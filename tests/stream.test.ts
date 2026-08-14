@@ -81,6 +81,94 @@ run([
   ],
 
   [
+    "reasoning-start maps to v3 reasoning-start part carrying the event id",
+    () => {
+      const parts = ccEventToStreamPart({ type: "reasoning-start", id: "reasoning-0" })
+      assert(parts.length === 1, "one part")
+      const p = parts[0] as { type: string; id?: string }
+      assertEqual(p.type, "reasoning-start")
+      assertEqual(p.id, "reasoning-0")
+    },
+  ],
+
+  [
+    "reasoning-end maps to v3 reasoning-end part carrying the event id",
+    () => {
+      const parts = ccEventToStreamPart({ type: "reasoning-end", id: "reasoning-0" })
+      assert(parts.length === 1, "one part")
+      const p = parts[0] as { type: string; id?: string }
+      assertEqual(p.type, "reasoning-end")
+      assertEqual(p.id, "reasoning-0")
+    },
+  ],
+
+  [
+    "text-start maps to v3 text-start part carrying the event id",
+    () => {
+      const parts = ccEventToStreamPart({ type: "text-start", id: "txt-0" })
+      assert(parts.length === 1, "one part")
+      const p = parts[0] as { type: string; id?: string }
+      assertEqual(p.type, "text-start")
+      assertEqual(p.id, "txt-0")
+    },
+  ],
+
+  [
+    "text-end maps to v3 text-end part carrying the event id",
+    () => {
+      const parts = ccEventToStreamPart({ type: "text-end", id: "txt-0" })
+      assert(parts.length === 1, "one part")
+      const p = parts[0] as { type: string; id?: string }
+      assertEqual(p.type, "text-end")
+      assertEqual(p.id, "txt-0")
+    },
+  ],
+
+  [
+    "real reasoning+text event sequence emits start/end parts so AI SDK can assemble",
+    () => {
+      // Mirrors the live Command Code SSE for deepseek/deepseek-v4-flash
+      // (captured 2026-08-15): reasoning-start → reasoning-deltas →
+      // reasoning-end → text-start → text-deltas → text-end → finish.
+      // Without the start/end parts the AI SDK's streamText consumer throws
+      // "reasoning part <id> not found" / "text part <id> not found".
+      const events = [
+        { type: "reasoning-start", id: "reasoning-0" },
+        { type: "reasoning-delta", id: "reasoning-0", text: "The" },
+        { type: "reasoning-delta", id: "reasoning-0", text: " user" },
+        { type: "reasoning-end", id: "reasoning-0" },
+        { type: "text-start", id: "txt-0" },
+        { type: "text-delta", id: "txt-0", text: "Hello" },
+        { type: "text-delta", id: "txt-0", text: "!" },
+        { type: "text-end", id: "txt-0" },
+        { type: "finish", finishReason: "stop", totalUsage: { inputTokens: 7, outputTokens: 2 } },
+      ]
+      const parts = events.flatMap((e) => ccEventToStreamPart(e))
+      const byType = new Map<string, number>()
+      for (const p of parts) {
+        const t = (p as { type: string }).type
+        byType.set(t, (byType.get(t) ?? 0) + 1)
+      }
+      assertEqual(byType.get("reasoning-start"), 1)
+      assertEqual(byType.get("reasoning-delta"), 2)
+      assertEqual(byType.get("reasoning-end"), 1)
+      assertEqual(byType.get("text-start"), 1)
+      assertEqual(byType.get("text-delta"), 2)
+      assertEqual(byType.get("text-end"), 1)
+      assertEqual(byType.get("finish"), 1)
+      // Every delta/end id must reference a preceding start id (the AI SDK
+      // requirement that failed in production: "reasoning part reasoning-0 not found").
+      const started = new Set<string>()
+      for (const p of parts) {
+        const part = p as { type: string; id?: string }
+        if (part.type === "reasoning-start" || part.type === "text-start") started.add(part.id as string)
+        if (part.type === "reasoning-end" || part.type === "text-end")
+          assert(started.has(part.id as string), `${part.type} id ${part.id} has no start`)
+      }
+    },
+  ],
+
+  [
     "tool-call maps to v3 tool-input start/delta/end + tool-call parts",
     () => {
       const parts = ccEventToStreamPart({

@@ -72,16 +72,30 @@ function toolCallIdOf(event: Record<string, unknown>): string {
 export function ccEventToStreamPart(event: unknown): LanguageModelV3StreamPart[] {
   if (!isRecord(event)) return []
   switch (event.type) {
+    case "text-start": {
+      const id = toolCallIdOf(event) || "text"
+      return [{ type: "text-start", id }]
+    }
     case "text-delta": {
       const id = toolCallIdOf(event) || "text"
       return [{ type: "text-delta", id, delta: stringValue(event.text) ?? "" }]
+    }
+    case "text-end": {
+      const id = toolCallIdOf(event) || "text"
+      return [{ type: "text-end", id }]
+    }
+    case "reasoning-start": {
+      const id = toolCallIdOf(event) || "reasoning"
+      return [{ type: "reasoning-start", id }]
     }
     case "reasoning-delta": {
       const id = toolCallIdOf(event) || "reasoning"
       return [{ type: "reasoning-delta", id, delta: stringValue(event.text) ?? "" }]
     }
-    case "reasoning-start":
-    case "reasoning-end":
+    case "reasoning-end": {
+      const id = toolCallIdOf(event) || "reasoning"
+      return [{ type: "reasoning-end", id }]
+    }
     case "tool-result":
       return []
     case "tool-call": {
