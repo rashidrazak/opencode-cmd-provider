@@ -1,1 +1,1 @@
-# Opencode CommandCode Provider
+# OpenCode CommandCode Provider
