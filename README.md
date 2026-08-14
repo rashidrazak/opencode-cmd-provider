@@ -7,8 +7,6 @@ A provider and plugin for [opencode](https://opencode.ai) that connects to the [
 
 > **Disclaimer:** This is an unofficial, community-maintained integration. It is not affiliated with, endorsed by, or supported by Command Code. You need your own Command Code account and API key or subscription. Command Code's terms, availability, and pricing apply.
 
-> **Disclaimer:** This is an unofficial, community-maintained integration. It is not affiliated with, endorsed by, or supported by Command Code. You need your own Command Code account and API key or subscription. Command Code's terms, availability, and pricing apply.
-
 ## Install
 
 Add the package to your opencode configuration:
