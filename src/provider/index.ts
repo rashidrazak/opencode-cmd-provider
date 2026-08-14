@@ -1,11 +1,12 @@
-// src/provider/index.ts
-// Stub — real factory implemented in issue #8.
-export function createCommandCode(_options: Record<string, unknown> = {}): {
-  languageModel(modelId: string): unknown
-} {
+// src/provider/index.ts — public provider factory (PLAN #8)
+import { CommandCodeLanguageModel, type CommandCodeModelOptions } from "./command-code-model.js"
+
+export function createCommandCode(options: CommandCodeModelOptions = {}) {
   return {
-    languageModel() {
-      throw new Error("createCommandCode is implemented in #8")
+    languageModel(modelId: string) {
+      return new CommandCodeLanguageModel(options, modelId)
     },
   }
 }
+
+export type { CommandCodeModelOptions } from "./command-code-model.js"
