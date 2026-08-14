@@ -161,7 +161,8 @@ run([
       const started = new Set<string>()
       for (const p of parts) {
         const part = p as { type: string; id?: string }
-        if (part.type === "reasoning-start" || part.type === "text-start") started.add(part.id as string)
+        if (part.type === "reasoning-start" || part.type === "text-start")
+          started.add(part.id as string)
         if (part.type === "reasoning-end" || part.type === "text-end")
           assert(started.has(part.id as string), `${part.type} id ${part.id} has no start`)
       }
