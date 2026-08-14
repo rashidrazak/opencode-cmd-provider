@@ -169,17 +169,38 @@ function completeToolCallIds(messages?: PromptLike): Set<string> {
   return new Set([...callIds].filter((id) => resultIds.has(id)))
 }
 
-function resultText(result: unknown): string {
+function unwrapToolResult(result: unknown): string {
   if (typeof result === "string") return result
-  if (Array.isArray(result)) return result.map(resultText).filter(Boolean).join("\n")
-  if (result && typeof result === "object") {
-    const text = (result as { text?: unknown }).text
-    if (typeof text === "string") return text
-    const content = (result as { content?: unknown }).content
-    if (content !== undefined) return resultText(content)
-    return JSON.stringify(result)
+  if (Array.isArray(result)) return result.map(unwrapToolResult).filter(Boolean).join("\n")
+  if (!isRecord(result)) return String(result ?? "")
+  switch (result.type) {
+    case "text":
+    case "error-text":
+      return stringValue(result.value) ?? ""
+    case "json":
+    case "error-json":
+      return JSON.stringify(result.value)
+    case "execution-denied":
+      return stringValue(result.reason) ?? "Tool execution denied."
+    case "content": {
+      const text = Array.isArray(result.value)
+        ? result.value
+            .map((entry) =>
+              isRecord(entry) && entry.type === "text" ? (stringValue(entry.text) ?? "") : "",
+            )
+            .filter(Boolean)
+            .join("\n")
+        : ""
+      return text
+    }
+    default: {
+      const text = stringValue(result.text)
+      if (text !== undefined) return text
+      const content = result.content
+      if (content !== undefined) return unwrapToolResult(content)
+      return JSON.stringify(result)
+    }
   }
-  return String(result ?? "")
 }
 
 export function messagesToCC(
@@ -210,7 +231,7 @@ export function messagesToCC(
             type: "tool-call",
             toolCallId,
             toolName: stringValue(content.toolName) ?? "",
-            input: recordOrEmpty(content.args ?? content.arguments),
+            input: recordOrEmpty(content.input ?? content.args ?? content.arguments),
           })
         }
       }
@@ -227,8 +248,8 @@ export function messagesToCC(
               toolCallId,
               toolName: stringValue(content.toolName) ?? "",
               output: content.isError
-                ? { type: "error-text", value: resultText(content.result ?? content.output) }
-                : { type: "text", value: resultText(content.result ?? content.output) },
+                ? { type: "error-text", value: unwrapToolResult(content.result ?? content.output) }
+                : { type: "text", value: unwrapToolResult(content.result ?? content.output) },
             },
           ],
         })

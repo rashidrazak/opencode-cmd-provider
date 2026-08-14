@@ -73,6 +73,45 @@ run([
   ],
 
   [
+    "maps tool call input from the AI SDK v3 prompt shape",
+    () => {
+      const out = messagesToCC([
+        {
+          role: "assistant",
+          content: [
+            { type: "tool-call", toolCallId: "tc1", toolName: "read", input: { path: "a.ts" } },
+          ],
+        },
+        {
+          role: "tool",
+          content: [
+            { type: "tool-result", toolCallId: "tc1", toolName: "read", result: "file contents" },
+          ],
+        },
+      ])
+      assertEqual(out, [
+        {
+          role: "assistant",
+          content: [
+            { type: "tool-call", toolCallId: "tc1", toolName: "read", input: { path: "a.ts" } },
+          ],
+        },
+        {
+          role: "tool",
+          content: [
+            {
+              type: "tool-result",
+              toolCallId: "tc1",
+              toolName: "read",
+              output: { type: "text", value: "file contents" },
+            },
+          ],
+        },
+      ])
+    },
+  ],
+
+  [
     "drops tool calls without a paired result",
     () => {
       const out = messagesToCC([
@@ -82,6 +121,141 @@ run([
         },
       ])
       assertEqual(out, [])
+    },
+  ],
+
+  [
+    "unwraps text tool results",
+    () => {
+      const out = messagesToCC([
+        {
+          role: "assistant",
+          content: [{ type: "tool-call", toolCallId: "tc1", toolName: "bash", args: {} }],
+        },
+        {
+          role: "tool",
+          content: [
+            {
+              type: "tool-result",
+              toolCallId: "tc1",
+              toolName: "bash",
+              output: { type: "text", value: "file1 file2" },
+            },
+          ],
+        },
+      ])
+      const tool = out[1] as { content: Array<{ output: { value: string } }> }
+      assertEqual(tool.content[0].output, { type: "text", value: "file1 file2" })
+    },
+  ],
+
+  [
+    "unwraps error-text tool results",
+    () => {
+      const out = messagesToCC([
+        {
+          role: "assistant",
+          content: [{ type: "tool-call", toolCallId: "tc1", toolName: "bash", args: {} }],
+        },
+        {
+          role: "tool",
+          content: [
+            {
+              type: "tool-result",
+              toolCallId: "tc1",
+              toolName: "bash",
+              output: { type: "error-text", value: "boom" },
+              isError: true,
+            },
+          ],
+        },
+      ])
+      const tool = out[1] as { content: Array<{ output: { type: string; value: string } }> }
+      assertEqual(tool.content[0].output, { type: "error-text", value: "boom" })
+    },
+  ],
+
+  [
+    "stringifies json tool results",
+    () => {
+      const out = messagesToCC([
+        {
+          role: "assistant",
+          content: [{ type: "tool-call", toolCallId: "tc1", toolName: "bash", args: {} }],
+        },
+        {
+          role: "tool",
+          content: [
+            {
+              type: "tool-result",
+              toolCallId: "tc1",
+              toolName: "bash",
+              output: { type: "json", value: { files: ["a", "b"] } },
+            },
+          ],
+        },
+      ])
+      const tool = out[1] as { content: Array<{ output: { type: string; value: string } }> }
+      assertEqual(tool.content[0].output, {
+        type: "text",
+        value: '{"files":["a","b"]}',
+      })
+    },
+  ],
+
+  [
+    "unwraps content tool results to text",
+    () => {
+      const out = messagesToCC([
+        {
+          role: "assistant",
+          content: [{ type: "tool-call", toolCallId: "tc1", toolName: "bash", args: {} }],
+        },
+        {
+          role: "tool",
+          content: [
+            {
+              type: "tool-result",
+              toolCallId: "tc1",
+              toolName: "bash",
+              output: {
+                type: "content",
+                value: [
+                  { type: "text", text: "line one" },
+                  { type: "file-data", data: "aGk=", mediaType: "image/png" },
+                ],
+              },
+            },
+          ],
+        },
+      ])
+      const tool = out[1] as { content: Array<{ output: { value: string } }> }
+      assertEqual(tool.content[0].output, { type: "text", value: "line one" })
+    },
+  ],
+
+  [
+    "maps execution-denied tool results to the denial reason",
+    () => {
+      const out = messagesToCC([
+        {
+          role: "assistant",
+          content: [{ type: "tool-call", toolCallId: "tc1", toolName: "bash", args: {} }],
+        },
+        {
+          role: "tool",
+          content: [
+            {
+              type: "tool-result",
+              toolCallId: "tc1",
+              toolName: "bash",
+              output: { type: "execution-denied", reason: "user said no" },
+            },
+          ],
+        },
+      ])
+      const tool = out[1] as { content: Array<{ output: { type: string; value: string } }> }
+      assertEqual(tool.content[0].output, { type: "text", value: "user said no" })
     },
   ],
 
