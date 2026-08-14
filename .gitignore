@@ -1,0 +1,8 @@
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Working planning docs (not for publication)
+DESIGN.md
+PLAN.md
+HANDOFF.md
