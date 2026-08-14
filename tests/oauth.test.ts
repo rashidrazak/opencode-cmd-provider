@@ -13,59 +13,71 @@ function post(port: number, body: Record<string, unknown>): Promise<Response> {
 }
 
 run([
-  ["auth server receives the key POST", async () => {
-    const authServer = await startAuthServer({ startPort: 0 })
-    try {
-      const response = await post(authServer.port, {
+  [
+    "auth server receives the key POST",
+    async () => {
+      const authServer = await startAuthServer({ startPort: 0 })
+      try {
+        const response = await post(authServer.port, {
+          apiKey: "user_abc",
+          state: "st",
+          userId: "u",
+          userName: "n",
+          keyName: "k",
+        })
+        assertEqual(response.status, 200)
+        const callback = await authServer.waitForCallback
+        assertEqual(callback.apiKey, "user_abc")
+        assertEqual(callback.state, "st")
+      } finally {
+        authServer.server.close()
+      }
+    },
+  ],
+
+  [
+    "auth server rejects missing fields",
+    async () => {
+      const authServer = await startAuthServer({ startPort: 0 })
+      try {
+        const response = await post(authServer.port, { apiKey: "user_abc" })
+        assertEqual(response.status, 400)
+      } finally {
+        authServer.server.close()
+      }
+    },
+  ],
+
+  [
+    "runAuthFlow returns AuthOAuthResult with working callback",
+    async () => {
+      const result = await runAuthFlow({ startPort: 0 })
+      assertEqual(result.method, "auto")
+      assert(result.url.includes("commandcode.ai"))
+      assert(result.instructions.length > 0)
+      const port = Number(
+        new URL(result.url).searchParams.get("callback")?.match(/localhost:(\d+)/)?.[1],
+      )
+      const response = await post(port, {
         apiKey: "user_abc",
-        state: "st",
+        state: new URL(result.url).searchParams.get("state"),
         userId: "u",
         userName: "n",
         keyName: "k",
       })
       assertEqual(response.status, 200)
-      const callback = await authServer.waitForCallback
-      assertEqual(callback.apiKey, "user_abc")
-      assertEqual(callback.state, "st")
-    } finally {
-      authServer.server.close()
-    }
-  }],
+      const outcome = await result.callback()
+      assertEqual(outcome.type, "success")
+      if (outcome.type === "success") assertEqual(outcome.key, "user_abc")
+    },
+  ],
 
-  ["auth server rejects missing fields", async () => {
-    const authServer = await startAuthServer({ startPort: 0 })
-    try {
-      const response = await post(authServer.port, { apiKey: "user_abc" })
-      assertEqual(response.status, 400)
-    } finally {
-      authServer.server.close()
-    }
-  }],
-
-  ["runAuthFlow returns AuthOAuthResult with working callback", async () => {
-    const result = await runAuthFlow({ startPort: 0 })
-    assertEqual(result.method, "auto")
-    assert(result.url.includes("commandcode.ai"))
-    assert(result.instructions.length > 0)
-    const port = Number(
-      new URL(result.url).searchParams.get("callback")?.match(/localhost:(\d+)/)?.[1],
-    )
-    const response = await post(port, {
-      apiKey: "user_abc",
-      state: new URL(result.url).searchParams.get("state"),
-      userId: "u",
-      userName: "n",
-      keyName: "k",
-    })
-    assertEqual(response.status, 200)
-    const outcome = await result.callback()
-    assertEqual(outcome.type, "success")
-    if (outcome.type === "success") assertEqual(outcome.key, "user_abc")
-  }],
-
-  ["runAuthFlow times out to failed", async () => {
-    const result = await runAuthFlow({ startPort: 0, timeoutMs: 30 })
-    const outcome = await result.callback()
-    assertEqual(outcome.type, "failed")
-  }],
+  [
+    "runAuthFlow times out to failed",
+    async () => {
+      const result = await runAuthFlow({ startPort: 0, timeoutMs: 30 })
+      const outcome = await result.callback()
+      assertEqual(outcome.type, "failed")
+    },
+  ],
 ])

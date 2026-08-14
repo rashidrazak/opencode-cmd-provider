@@ -58,7 +58,9 @@ type PromptLike = readonly {
 function imageParts(value: unknown): readonly Record<string, unknown>[] {
   if (isRecord(value)) return value.type === "image" || value.type === "file" ? [value] : []
   return recordArray(value).filter(
-    (part) => part.type === "image" || (part.type === "file" && stringValue(part.mediaType)?.startsWith("image/")),
+    (part) =>
+      part.type === "image" ||
+      (part.type === "file" && stringValue(part.mediaType)?.startsWith("image/")),
   )
 }
 
@@ -75,7 +77,12 @@ export function assertTextOnlyMessages(messages?: PromptLike): void {
   }
 }
 
-function imageToCommandCode(part: { image?: unknown; data?: unknown; mimeType?: unknown; mediaType?: unknown }): CCImagePart {
+function imageToCommandCode(part: {
+  image?: unknown
+  data?: unknown
+  mimeType?: unknown
+  mediaType?: unknown
+}): CCImagePart {
   const raw = stringValue(part.image) ?? stringValue(part.data)
   const mimeType = stringValue(part.mimeType) ?? stringValue(part.mediaType)
   if (!raw || raw.length === 0) {
@@ -85,7 +92,11 @@ function imageToCommandCode(part: { image?: unknown; data?: unknown; mimeType?: 
     const [mime] = raw.slice(5).split(";base64,")
     return { type: "image", image: raw, mimeType: mime ?? mimeType ?? "application/octet-stream" }
   }
-  return { type: "image", image: `data:${mimeType ?? "application/octet-stream"};base64,${raw}`, mimeType: mimeType ?? "application/octet-stream" }
+  return {
+    type: "image",
+    image: `data:${mimeType ?? "application/octet-stream"};base64,${raw}`,
+    mimeType: mimeType ?? "application/octet-stream",
+  }
 }
 
 function userContentToCommandCode(content: unknown, allowImages: boolean): unknown {

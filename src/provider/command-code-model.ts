@@ -12,16 +12,34 @@ import type {
   LanguageModelV3Content,
   LanguageModelV3Usage,
 } from "@ai-sdk/provider"
-import type { LanguageModelV3Prompt, LanguageModelV3StreamPart, ModelCallOptions } from "./aisdk-types.js"
+import type {
+  LanguageModelV3Prompt,
+  LanguageModelV3StreamPart,
+  ModelCallOptions,
+} from "./aisdk-types.js"
 import { resolveApiKey } from "./auth-key.js"
-import { messagesToCC, toolsToJson, systemPromptToText, getEnvironmentInfo, isRecord, stringValue } from "./converters.js"
+import {
+  messagesToCC,
+  toolsToJson,
+  systemPromptToText,
+  getEnvironmentInfo,
+  isRecord,
+  stringValue,
+} from "./converters.js"
 import { parseStreamEventLine, ccEventToStreamPart } from "./stream.js"
 import { redactCommandCodeErrorText, commandCodeErrorMessage } from "./redact.js"
 import { calculateCommandCodeCost } from "./cost.js"
 import { ZERO_MODEL_COST, MODEL_COSTS } from "./pricing.js"
 import { mappedReasoningEffort, thinkingMetadataForModel, isReasoningModel } from "./reasoning.js"
 import { modelSupportsImageInput } from "./modalities.js"
-import { isRetryableStatus, retryDelayMs, raceAbort, abortError, timeoutError, delay } from "./retry.js"
+import {
+  isRetryableStatus,
+  retryDelayMs,
+  raceAbort,
+  abortError,
+  timeoutError,
+  delay,
+} from "./retry.js"
 import { projectSlugFromPath } from "./project-slug.js"
 
 export interface CommandCodeModelOptions {
@@ -128,7 +146,14 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
   async doStream(
     options: ModelCallOptions,
   ): Promise<{ stream: ReadableStream<LanguageModelV3StreamPart>; error?: unknown }> {
-    return { stream: this.runStream(this.bodyFor(options), this.headersFor(options), options.abortSignal, options) }
+    return {
+      stream: this.runStream(
+        this.bodyFor(options),
+        this.headersFor(options),
+        options.abortSignal,
+        options,
+      ),
+    }
   }
 
   /**
@@ -152,7 +177,13 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
       }
     }
     const parts: LanguageModelV3StreamPart[] = []
-    const stream = this.runStream(this.bodyFor(options), this.headersFor(options), options.abortSignal, options, parts)
+    const stream = this.runStream(
+      this.bodyFor(options),
+      this.headersFor(options),
+      options.abortSignal,
+      options,
+      parts,
+    )
     const reader = stream.getReader()
     for (;;) {
       const { done } = await reader.read()
@@ -205,7 +236,11 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
         tools: toolsToJson(
           (options.tools ?? [])
             .filter((tool) => tool.type === "function")
-            .map((tool) => ({ name: tool.name, description: tool.description, parameters: tool.inputSchema })),
+            .map((tool) => ({
+              name: tool.name,
+              description: tool.description,
+              parameters: tool.inputSchema,
+            })),
         ),
         system: systemPromptToText(promptSystem(options.prompt)),
         max_tokens: maxTokens,
@@ -256,9 +291,11 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
           streamController.enqueue(part)
         }
         const fail = (error: unknown) => {
-          const message =
-            error instanceof Error ? error.message : String(error)
-          const part: LanguageModelV3StreamPart = { type: "error", error: new Error(redactCommandCodeErrorText(message)) }
+          const message = error instanceof Error ? error.message : String(error)
+          const part: LanguageModelV3StreamPart = {
+            type: "error",
+            error: new Error(redactCommandCodeErrorText(message)),
+          }
           sink?.push(part)
           streamController.enqueue(part)
           streamController.close()
@@ -342,7 +379,8 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
                   headers,
                   body: bodyStr,
                   signal: attemptController.signal,
-                })              } catch (fetchError: unknown) {
+                })
+              } catch (fetchError: unknown) {
                 if (controller.signal.aborted) throw abortError("Aborted")
                 if (attemptTimedOut) {
                   if (attempt < maxRetries) continue retryLoop

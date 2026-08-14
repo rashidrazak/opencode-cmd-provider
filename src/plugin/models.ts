@@ -30,7 +30,13 @@ export function catalogToOpenCodeModels(
         reasoning: isReasoningModel(model.id),
         attachment: modalities.includes("image"),
         toolcall: true,
-        input: { text: true, image: modalities.includes("image"), audio: false, video: false, pdf: false },
+        input: {
+          text: true,
+          image: modalities.includes("image"),
+          audio: false,
+          video: false,
+          pdf: false,
+        },
         output: { text: true, audio: false, image: false, video: false, pdf: false },
         interleaved: false,
       },
@@ -39,10 +45,15 @@ export function catalogToOpenCodeModels(
         output: costs.output,
         cache: { read: costs.cacheRead, write: costs.cacheWrite },
       },
-      limit: { context: model.contextWindow, output: Math.min(model.contextWindow, DEFAULT_MAX_OUTPUT_TOKENS) },
+      limit: {
+        context: model.contextWindow,
+        output: Math.min(model.contextWindow, DEFAULT_MAX_OUTPUT_TOKENS),
+      },
       status: "active",
       options: {
-        ...(thinkingMetadataForModel(model.id) ? { thinking: thinkingMetadataForModel(model.id) } : {}),
+        ...(thinkingMetadataForModel(model.id)
+          ? { thinking: thinkingMetadataForModel(model.id) }
+          : {}),
       },
       headers: {},
       release_date: "",

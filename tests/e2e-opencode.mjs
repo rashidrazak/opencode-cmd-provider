@@ -57,8 +57,12 @@ const server = createServer((req, res) => {
     if (req.url === "/alpha/generate") {
       received.push(JSON.parse(body))
       res.writeHead(200, { "content-type": "text/event-stream" })
-      res.write(`data: ${JSON.stringify({ type: "text-delta", text: "hello from command code" })}\n\n`)
-      res.write(`data: ${JSON.stringify({ type: "finish", finishReason: "stop", totalUsage: { inputTokens: 3, outputTokens: 4 } })}\n\n`)
+      res.write(
+        `data: ${JSON.stringify({ type: "text-delta", text: "hello from command code" })}\n\n`,
+      )
+      res.write(
+        `data: ${JSON.stringify({ type: "finish", finishReason: "stop", totalUsage: { inputTokens: 3, outputTokens: 4 } })}\n\n`,
+      )
       res.end()
       return
     }
@@ -88,7 +92,9 @@ const list = spawnSync("opencode", ["models"], {
   encoding: "utf-8",
   timeout: 30_000,
 })
-const discovered = (list.stdout || "").split("\n").some((l) => l.includes("commandcode/claude-sonnet-5"))
+const discovered = (list.stdout || "")
+  .split("\n")
+  .some((l) => l.includes("commandcode/claude-sonnet-5"))
 if (list.status !== 0 || !discovered) {
   console.error("opencode failed to discover commandcode/claude-sonnet-5:")
   console.error(list.stderr || list.stdout)

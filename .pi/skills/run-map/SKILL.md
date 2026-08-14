@@ -55,7 +55,7 @@ trigger and the ritual around it.
   quitting pi kills it.
 - If a failure is a one-off (flaky test, transient auth), re-run the loop —
   the claim guard skips already-assigned tickets and picks up where it stopped.
-- If failures show a *pattern* (same ticket class flailing, downstream breaks),
+- If failures show a _pattern_ (same ticket class flailing, downstream breaks),
   stop the loop and report to the user — do not improvise fixes inside the loop.
 - Do not parallelize: the ticket graph has one shared repo and ~2× speedup
   ceiling; the script is deliberately sequential (one writer per worktree).

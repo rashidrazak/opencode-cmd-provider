@@ -10,7 +10,11 @@
 //     outputTokens: { total } } — cache tokens are folded into the input
 //     totals the way pi folds them into its usage shape (AI SDK v3 has no
 //     separate cache fields on the model-facing shape we emit here).
-import type { LanguageModelV3StreamPart, LanguageModelV3Usage, LanguageModelV3FinishReason } from "@ai-sdk/provider"
+import type {
+  LanguageModelV3StreamPart,
+  LanguageModelV3Usage,
+  LanguageModelV3FinishReason,
+} from "@ai-sdk/provider"
 import { isRecord, stringValue, numberValue, recordOrEmpty } from "./converters.js"
 import { commandCodeErrorMessage } from "./redact.js"
 
@@ -43,7 +47,9 @@ export function mapFinishReason(reason: unknown): LanguageModelV3FinishReason {
   return { unified: "other", raw }
 }
 
-export function ccUsageToAiSdkUsage(event: Record<string, unknown>): LanguageModelV3Usage | undefined {
+export function ccUsageToAiSdkUsage(
+  event: Record<string, unknown>,
+): LanguageModelV3Usage | undefined {
   const usage = event.totalUsage
   if (!isRecord(usage)) return undefined
   const details = isRecord(usage.inputTokenDetails) ? usage.inputTokenDetails : undefined
@@ -92,10 +98,16 @@ export function ccEventToStreamPart(event: unknown): LanguageModelV3StreamPart[]
     }
     case "finish": {
       const usage = ccUsageToAiSdkUsage(event)
-      return [{ type: "finish", finishReason: mapFinishReason(event.finishReason), usage: usage ?? {
-        inputTokens: { total: 0, noCache: 0, cacheRead: 0, cacheWrite: 0 },
-        outputTokens: { total: 0, text: 0, reasoning: 0 },
-      } }]
+      return [
+        {
+          type: "finish",
+          finishReason: mapFinishReason(event.finishReason),
+          usage: usage ?? {
+            inputTokens: { total: 0, noCache: 0, cacheRead: 0, cacheWrite: 0 },
+            outputTokens: { total: 0, text: 0, reasoning: 0 },
+          },
+        },
+      ]
     }
     case "error": {
       const message =
