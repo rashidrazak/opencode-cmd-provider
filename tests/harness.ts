@@ -29,6 +29,26 @@ export function assertEqual(actual: unknown, expected: unknown, msg?: string): v
     )
   }
 }
+export function throws(
+  fn: () => unknown,
+  matcher?: RegExp | ((err: unknown) => boolean),
+  msg?: string,
+): void {
+  try {
+    fn()
+  } catch (err) {
+    if (typeof matcher === "function") {
+      if (!matcher(err)) throw new Error(`thrown error did not match: ${String(err)}`)
+      return
+    }
+    if (matcher && (!(err instanceof Error) || !matcher.test(err.message))) {
+      throw new Error(`thrown error did not match ${matcher}: ${String(err)}`)
+    }
+    return
+  }
+  throw new Error(msg ?? "expected function to throw")
+}
+
 export async function rejects(
   promise: Promise<unknown>,
   matcher: RegExp | ((err: unknown) => boolean),
