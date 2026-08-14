@@ -14,9 +14,9 @@ Single-context: one `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agent
 
 ### Spec and plan
 
-`DESIGN.md` (approved design spec) and `PLAN.md` (implementation plan, task-by-task) are the
+`DESIGN.md` (approved design spec) and `PLAN.md` (implementation plan) are the
 source of truth for the `opencode-cmd-provider` work tracked in GitHub Issues. When working
 on any issue from the implementation map (#15) or any of its children (#1–#14), read both
-files first — including `DESIGN.md` §4 (verified opencode loader behavior) — and follow the
-plan's task steps. If a ticket and the plan disagree, the plan wins; note the discrepancy in
-the ticket.
+files first — including `DESIGN.md` §4 (verified opencode loader behavior). PLAN.md's
+sections mirror the issues one-to-one (Issue N ↔ its own section, in the same order). If a
+ticket and the plan disagree, the plan wins; note the discrepancy in the ticket.
