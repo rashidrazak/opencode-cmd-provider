@@ -28,20 +28,27 @@ Add the package to your opencode configuration:
           "name": "Claude Sonnet 5",
           "limit": { "context": 200000, "output": 65536 },
         },
+        "deepseek/deepseek-v4-flash": {
+          "name": "DeepSeek V4 Flash",
+        },
       },
     },
   },
 }
 ```
 
-> **The `models` map is required.** opencode only fires a provider's `models`
-> discovery hook for providers already in its [models.dev](https://models.dev)
-> catalog, and `commandcode` is not in that catalog yet. Declaring the models you
-> want in `provider.commandcode.models` is what makes them appear in `/models`
-> and usable with `opencode run --model commandcode/...`. The reference config is
-> the one written by `scripts/opencode-fixture.mjs`. When `commandcode` lands in
-> the models.dev catalog, this map becomes optional and discovery works via the
-> plugin's `provider.models` hook.
+> **The `models` map is required, and each key must be the model's full Command
+> Code catalog ID.** opencode only fires a provider's `models` discovery hook for
+> providers already in its [models.dev](https://models.dev) catalog, and
+> `commandcode` is not in that catalog yet — so you must declare the models you
+> want. The keys are passed straight to the Command Code API, so use the exact
+> catalog IDs (some are prefixed, e.g. `deepseek/deepseek-v4-flash`,
+> `google/gemini-3.5-flash`, `xai/grok-4.5`). List the current catalog from the
+> terminal with `opencode run --model commandcode/... "hi"` after connecting, or
+> hit `https://api.commandcode.ai/provider/v1/models`. An unprefixed or wrong ID
+> fails with a `403 Model/provider not recognized` error. When `commandcode`
+> lands in the models.dev catalog, this map becomes optional and discovery works
+> via the plugin's `provider.models` hook.
 
 Start or reload opencode, then authenticate:
 
