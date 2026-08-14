@@ -5,7 +5,13 @@
 // #3's stream helpers, retry/abort/timeout via retry.ts, redaction on every
 // surfaced error, v3 stream parts on the wire.
 import { randomUUID } from "node:crypto"
-import type { LanguageModelV3 } from "@ai-sdk/provider"
+import type {
+  LanguageModelV3,
+  LanguageModelV3GenerateResult,
+  LanguageModelV3FinishReason,
+  LanguageModelV3Content,
+  LanguageModelV3Usage,
+} from "@ai-sdk/provider"
 import type { LanguageModelV3Prompt, LanguageModelV3StreamPart, ModelCallOptions } from "./aisdk-types.js"
 import { resolveApiKey } from "./auth-key.js"
 import { messagesToCC, toolsToJson, systemPromptToText, getEnvironmentInfo, isRecord, stringValue } from "./converters.js"
@@ -73,28 +79,94 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
     return { cost: MODEL_COSTS[this.modelId] ?? ZERO_MODEL_COST }
   }
 
-  async doGenerate(_options: ModelCallOptions): Promise<never> {
-    throw new Error("doGenerate implemented in #9")
+  async doGenerate(options: ModelCallOptions): Promise<LanguageModelV3GenerateResult> {
+    const { parts, error } = await this.runOnce(options)
+    if (error) throw error
+
+    const content: LanguageModelV3Content[] = []
+    let text = ""
+    let reasoning = ""
+    let finishReason: LanguageModelV3FinishReason = { unified: "other", raw: "unknown" }
+    let usage: LanguageModelV3Usage | undefined
+    for (const part of parts) {
+      switch (part.type) {
+        case "text-delta":
+          text += part.delta
+          break
+        case "reasoning-delta":
+          reasoning += part.delta
+          break
+        case "tool-call":
+          content.push({
+            type: "tool-call",
+            toolCallId: part.toolCallId,
+            toolName: part.toolName,
+            input: part.input,
+          })
+          break
+        case "finish":
+          finishReason = part.finishReason
+          usage = part.usage
+          break
+        case "error":
+          throw part.error
+        default:
+          break
+      }
+    }
+    if (text) content.push({ type: "text", text })
+    if (reasoning) content.push({ type: "reasoning", text: reasoning })
+    if (!usage) {
+      usage = {
+        inputTokens: { total: 0, noCache: 0, cacheRead: 0, cacheWrite: 0 },
+        outputTokens: { total: 0, text: 0, reasoning: 0 },
+      }
+    }
+    return { content, finishReason, usage, warnings: [] }
   }
 
   async doStream(
     options: ModelCallOptions,
   ): Promise<{ stream: ReadableStream<LanguageModelV3StreamPart>; error?: unknown }> {
-    const prompt = options.prompt
-    const signal = options.abortSignal
+    return { stream: this.runStream(this.bodyFor(options), this.headersFor(options), options.abortSignal, options) }
+  }
+
+  /**
+   * Runs one request/parse pass and collects the v3 parts (doGenerate).
+   * Stream errors surface as error parts; the first error part is also
+   * returned so doGenerate can throw it.
+   */
+  private async runOnce(
+    options: ModelCallOptions,
+  ): Promise<{ parts: LanguageModelV3StreamPart[]; error?: Error }> {
     const apiKey = resolveApiKey({
       apiKey: this.options.apiKey,
       authPaths: this.options.authPaths,
     })
-
     if (!apiKey) {
       return {
-        stream: errorStream(
+        parts: [],
+        error: new Error(
           "No Command Code API key. Run /connect and select Command Code, set the COMMANDCODE_API_KEY env var, or configure an auth file.",
         ),
       }
     }
+    const parts: LanguageModelV3StreamPart[] = []
+    const stream = this.runStream(this.bodyFor(options), this.headersFor(options), options.abortSignal, options, parts)
+    const reader = stream.getReader()
+    for (;;) {
+      const { done } = await reader.read()
+      if (done) break
+    }
+    await reader.cancel().catch(() => {})
+    const errorPart = parts.find((p) => p.type === "error")
+    return {
+      parts,
+      error: errorPart && errorPart.type === "error" ? (errorPart.error as Error) : undefined,
+    }
+  }
 
+  private bodyFor(options: ModelCallOptions): unknown {
     const reasoningEffort = mappedReasoningEffort(
       {
         reasoning: isReasoningModel(this.modelId),
@@ -112,7 +184,7 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
     )
     const allowImages = modelSupportsImageInput(this.modelId)
 
-    const body = {
+    return {
       config: {
         workingDir: process.cwd(),
         date: new Date().toISOString().split("T")[0],
@@ -129,13 +201,13 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
       skills: null,
       params: {
         model: this.modelId,
-        messages: messagesToCC(prompt, { allowImages }),
+        messages: messagesToCC(options.prompt, { allowImages }),
         tools: toolsToJson(
           (options.tools ?? [])
             .filter((tool) => tool.type === "function")
             .map((tool) => ({ name: tool.name, description: tool.description, parameters: tool.inputSchema })),
         ),
-        system: systemPromptToText(promptSystem(prompt)),
+        system: systemPromptToText(promptSystem(options.prompt)),
         max_tokens: maxTokens,
         temperature: 0.3,
         stream: true,
@@ -143,10 +215,16 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
       },
       threadId: randomUUID(),
     }
+  }
 
-    const headers = {
+  private headersFor(options: ModelCallOptions): Record<string, string> {
+    const apiKey = resolveApiKey({
+      apiKey: this.options.apiKey,
+      authPaths: this.options.authPaths,
+    })
+    return {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
+      Authorization: `Bearer ${apiKey ?? ""}`,
       "x-command-code-version": COMMAND_CODE_CLI_VERSION,
       "x-cli-environment": "production",
       "x-project-slug": projectSlugFromPath(process.cwd()),
@@ -155,10 +233,6 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
       ...this.options.headers,
       ...(options.headers ?? {}),
     }
-
-    return {
-      stream: this.runStream(body, headers, signal, options, apiKey),
-    }
   }
 
   private runStream(
@@ -166,7 +240,7 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
     headers: Record<string, string>,
     signal: AbortSignal | undefined,
     options: ModelCallOptions,
-    apiKey: string,
+    sink?: LanguageModelV3StreamPart[],
   ): ReadableStream<LanguageModelV3StreamPart> {
     const timeoutMs = this.options.timeout
     const maxRetries = this.options.maxRetries ?? DEFAULT_MAX_RETRIES
@@ -177,11 +251,28 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
 
     return new ReadableStream<LanguageModelV3StreamPart>({
       start: async (streamController) => {
+        const emit = (part: LanguageModelV3StreamPart) => {
+          sink?.push(part)
+          streamController.enqueue(part)
+        }
         const fail = (error: unknown) => {
           const message =
             error instanceof Error ? error.message : String(error)
-          streamController.enqueue({ type: "error", error: new Error(redactCommandCodeErrorText(message)) })
+          const part: LanguageModelV3StreamPart = { type: "error", error: new Error(redactCommandCodeErrorText(message)) }
+          sink?.push(part)
+          streamController.enqueue(part)
           streamController.close()
+        }
+
+        const key = resolveApiKey({
+          apiKey: this.options.apiKey,
+          authPaths: this.options.authPaths,
+        })
+        if (!key) {
+          fail(
+            "No Command Code API key. Run /connect and select Command Code, set the COMMANDCODE_API_KEY env var, or configure an auth file.",
+          )
+          return
         }
 
         const handleEvent = (event: unknown): boolean => {
@@ -201,7 +292,7 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
                   cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
                 })
               }
-              streamController.enqueue(part)
+              emit(part)
             }
             return finished
           } catch (streamError) {
@@ -216,8 +307,6 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
         try {
           signal?.addEventListener("abort", onOuterAbort, { once: true })
           if (signal?.aborted) throw abortError("Aborted")
-          if (!apiKey) throw abortError("Aborted")
-
           let response!: Response
           let finished = false
           retryLoop: for (let attempt = 0; ; attempt++) {
@@ -253,8 +342,7 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
                   headers,
                   body: bodyStr,
                   signal: attemptController.signal,
-                })
-              } catch (fetchError: unknown) {
+                })              } catch (fetchError: unknown) {
                 if (controller.signal.aborted) throw abortError("Aborted")
                 if (attemptTimedOut) {
                   if (attempt < maxRetries) continue retryLoop
@@ -357,7 +445,7 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
           if (!finished) {
             // The server closed the stream without a finish event; the AI SDK
             // expects a finish part to terminate a stream.
-            streamController.enqueue({
+            emit({
               type: "finish",
               finishReason: { unified: "stop", raw: "stop" },
               usage: {
