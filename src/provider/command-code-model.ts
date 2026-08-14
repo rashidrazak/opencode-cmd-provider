@@ -30,7 +30,12 @@ import { parseStreamEventLine, ccEventToStreamPart } from "./stream.js"
 import { redactCommandCodeErrorText, commandCodeErrorMessage } from "./redact.js"
 import { calculateCommandCodeCost } from "./cost.js"
 import { ZERO_MODEL_COST, MODEL_COSTS } from "./pricing.js"
-import { mappedReasoningEffort, thinkingMetadataForModel, isReasoningModel } from "./reasoning.js"
+import {
+  mappedReasoningEffort,
+  resolveProviderReasoning,
+  thinkingMetadataForModel,
+  isReasoningModel,
+} from "./reasoning.js"
 import { modelSupportsImageInput } from "./modalities.js"
 import {
   isRetryableStatus,
@@ -204,9 +209,7 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
         thinkingLevelMap: thinkingMetadataForModel(this.modelId)?.thinkingLevelMap,
       },
       {
-        reasoning:
-          (options.providerOptions?.reasoning as string | undefined) ??
-          (options.providerOptions?.reasoningEffort as string | undefined),
+        reasoning: resolveProviderReasoning(options.providerOptions, "commandcode"),
       },
     )
     const maxTokens = Math.min(

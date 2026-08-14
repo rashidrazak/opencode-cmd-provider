@@ -89,3 +89,34 @@ export function mappedReasoningEffort(
   const mapped = model.thinkingLevelMap?.[level as PiThinkingLevel]
   return typeof mapped === "string" && mapped !== "off" ? mapped : undefined
 }
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined
+}
+
+/**
+ * Resolves the user's requested reasoning effort from AI SDK v3 call
+ * providerOptions. The v3 shape namespaces options per provider
+ * (`{ commandcode: { reasoningEffort } }`), but some runtimes pass the
+ * effort at the top level — accept both. Without this, opencode's
+ * `reasoningEffort` agent setting is silently dropped and the API falls
+ * back to its default reasoning depth.
+ */
+export function resolveProviderReasoning(
+  providerOptions: unknown,
+  providerId: string,
+): string | undefined {
+  if (!isRecord(providerOptions)) return undefined
+  const topLevel =
+    stringValue(providerOptions.reasoning) ?? stringValue(providerOptions.reasoningEffort)
+  if (topLevel) return topLevel
+  const namespaced = providerOptions[providerId]
+  if (isRecord(namespaced)) {
+    return stringValue(namespaced.reasoning) ?? stringValue(namespaced.reasoningEffort)
+  }
+  return undefined
+}

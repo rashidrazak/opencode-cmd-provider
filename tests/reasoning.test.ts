@@ -4,6 +4,7 @@ import {
   MODEL_EFFORTS,
   isReasoningModel,
   mappedReasoningEffort,
+  resolveProviderReasoning,
   thinkingMetadataForModel,
 } from "../src/provider/reasoning.js"
 import { assert, assertEqual, run } from "./harness.js"
@@ -48,6 +49,40 @@ run([
     () => {
       const model = { reasoning: false, thinkingLevelMap: {} as Record<string, string | null> }
       assertEqual(mappedReasoningEffort(model, { reasoning: "high" }), undefined)
+    },
+  ],
+
+  [
+    "resolveProviderReasoning reads the provider-namespaced AI SDK v3 shape",
+    () => {
+      assertEqual(
+        resolveProviderReasoning({ commandcode: { reasoningEffort: "high" } }, "commandcode"),
+        "high",
+      )
+      assertEqual(
+        resolveProviderReasoning({ commandcode: { reasoning: "max" } }, "commandcode"),
+        "max",
+      )
+    },
+  ],
+
+  [
+    "resolveProviderReasoning falls back to the top-level shape",
+    () => {
+      assertEqual(resolveProviderReasoning({ reasoningEffort: "high" }, "commandcode"), "high")
+      assertEqual(resolveProviderReasoning({ reasoning: "high" }, "commandcode"), "high")
+    },
+  ],
+
+  [
+    "resolveProviderReasoning ignores other provider namespaces",
+    () => {
+      assertEqual(
+        resolveProviderReasoning({ claude: { reasoningEffort: "max" } }, "commandcode"),
+        undefined,
+      )
+      assertEqual(resolveProviderReasoning(undefined, "commandcode"), undefined)
+      assertEqual(resolveProviderReasoning(null, "commandcode"), undefined)
     },
   ],
 
