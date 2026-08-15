@@ -80,6 +80,22 @@ export function isReasoningModel(modelId: string): boolean {
   return MODEL_EFFORTS[modelId] !== undefined
 }
 
+/**
+ * opencode model `variants` for the Command Code model: one entry per supported
+ * reasoning effort, keyed by the effort name. Each variant carries
+ * `{ reasoningEffort: effort }`, which opencode merges into the request
+ * `providerOptions` when the user cycles reasoning with `ctrl+t`. Without a
+ * non-empty `variants` map (and `capabilities.reasoning: true`), opencode has
+ * nothing to cycle and the effort is never surfaced.
+ */
+export function reasoningVariantsForModel(
+  modelId: string,
+): Record<string, { reasoningEffort: string }> | undefined {
+  const efforts = MODEL_EFFORTS[modelId]
+  if (!efforts) return undefined
+  return Object.fromEntries(efforts.map((effort) => [effort, { reasoningEffort: effort }]))
+}
+
 export function mappedReasoningEffort(
   model: { reasoning: boolean; thinkingLevelMap?: Partial<Record<PiThinkingLevel, string | null>> },
   options?: { reasoning?: string },

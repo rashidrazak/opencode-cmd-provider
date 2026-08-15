@@ -4,6 +4,7 @@ import {
   MODEL_EFFORTS,
   isReasoningModel,
   mappedReasoningEffort,
+  reasoningVariantsForModel,
   resolveProviderReasoning,
   thinkingMetadataForModel,
 } from "../src/provider/reasoning.js"
@@ -96,6 +97,24 @@ run([
           assert(e !== "off", `${id} must not list "off" as an effort`)
         }
       }
+    },
+  ],
+
+  [
+    "reasoningVariantsForModel exposes one variant per supported effort",
+    () => {
+      const variants = reasoningVariantsForModel("deepseek/deepseek-v4-flash")
+      assert(variants, "expected variants")
+      assertEqual(Object.keys(variants), ["high", "max"])
+      assertEqual(variants.high, { reasoningEffort: "high" })
+      assertEqual(variants.max, { reasoningEffort: "max" })
+    },
+  ],
+
+  [
+    "reasoningVariantsForModel is empty for non-reasoning models",
+    () => {
+      assertEqual(reasoningVariantsForModel("brand-new/model"), undefined)
     },
   ],
 ])

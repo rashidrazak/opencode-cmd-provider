@@ -1,14 +1,18 @@
 // src/plugin/index.ts — V1 opencode plugin module (PLAN #11)
 import { getApiBase, getModelsUrl, getModelsTimeoutMs, getDataDir } from "../env.js"
 import { loadCommandCodeModels } from "../provider/models.js"
-import { catalogToOpenCodeModels } from "./models.js"
+import { augmentConfigCommandCodeModels, catalogToOpenCodeModels } from "./models.js"
 import { runAuthFlow } from "./auth.js"
 import type { Plugin } from "@opencode-ai/plugin"
+import type { Config } from "@opencode-ai/sdk/v2"
 import { join } from "node:path"
 import { mkdirSync } from "node:fs"
 
 const server: Plugin = async () => {
   return {
+    config: async (config) => {
+      augmentConfigCommandCodeModels(config as Config)
+    },
     auth: {
       provider: "commandcode",
       methods: [
