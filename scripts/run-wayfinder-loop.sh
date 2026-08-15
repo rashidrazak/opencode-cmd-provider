@@ -12,7 +12,7 @@
 #   3. Spawn     — a COLD headless agent process implements the ticket in this
 #                  repo. Fresh context per ticket is the point: the agent's
 #                  window contains only the prompt + AGENTS.md (injected) +
-#                  what it reads (issue, DESIGN.md, PLAN.md section).
+#                  what it reads (issue, ADRs).
 #   4. Verify    — HEAD must move and the tip commit must reference #N.
 #                  Anything else = hard stop with an error, never a blind close.
 #   5. Close     — close the ticket with a comment linking the commit.
@@ -79,13 +79,13 @@ Implement GitHub issue #$1 in this repository ($REPO_OWNER/$REPO_NAME).
 Order of reading, before writing any code:
 1. AGENTS.md — repo conventions.
 2. The issue: gh issue view $1 --json body,labels
-3. DESIGN.md — especially §4 (verified opencode loader behavior).
-4. The "Issue $1" section of PLAN.md — it mirrors the issue one-to-one and is
-   the source of truth. If the issue and the plan disagree, the plan wins;
-   note the discrepancy in a comment on issue #$1.
+3. CONTEXT.md — domain vocabulary (terms a spec may rely on).
+4. docs/adr/ — architectural decisions, including verified opencode loader
+   behavior (ADR-0001). If the issue and an ADR disagree, note the
+   discrepancy in a comment on issue #$1.
 
 How to work:
-- TDD at the seams the plan prescribes: write the plan's failing test first,
+- TDD at the seams the spec prescribes: write the spec's failing test first,
   run it to watch it fail, implement, run it green.
 - Run the single test file repeatedly while working; run the full test suite
   and typecheck before finishing.
@@ -93,7 +93,7 @@ How to work:
 
 When done:
 - Commit on the current branch: git add -A && git commit -m "<type>(scope): <summary> (#$1)"
-  (choose type/scope per the plan's commit lines).
+  (choose type/scope matching the change's scope).
 - Do NOT close the issue and do NOT push; the driver loop handles both.
 - Report a short summary: files touched, test results, any acceptance
   criteria you could not satisfy, and the commit SHA.

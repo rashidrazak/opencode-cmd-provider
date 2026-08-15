@@ -23,9 +23,8 @@ Single-context: one `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agent
 
 ### Spec and plan
 
-`DESIGN.md` (approved design spec) and `PLAN.md` (implementation plan) are the
-source of truth for the `opencode-cmd-provider` work tracked in GitHub Issues. When working
-on any issue from the implementation map (#15) or any of its children (#1–#14), read both
-files first — including `DESIGN.md` §4 (verified opencode loader behavior). PLAN.md's
-sections mirror the issues one-to-one (Issue N ↔ its own section, in the same order). If a
-ticket and the plan disagree, the plan wins; note the discrepancy in the ticket.
+Specs and plans live in GitHub Issues. Domain vocabulary lives in `CONTEXT.md`;
+architectural decisions (including verified opencode loader behavior) live in
+`docs/adr/`. When working on any issue, read the issue, `CONTEXT.md`, and any
+ADRs touching the area first. If a ticket and an ADR disagree, note the
+discrepancy in the ticket.

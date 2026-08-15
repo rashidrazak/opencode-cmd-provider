@@ -34,9 +34,9 @@ trigger and the ritual around it.
 - **Claim** — assigns @me before spawning (anti-race).
 - **Spawn** — one cold headless agent process per ticket (`AGENT_CMD`,
   default `pi -p`). Fresh context per ticket is deliberate: the session reads
-  AGENTS.md → the issue → DESIGN.md (esp. §4) → the matching PLAN.md section,
-  works TDD at the plan's seams, runs typecheck + full suite, commits
-  referencing `#N`.
+  AGENTS.md → the issue → CONTEXT.md → ADRs (incl. verified loader behavior,
+  ADR-0001), works TDD at the spec's seams, runs typecheck + full suite,
+  commits referencing `#N`.
 - **Verify** — HEAD must move and the tip commit must reference `#N`;
   otherwise hard stop, never a blind close.
 - **Close** — comment with the commit SHA, loop to the next frontier ticket.
