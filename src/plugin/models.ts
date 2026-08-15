@@ -2,7 +2,7 @@
 import type { Config, ProviderConfig } from "@opencode-ai/sdk/v2"
 import type { CatalogModel } from "../catalog/snapshot.js"
 import { MODEL_COSTS, ZERO_MODEL_COST, type CommandCodeModelCost } from "../provider/pricing.js"
-import { isReasoningModel, reasoningVariantsForModel } from "../provider/reasoning.js"
+import { reasoningVariantsForModel } from "../provider/reasoning.js"
 import { inputModalitiesForModel } from "../provider/modalities.js"
 
 const DEFAULT_MAX_OUTPUT_TOKENS = 65_536
