@@ -1,52 +1,152 @@
-// tests/plugin-models.test.ts — catalog → opencode Model mapping (PLAN #11)
-import { augmentConfigCommandCodeModels, catalogToOpenCodeModels } from "../src/plugin/models.js"
-import { commandCodeModelsFromApiResponse } from "../src/provider/models.js"
+// tests/plugin-models.test.ts — snapshot auto-registration + config augmentation
+// (issue #16)
+import { autoRegister, augmentConfigCommandCodeModels } from "../src/plugin/models.js"
+import type { CatalogModel } from "../src/catalog/snapshot.js"
 import { assert, assertEqual, run } from "./harness.js"
+
+const OPTIONS = {
+  npm: "opencode-cmd-provider",
+  name: "Command Code",
+  baseURL: "https://api.commandcode.ai",
+}
+
+const SNAPSHOT: readonly CatalogModel[] = [
+  { id: "claude-sonnet-5", name: "Claude Sonnet 5", contextLength: 200000 },
+  { id: "deepseek/deepseek-v4-flash", name: "DeepSeek V4 Flash (latest)", contextLength: 1000000 },
+  { id: "unknown/foo", name: "Foo", contextLength: 16000 },
+]
 
 run([
   [
-    "maps catalog models to opencode Model shape",
+    "auto-registers the provider entry into an empty config",
     () => {
-      const models = commandCodeModelsFromApiResponse({
-        object: "list",
-        data: [
-          { id: "claude-sonnet-5", name: "Claude Sonnet 5", context_length: 200000 },
-          { id: "unknown/foo", name: "Foo", context_length: 16000 },
-        ],
-      })
-      const mapped = catalogToOpenCodeModels(models, {
-        npm: "opencode-cmd-provider",
-        url: "https://api.commandcode.ai",
-      })
-      const sonnet = mapped["claude-sonnet-5"]
-      assert(sonnet, "sonnet missing")
-      assertEqual(sonnet.api.id, "claude-sonnet-5")
-      assertEqual(sonnet.api.npm, "opencode-cmd-provider")
-      assertEqual(sonnet.api.url, "https://api.commandcode.ai")
-      assertEqual(sonnet.capabilities.reasoning, true)
-      assertEqual(sonnet.capabilities.attachment, true)
-      assertEqual(sonnet.capabilities.toolcall, true)
-      assertEqual(sonnet.capabilities.interleaved, false)
+      const config = {}
+      const returned = autoRegister(config, SNAPSHOT, OPTIONS)
+      assert(returned === config, "autoRegister must return the same config object")
+      const entry = config.provider.commandcode
+      assert(entry, "provider.commandcode missing")
+      assertEqual(entry.npm, "opencode-cmd-provider")
+      assertEqual(entry.name, "Command Code")
+      assertEqual(entry.env, ["COMMANDCODE_API_KEY"])
+      assertEqual(entry.options, { baseURL: "https://api.commandcode.ai" })
+      assertEqual(Object.keys(entry.models ?? {}).length, 3)
+
+      const sonnet = entry.models["claude-sonnet-5"]
+      assertEqual(sonnet.name, "[CMD] Claude Sonnet 5")
       assertEqual(sonnet.limit, { context: 200000, output: 65536 })
-      assertEqual(sonnet.status, "active")
+      assertEqual(sonnet.reasoning, true)
       assertEqual(Object.keys(sonnet.variants ?? {}), ["low", "medium", "high", "xhigh", "max"])
-      assertEqual(sonnet.variants?.["high"], { reasoningEffort: "high" })
-      const unknown = mapped["unknown/foo"]
-      assertEqual(unknown.capabilities.reasoning, false)
-      assertEqual(unknown.capabilities.attachment, false)
-      assertEqual(unknown.cost.input, 0)
-      assertEqual(unknown.variants, {})
+      assertEqual(sonnet.modalities, { input: ["text", "image"] })
+      assertEqual(sonnet.cost, { input: 2, output: 10, cache_read: 0.2, cache_write: 2.5 })
+      assertEqual(sonnet.status, "active")
+
+      const flash = entry.models["deepseek/deepseek-v4-flash"]
+      assertEqual(flash.name, "[CMD] DeepSeek V4 Flash (latest)")
+      assertEqual(flash.limit, { context: 1000000, output: 65536 })
+      assertEqual(flash.reasoning, true)
+      assertEqual(Object.keys(flash.variants ?? {}), ["high", "max"])
+
+      const unknown = entry.models["unknown/foo"]
+      assertEqual(unknown.name, "[CMD] Foo")
+      assertEqual(unknown.limit, { context: 16000, output: 16000 })
+      assertEqual(unknown.reasoning, undefined)
+      assertEqual(unknown.variants, undefined)
+      assertEqual(unknown.modalities, { input: ["text"] })
+      assertEqual(unknown.cost, { input: 0, output: 0, cache_read: 0, cache_write: 0 })
     },
   ],
 
   [
-    "models hook returns empty map when catalog is empty",
+    "injects nothing when the snapshot is empty",
     () => {
-      const mapped = catalogToOpenCodeModels([], {
-        npm: "opencode-cmd-provider",
-        url: "https://api.commandcode.ai",
+      const config = { provider: { openai: { npm: "x" } } }
+      autoRegister(config, [], OPTIONS)
+      assertEqual(Object.keys(config.provider), ["openai"])
+    },
+  ],
+
+  [
+    "leaves a declared commandcode entry untouched when the snapshot is empty",
+    () => {
+      const declared = {
+        "claude-sonnet-5": {
+          name: "My Sonnet",
+          limit: { context: 999, output: 999 },
+        },
+      }
+      const config = {
+        provider: {
+          commandcode: {
+            name: "My CC",
+            options: { baseURL: "http://custom" },
+            models: declared,
+          },
+        },
+      }
+      autoRegister(config, [], OPTIONS)
+      assertEqual(config.provider.commandcode, {
+        name: "My CC",
+        options: { baseURL: "http://custom" },
+        models: declared,
       })
-      assertEqual(mapped, {})
+    },
+  ],
+
+  [
+    "merges with a user-declared entry without touching user models",
+    () => {
+      const declared = {
+        "my-sonnet": {
+          id: "claude-sonnet-5",
+          name: "My Sonnet",
+          limit: { context: 999, output: 999 },
+        },
+        "retired-model": {
+          name: "Retired",
+          limit: { context: 1000, output: 1000 },
+        },
+      }
+      const config = {
+        provider: {
+          commandcode: {
+            name: "My CC",
+            env: ["MY_CC_KEY"],
+            options: { baseURL: "http://custom" },
+            models: declared,
+          },
+        },
+      }
+      autoRegister(config, SNAPSHOT, OPTIONS)
+      const entry = config.provider.commandcode
+      assertEqual(entry.name, "My CC")
+      assertEqual(entry.env, ["MY_CC_KEY"])
+      assertEqual(entry.options, { baseURL: "http://custom" })
+      assertEqual(entry.npm, "opencode-cmd-provider")
+
+      assertEqual(entry.models["my-sonnet"], declared["my-sonnet"])
+      assertEqual(entry.models["retired-model"], declared["retired-model"])
+      assert(entry.models["claude-sonnet-5"] === undefined, "id-mapped model must not duplicate")
+      const flash = entry.models["deepseek/deepseek-v4-flash"]
+      assertEqual(flash.name, "[CMD] DeepSeek V4 Flash (latest)")
+    },
+  ],
+
+  [
+    "keeps provider-level declared settings when only some are declared",
+    () => {
+      const config = {
+        provider: {
+          commandcode: {
+            name: "Custom Name",
+          },
+        },
+      }
+      autoRegister(config, SNAPSHOT, OPTIONS)
+      const entry = config.provider.commandcode
+      assertEqual(entry.name, "Custom Name")
+      assertEqual(entry.npm, "opencode-cmd-provider")
+      assertEqual(entry.env, ["COMMANDCODE_API_KEY"])
+      assertEqual(entry.options, { baseURL: "https://api.commandcode.ai" })
     },
   ],
 

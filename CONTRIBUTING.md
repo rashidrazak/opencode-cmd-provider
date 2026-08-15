@@ -42,7 +42,7 @@ For release and npm smoke-test steps, see [RELEASE.md](RELEASE.md).
 npm run build && npm run test:e2e
 ```
 
-The e2e verifies the plugin loads and discovers a config-declared Command Code model, then attempts a headless `opencode run`. If the headless run hangs before sending a request against a local/mock baseURL — an upstream opencode bug (see the test file for issue links) — the test logs the blocker and skips gracefully.
+The e2e verifies the plugin loads and auto-registers the Command Code models — the fixture declares no provider and no models, so discovery proves auto-registration — then attempts a headless `opencode run`. If the headless run hangs before sending a request against a local/mock baseURL — an upstream opencode bug (see the test file for issue links) — the test logs the blocker and skips gracefully.
 
 ## Pull request guidelines
 

@@ -1,7 +1,7 @@
-// src/plugin/models.ts — catalog → opencode Model mapping (PLAN #11)
-import type { Config, Model, ProviderConfig } from "@opencode-ai/sdk/v2"
-import type { CommandCodeModel } from "../provider/models.js"
-import { MODEL_COSTS, ZERO_MODEL_COST } from "../provider/pricing.js"
+// src/plugin/models.ts — snapshot → config auto-registration (issue #16)
+import type { Config, ProviderConfig } from "@opencode-ai/sdk/v2"
+import type { CatalogModel } from "../catalog/snapshot.js"
+import { MODEL_COSTS, ZERO_MODEL_COST, type CommandCodeModelCost } from "../provider/pricing.js"
 import { isReasoningModel, reasoningVariantsForModel } from "../provider/reasoning.js"
 import { inputModalitiesForModel } from "../provider/modalities.js"
 
@@ -10,20 +10,64 @@ const DEFAULT_MAX_OUTPUT_TOKENS = 65_536
 type ConfigModel = NonNullable<NonNullable<ProviderConfig["models"]>[string]>
 type ConfigVariants = NonNullable<ConfigModel["variants"]>
 
-export interface CatalogMappingOptions {
+export interface AutoRegisterOptions {
   npm: string
-  url: string
+  name: string
+  baseURL: string
+}
+
+/**
+ * Registers the `commandcode` provider entry into opencode's config so every
+ * snapshot model is available without any user declaration.
+ *
+ * opencode only invokes a plugin's `provider.models` hook for providers that
+ * already exist in its models.dev catalog; `commandcode` is not in that
+ * catalog, so models reach the session through the config-declared
+ * `provider.commandcode.models` map. The `config` hook runs before opencode
+ * reads `config.provider` and honors in-place mutation (ADR-0001), which makes
+ * this the only zero-declaration mechanism available today.
+ *
+ * Pure function: takes a config and a snapshot, mutates and returns the config.
+ * Merge semantics — the user's declared entry always wins:
+ * - provider-level keys (`npm`, `name`, `env`, `options.baseURL`) are filled
+ *   only when unset;
+ * - snapshot models are added only when no declared model claims the id (by
+ *   config key or by the entry's `id`);
+ * - declared models are never modified, and declared models that left the
+ *   catalog stay usable.
+ */
+export function autoRegister(
+  config: Config,
+  snapshot: readonly CatalogModel[],
+  options: AutoRegisterOptions,
+): Config {
+  if (snapshot.length === 0) return config
+
+  const provider = (config.provider ??= {})
+  const entry = (provider["commandcode"] ??= {}) as ProviderConfig
+  entry.npm ??= options.npm
+  entry.name ??= options.name
+  entry.env ??= ["COMMANDCODE_API_KEY"]
+  entry.options ??= {}
+  entry.options.baseURL ??= options.baseURL
+  entry.models ??= {}
+
+  const declaredById = new Set(
+    Object.values(entry.models)
+      .map((model) => model?.id)
+      .filter((id): id is string => typeof id === "string"),
+  )
+
+  for (const model of snapshot) {
+    if (entry.models[model.id] !== undefined || declaredById.has(model.id)) continue
+    entry.models[model.id] = configModelFor(model)
+  }
+  return config
 }
 
 /**
  * Augments config-declared commandcode models with reasoning metadata and
  * variants so opencode's `ctrl+t` can cycle reasoning effort.
- *
- * opencode only invokes a plugin's `provider.models` hook for providers that
- * already exist in its models.dev catalog; `commandcode` is not in that catalog,
- * so models reach the session through the config-declared `provider.commandcode
- * .models` map. That config shape supports `reasoning` and `variants`, which the
- * `config` hook can populate before the provider is built.
  *
  * In-place mutation of the config object (the plugin `config` hook contract).
  */
@@ -40,49 +84,32 @@ export function augmentConfigCommandCodeModels(config: Config): void {
   }
 }
 
-export function catalogToOpenCodeModels(
-  models: readonly CommandCodeModel[],
-  options: CatalogMappingOptions,
-): Record<string, Model> {
-  const out: Record<string, Model> = {}
-  for (const model of models) {
-    const costs = MODEL_COSTS[model.id] ?? ZERO_MODEL_COST
-    const modalities = inputModalitiesForModel(model.id)
-    out[model.id] = {
-      id: model.id,
-      providerID: "commandcode",
-      api: { id: model.id, url: options.url, npm: options.npm },
-      name: model.name,
-      capabilities: {
-        temperature: false,
-        reasoning: isReasoningModel(model.id),
-        attachment: modalities.includes("image"),
-        toolcall: true,
-        input: {
-          text: true,
-          image: modalities.includes("image"),
-          audio: false,
-          video: false,
-          pdf: false,
-        },
-        output: { text: true, audio: false, image: false, video: false, pdf: false },
-        interleaved: false,
-      },
-      cost: {
-        input: costs.input,
-        output: costs.output,
-        cache: { read: costs.cacheRead, write: costs.cacheWrite },
-      },
-      limit: {
-        context: model.contextWindow,
-        output: Math.min(model.contextWindow, DEFAULT_MAX_OUTPUT_TOKENS),
-      },
-      status: "active",
-      options: {},
-      headers: {},
-      release_date: "",
-      variants: reasoningVariantsForModel(model.id) ?? {},
-    }
+/**
+ * Config-schema model entry (not the SDK `Model` shape) for a snapshot model:
+ * `[CMD]`-prefixed display name, context/output limits with output capped at
+ * 65_536, and metadata enriched from the reasoning, modality, and pricing
+ * tables.
+ */
+function configModelFor(model: CatalogModel): ConfigModel {
+  const variants = reasoningVariantsForModel(model.id)
+  const costs: CommandCodeModelCost = MODEL_COSTS[model.id] ?? ZERO_MODEL_COST
+  return {
+    name: `[CMD] ${model.name}`,
+    limit: {
+      context: model.contextLength,
+      output: Math.min(model.contextLength, DEFAULT_MAX_OUTPUT_TOKENS),
+    },
+    reasoning: variants ? true : undefined,
+    variants: variants as ConfigVariants | undefined,
+    modalities: {
+      input: [...inputModalitiesForModel(model.id)],
+    },
+    cost: {
+      input: costs.input,
+      output: costs.output,
+      cache_read: costs.cacheRead,
+      cache_write: costs.cacheWrite,
+    },
+    status: "active",
   }
-  return out
 }

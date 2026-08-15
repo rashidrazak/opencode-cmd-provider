@@ -2,8 +2,9 @@
 // package. Requires: `opencode` on PATH and `npm run build` run first.
 //
 // Skips (exit 0) when opencode is absent. Verifies, in order:
-//   1. the fixture wires the built plugin + a config-declared Command Code model;
-//   2. opencode loads the plugin and discovers that model (`opencode models`);
+//   1. the fixture wires ONLY the built plugin (no declared provider or models);
+//   2. opencode loads the plugin and auto-registers the commandcode models
+//      (`opencode models` lists them without any config declaration);
 //   3. a headless `opencode run` completes a turn and the mock's assistant text
 //      appears in the output, and the generate request reaches the mock.
 //
@@ -85,7 +86,8 @@ if (fixture.status !== 0) {
 }
 const dir = fixture.stdout.trim()
 
-// 1 + 2: plugin loads and the config-declared model is discovered.
+// 1 + 2: plugin loads and auto-registers the commandcode models — the fixture
+// declares no provider and no models, so discovery proves auto-registration.
 const list = spawnSync("opencode", ["models"], {
   cwd: dir,
   env: { ...isoEnv, COMMANDCODE_API_KEY: "user_e2e", COMMANDCODE_API_BASE: base },
@@ -96,12 +98,12 @@ const discovered = (list.stdout || "")
   .split("\n")
   .some((l) => l.includes("commandcode/claude-sonnet-5"))
 if (list.status !== 0 || !discovered) {
-  console.error("opencode failed to discover commandcode/claude-sonnet-5:")
+  console.error("opencode failed to discover auto-registered commandcode/claude-sonnet-5:")
   console.error(list.stderr || list.stdout)
   server.close()
   process.exit(1)
 }
-console.log("ok - plugin loads and commandcode/claude-sonnet-5 is discovered")
+console.log("ok - plugin auto-registers commandcode/claude-sonnet-5 with no declared config")
 
 // 3: headless run. Known upstream bug may hang before sending the request; detect
 // and skip gracefully in that case.

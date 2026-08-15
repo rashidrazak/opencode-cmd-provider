@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+Feature: zero-config install via auto-registration from a bundled model snapshot.
+
+- The plugin now bundles a snapshot of the Command Code model catalog (`src/catalog/snapshot.ts`, 55 models) and auto-registers the `commandcode` provider — npm, name, `env`, and every model — during its `config` hook. Installing the plugin is enough: all Command Code models appear in `/models` with the `[CMD]` display-name prefix, no `provider.commandcode` block or `models` map required. No network access is ever needed at runtime.
+- Declared config wins: provider-level keys are filled only when unset, declared models are never modified or removed, models that left the catalog stay usable, and `whitelist`/`blacklist` still filter auto-registered models.
+- The snapshot is regenerated from the live catalog at every release via `npm run refresh:snapshot` (`scripts/refresh-snapshot.mjs`); newly published models appear after a plugin update.
+- Deleted the now-dead network machinery: live catalog fetch and cache (`loadCommandCodeModels`, cache file), the `provider.models` hook, `catalogToOpenCodeModels`, and the `COMMANDCODE_MODELS_*` env vars.
+- `COMMANDCODE_API_BASE` now actually overrides the runtime API base (injected as `options.baseURL` when the user declares no `options` of their own).
+
 ## 0.1.2 - 2026-08-15
 
 Fix: tool-call history round-trip and reasoning effort. Live probes against the Command Code API with opencode confirmed the AI SDK v3 shapes differ from what the converters expected:

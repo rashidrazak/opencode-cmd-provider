@@ -1,10 +1,8 @@
-// Writes a throwaway opencode.json wired to the local package + mock endpoints.
-//
-// opencode's plugin `provider.models` hook only fires for providers already
-// present in its models.dev catalog; `commandcode` is not in that catalog, so
-// model discovery for this provider is driven by the config-declared `models`
-// map (which the plugin's install instructions write for the user). The mock
-// model entry here mirrors what the catalog hook would have produced.
+// Writes a throwaway opencode.json wiring the local package as the only
+// plugin, with no declared provider or models. The plugin's config hook
+// auto-registers the commandcode provider and every snapshot model, so model
+// discovery proves auto-registration end-to-end. COMMANDCODE_API_BASE is read
+// by the plugin (injected as options.baseURL) so requests reach the mock.
 import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
@@ -14,19 +12,6 @@ const pluginPath = resolve(import.meta.dirname, "..", "dist", "index.js")
 const config = {
   $schema: "https://opencode.ai/config.json",
   plugin: [`file://${pluginPath}`],
-  provider: {
-    commandcode: {
-      npm: `file://${pluginPath}`,
-      name: "Command Code",
-      options: { baseURL: process.env.COMMANDCODE_API_BASE ?? "https://api.commandcode.ai" },
-      models: {
-        "claude-sonnet-5": {
-          name: "Claude Sonnet 5",
-          limit: { context: 200000, output: 65536 },
-        },
-      },
-    },
-  },
 }
 mkdirSync(join(dir, ".opencode"), { recursive: true })
 writeFileSync(join(dir, "opencode.json"), JSON.stringify(config, null, 2))

@@ -16,37 +16,29 @@ Add the package to your opencode configuration:
 {
   "$schema": "https://opencode.ai/config.json",
   "plugin": ["opencode-cmd-provider"],
-  "provider": {
-    "commandcode": {
-      "npm": "opencode-cmd-provider",
-      "name": "Command Code",
-      "options": { "baseURL": "https://api.commandcode.ai" },
-      "models": {
-        "claude-sonnet-5": {
-          "name": "Claude Sonnet 5",
-          "limit": { "context": 200000, "output": 65536 },
-        },
-        "deepseek/deepseek-v4-flash": {
-          "name": "DeepSeek V4 Flash",
-        },
-      },
-    },
-  },
 }
 ```
 
-> **The `models` map is required, and each key must be the model's full Command
-> Code catalog ID.** opencode only fires a provider's `models` discovery hook for
-> providers already in its [models.dev](https://models.dev) catalog, and
-> `commandcode` is not in that catalog yet — so you must declare the models you
-> want. The keys are passed straight to the Command Code API, so use the exact
-> catalog IDs (some are prefixed, e.g. `deepseek/deepseek-v4-flash`,
-> `google/gemini-3.5-flash`, `xai/grok-4.5`). List the current catalog from the
-> terminal with `opencode run --model commandcode/... "hi"` after connecting, or
-> hit `https://api.commandcode.ai/provider/v1/models`. An unprefixed or wrong ID
-> fails with a `403 Model/provider not recognized` error. When `commandcode`
-> lands in the models.dev catalog, this map becomes optional and discovery works
-> via the plugin's `provider.models` hook.
+That's it. The plugin bundles a snapshot of the Command Code model catalog and
+auto-registers the `commandcode` provider — npm package, name, API key env var,
+and every model — when opencode loads. No `provider.commandcode` block, no
+`models` map, no network access needed. All Command Code models appear in
+`/models` with the `[CMD]` display-name prefix (e.g. `[CMD] Claude Sonnet 5`) so
+they aren't confused with same-named models from other providers.
+
+You can still declare your own `provider.commandcode` entry to customize
+behavior; your declarations always win and the snapshot fills in only what's
+missing:
+
+- Declared provider-level settings (`name`, `options`, `baseURL`, `env`) are
+  kept as you wrote them.
+- Declared models stay exactly as you wrote them — the snapshot never modifies
+  or removes them, and models that left the catalog remain usable.
+- `whitelist`/`blacklist` on a declared entry filter the auto-registered models
+  too, keeping the picker uncluttered.
+
+The catalog snapshot is refreshed at every release; newly published Command
+Code models appear after a plugin update.
 
 Start or reload opencode, then authenticate:
 
@@ -109,34 +101,30 @@ Pick a model with `/models`, or run non-interactively:
 opencode run --model commandcode/claude-sonnet-5 "hello"
 ```
 
-Model availability changes over time and is refreshed from the Command Code catalog when opencode loads.
+## Model discovery and offline behavior
+
+The plugin ships a snapshot of the Command Code model catalog (`src/catalog/snapshot.ts`)
+and auto-registers every model into opencode's config at startup. Model
+availability changes when the package is updated: the snapshot is regenerated
+from the live catalog at every release via `npm run refresh:snapshot`.
+
+Auto-registration adds no network latency to opencode startup — the snapshot is
+bundled, and the plugin never contacts the Command Code API to list models. The
+plugin works fully offline; model availability never depends on the catalog
+endpoint being reachable.
+
+The following environment variable is intended for tests, local mocks, and
+compatible API endpoints:
+
+| Variable               | Purpose                                |
+| ---------------------- | -------------------------------------- |
+| `COMMANDCODE_API_BASE` | Override the Command Code API base URL |
 
 ### Reasoning support
 
 Reasoning metadata is enriched only for models whose Command Code effort support is known. Supported levels are sent as the documented `reasoning_effort` request field; `off`, unsupported levels, and newly discovered models without metadata do not add reasoning fields to the request. No prompt instructions are injected.
 
 Reasoning blocks from completed assistant turns are not replayed to Command Code in later requests; only the user-visible text and completed tool calls are sent back as history. This prevents prior private reasoning traces from interfering with reasoning on follow-up turns.
-
-## Model discovery and offline behavior
-
-The provider fetches the current model catalog from:
-
-```txt
-https://api.commandcode.ai/provider/v1/models
-```
-
-The last successful catalog is cached at `<data-dir>/commandcode-models.json`, where `<data-dir>` is opencode's XDG data directory (default `~/.local/share/opencode`).
-
-If the endpoint is temporarily unavailable, the provider uses the cached catalog. On a first offline start without a cache, opencode still starts cleanly, but Command Code models remain unavailable until the connection is restored.
-
-The following environment variables are intended for tests, local mocks, and compatible API endpoints:
-
-| Variable                        | Purpose                                                                                        |
-| ------------------------------- | ---------------------------------------------------------------------------------------------- |
-| `COMMANDCODE_API_BASE`          | Override the Command Code API base URL                                                         |
-| `COMMANDCODE_MODELS_URL`        | Override the model catalog endpoint                                                            |
-| `COMMANDCODE_MODELS_CACHE`      | Override the model cache file path                                                             |
-| `COMMANDCODE_MODELS_TIMEOUT_MS` | Catalog fetch timeout (defaults to 10 seconds; invalid or non-positive values use the default) |
 
 ## Image input
 
@@ -152,7 +140,7 @@ Models missing from that table display zero cost in opencode. This does **not** 
 
 ## Update and remove
 
-Update the installed package, or remove it from the `plugin` array and the `provider.commandcode` block in your `opencode.json`. The npm package is cached under opencode's plugin cache (`~/.cache/opencode/packages/`); remove the cached directory to fully uninstall.
+Update the installed package, or remove it from the `plugin` array in your `opencode.json` (the auto-registered `provider.commandcode` entry is injected by the plugin, so there is no config block to remove). The npm package is cached under opencode's plugin cache (`~/.cache/opencode/packages/`); remove the cached directory to fully uninstall.
 
 ## Development
 
@@ -171,7 +159,7 @@ The headless end-to-end test runs the real opencode CLI against a mock Command C
 npm run build && npm run test:e2e
 ```
 
-`scripts/opencode-fixture.mjs` writes a throwaway `opencode.json` wiring the local build to the mock endpoints. `test:e2e` is a local dev gate (it needs the real `opencode` binary on PATH) and is excluded from `npm test`.
+`scripts/opencode-fixture.mjs` writes a throwaway `opencode.json` wiring only the local build as a plugin — no declared provider or models — so `opencode models` proves auto-registration against a real opencode binary. `test:e2e` is a local dev gate (it needs the real `opencode` binary on PATH) and is excluded from `npm test`.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for local setup and tests. See [RELEASE.md](RELEASE.md) for the release process.
 

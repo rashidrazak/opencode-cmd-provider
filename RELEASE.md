@@ -16,12 +16,17 @@ Recommended flow:
 Use `next` for beta/alpha/manual validation builds.
 
 ```sh
+npm run refresh:snapshot
 npm version prepatch --preid next --no-git-tag-version
 npm test
 npm run format:check
 npm pack --dry-run
 npm publish --tag next --access public
 ```
+
+`npm run refresh:snapshot` regenerates `src/catalog/snapshot.ts` from the live
+Command Code catalog so the release ships the current model list; commit the
+updated snapshot with the release.
 
 If npm asks for browser or OTP auth, run the publish command manually and complete the npm prompt.
 
@@ -49,7 +54,7 @@ npm run build
 npm run test:e2e
 ```
 
-The e2e writes a throwaway `opencode.json` via `scripts/opencode-fixture.mjs` and runs `opencode models` against the built package. Expected: `ok - plugin loads and commandcode/claude-sonnet-5 is discovered`.
+The e2e writes a throwaway `opencode.json` via `scripts/opencode-fixture.mjs` (plugin only — no declared provider or models) and runs `opencode models` against the built package. Expected: `ok - plugin auto-registers commandcode/claude-sonnet-5 with no declared config`.
 
 ### 2. Manual `/connect` + run test with isolated opencode config
 
@@ -62,7 +67,7 @@ export XDG_DATA_HOME="$HOME/.data"
 export XDG_CACHE_HOME="$HOME/.cache"
 ```
 
-Then, with a `plugin` and `provider.commandcode` block pointing at the published package:
+Then, with a `plugin` entry pointing at the published package (the provider block is auto-registered):
 
 ```txt
 /connect

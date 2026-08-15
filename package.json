@@ -17,8 +17,9 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit",
+    "refresh:snapshot": "node scripts/refresh-snapshot.mjs",
     "test": "npm run typecheck && npm run test:unit && npm run test:integration && npm run test:contract && npm run format:check",
-    "test:unit": "tsx tests/env.test.ts && tsx tests/auth-key.test.ts && tsx tests/converters.test.ts && tsx tests/stream.test.ts && tsx tests/redact.test.ts && tsx tests/cost.test.ts && tsx tests/retry.test.ts && tsx tests/reasoning.test.ts && tsx tests/modalities.test.ts && tsx tests/models.test.ts && tsx tests/oauth.test.ts && tsx tests/plugin-models.test.ts",
+    "test:unit": "tsx tests/env.test.ts && tsx tests/auth-key.test.ts && tsx tests/converters.test.ts && tsx tests/stream.test.ts && tsx tests/redact.test.ts && tsx tests/cost.test.ts && tsx tests/retry.test.ts && tsx tests/reasoning.test.ts && tsx tests/modalities.test.ts && tsx tests/snapshot.test.ts && tsx tests/refresh-snapshot.test.ts && tsx tests/oauth.test.ts && tsx tests/plugin-models.test.ts",
     "test:integration": "tsx tests/integration-do-stream.test.ts && tsx tests/integration-do-generate.test.ts",
     "test:contract": "tsx tests/contract.test.ts",
     "test:e2e": "node tests/e2e-opencode.mjs",
