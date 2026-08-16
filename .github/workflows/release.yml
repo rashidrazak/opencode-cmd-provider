@@ -13,12 +13,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
           registry-url: https://registry.npmjs.org
-      - run: npm ci
+
+      - name: Verify tag commit is on main
+        run: |
+          git fetch origin main
+          if ! git merge-base --is-ancestor "${GITHUB_SHA}" refs/remotes/origin/main; then
+            echo "::error::tag ${GITHUB_REF_NAME} points at ${GITHUB_SHA}, which is not on main. Land the version bump and CHANGELOG entry on main first, then re-tag."
+            exit 1
+          fi
 
       - name: Verify tag matches package.json version
         id: version
@@ -30,28 +39,21 @@ jobs:
           fi
           echo "version=${version}" >> "$GITHUB_OUTPUT"
 
+      - run: npm ci
       - run: npm run build
       - run: npm test
 
-      - name: Refresh catalog snapshot, fix the tag if stale
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Refresh catalog snapshot
+        run: npm run refresh:snapshot
+
+      - name: Fail on stale catalog snapshot
         run: |
-          npm run refresh:snapshot
           if git diff --exit-code -- src/catalog/snapshot.ts; then
             echo "snapshot is fresh"
-            exit 0
+          else
+            echo "::error::catalog snapshot is stale. Run 'npm run refresh:snapshot' locally, commit src/catalog/snapshot.ts, land it on main, then re-tag ${GITHUB_REF_NAME}."
+            exit 1
           fi
-          echo "::warning::catalog snapshot is stale; refreshing, committing, and moving the tag"
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add src/catalog/snapshot.ts
-          git commit -m "chore(snapshot): refresh catalog snapshot"
-          git push origin main
-          git tag -f "${GITHUB_REF_NAME}"
-          git push origin "${GITHUB_REF_NAME}" --force
-          echo "::error::snapshot refreshed and ${GITHUB_REF_NAME} moved; the re-triggered release run will publish"
-          exit 1
 
       - name: Extract changelog entry
         id: notes

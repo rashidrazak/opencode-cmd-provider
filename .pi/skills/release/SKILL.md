@@ -7,8 +7,8 @@ description: Cut a release of opencode-cmd-provider — bump the version, write 
 
 A **Release** is a versioned publication: a git tag `vX.Y.Z` matching
 `package.json`, a GitHub Release, and an npm publish (see `CONTEXT.md`,
-ADR 0002). The pipeline owns the mechanics; this skill is the pre-tag ritual
-and post-push verification.
+ADRs 0002 and 0003). The pipeline owns the mechanics; this skill is the
+pre-tag ritual and post-push verification.
 
 ## Version choice
 
@@ -24,22 +24,25 @@ and post-push verification.
    `## Unreleased` when it exists). This exact section becomes the GitHub
    Release body; without it the pipeline falls back to generated notes.
 3. **Commit** — conventional style: `chore(release): X.Y.Z`.
-4. **Tag and push**: `git tag vX.Y.Z && git push origin main --tags` — the tag
-   push triggers `release.yml`.
+4. **Land on main** — main is protected (required `test` check, PR review), so
+   open a PR and merge it. The pipeline refuses tags whose commit is not on
+   main; the tag must point at a commit that contains the bump.
+5. **Tag**: `git tag vX.Y.Z && git push origin vX.Y.Z` — the tag push triggers
+   `release.yml`. Push the tag only; main is already up to date.
 
-The catalog snapshot is **not** your job: the pipeline refreshes it and fixes
-the tag if the live catalog drifted (see ADR 0002). Running
+The catalog snapshot is **not** your job: the pipeline refreshes it and fails
+loudly if the live catalog drifted (see ADR 0003). Running
 `npm run refresh:snapshot` locally beforehand is optional — do it if you want
 the diff visible before tagging.
 
 ## What the pipeline does (no action needed)
 
-Asserts tag == `v<package.json.version>` → refreshes the catalog snapshot; if
-stale, commits it, moves the tag, and re-triggers itself (that run fails with
-an explanatory error; the re-triggered run publishes) → build + full test
-suite → OIDC npm publish (trusted publishing, provenance automatic) → GitHub
-Release from the CHANGELOG section. Provenance requires the repository to be
-public.
+Asserts the tag's commit is on `origin/main` → asserts tag ==
+`v<package.json.version>` → build + full test suite → refreshes the catalog
+snapshot and fails with instructions if it drifted (never moving the tag or
+pushing to main itself) → OIDC npm publish (trusted publishing, provenance
+automatic) → GitHub Release from the CHANGELOG section. Provenance requires
+the repository to be public.
 
 ## Verify after push
 
@@ -53,14 +56,15 @@ public.
 
 ## Failure recovery
 
-- **A stale snapshot produces a failed run + a re-triggered run** — that's
-  normal: the first run committed the snapshot and moved the tag; the second
-  run publishes. Verify with the second run's status.
+- **A stale snapshot fails the run** — nothing shipped. Refresh locally
+  (`npm run refresh:snapshot`), commit `src/catalog/snapshot.ts`, land it on
+  main via PR, then re-tag.
 - **Publish fails** — nothing shipped (npm rejects before writing) → fix, then
   `gh run rerun <run-id>`.
 - **Workflow file changes** — if a fix touches `.github/workflows/release.yml`,
   rerunning is not enough: the run executes the workflow from the tag's tree.
   Move the tag (`git push origin :refs/tags/vX.Y.Z`, re-tag at the fixed
   commit, push) so a fresh run uses the new file.
-- **Pre-publish failure** (tests, build, snapshot guard) — fix on main, rerun;
-  no tag movement unless the workflow changed.
+- **Pre-publish failure** (tests, build, snapshot guard) — fix on main via PR,
+  re-tag at the new commit; the old tag's run cannot be salvaged by rerun if
+  the tag commit itself is at fault.
