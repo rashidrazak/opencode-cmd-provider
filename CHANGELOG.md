@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.3 - 2026-08-16
 
 Feature: zero-config install via auto-registration from a bundled model snapshot.
 

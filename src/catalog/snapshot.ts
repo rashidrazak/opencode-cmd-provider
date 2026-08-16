@@ -29,11 +29,7 @@ export const MODEL_SNAPSHOT: readonly CatalogModel[] = [
   { id: "deepseek/deepseek-v4-flash", name: "DeepSeek V4 Flash (latest)", contextLength: 1000000 },
   { id: "moonshotai/Kimi-K3", name: "Kimi K3", contextLength: 1000000 },
   { id: "moonshotai/Kimi-K2.7-Code", name: "Kimi K2.7 Code", contextLength: 256000 },
-  {
-    id: "moonshotai/Kimi-K2.7-Code-Highspeed",
-    name: "Kimi K2.7 Code HighSpeed",
-    contextLength: 262000,
-  },
+  { id: "moonshotai/Kimi-K2.7-Code-Highspeed", name: "Kimi K2.7 Code HighSpeed", contextLength: 262000 },
   { id: "moonshotai/Kimi-K2.6", name: "Kimi K2.6", contextLength: 256000 },
   { id: "moonshotai/Kimi-K2.5", name: "Kimi K2.5", contextLength: 256000 },
   { id: "zai-org/GLM-5.3", name: "GLM-5.3", contextLength: 1000000 },
@@ -67,11 +63,7 @@ export const MODEL_SNAPSHOT: readonly CatalogModel[] = [
   { id: "poolside/laguna-s-2.1-free", name: "Laguna S 2.1", contextLength: 256000 },
   { id: "meta/muse-spark-1.1", name: "Muse Spark 1.1", contextLength: 1048576 },
   { id: "meta/muse-spark-1.2", name: "Muse Spark 1.2", contextLength: 1048576 },
-  {
-    id: "meta/muse-spark-1.2-contributor",
-    name: "Muse Spark 1.2 Contributor",
-    contextLength: 1048576,
-  },
+  { id: "meta/muse-spark-1.2-contributor", name: "Muse Spark 1.2 Contributor", contextLength: 1048576 },
   { id: "xai/grok-4.5", name: "Grok 4.5", contextLength: 500000 },
   { id: "xai/grok-4.6", name: "Grok 4.6", contextLength: 500000 },
 ]
