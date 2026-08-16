@@ -23,20 +23,23 @@ and post-push verification.
 2. **CHANGELOG.md** — add a `## X.Y.Z - YYYY-MM-DD` section (promote
    `## Unreleased` when it exists). This exact section becomes the GitHub
    Release body; without it the pipeline falls back to generated notes.
-3. **Refresh the snapshot**: `npm run refresh:snapshot` — commit the change if
-   the live catalog drifted. A stale snapshot is a hard release failure: the
-   pipeline regenerates and diffs it, then aborts. The only fix is to refresh
-   locally, commit, and re-tag.
-4. **Commit** — conventional style: `chore(release): X.Y.Z`.
-5. **Tag and push**: `git tag vX.Y.Z && git push origin main --tags` — the tag
+3. **Commit** — conventional style: `chore(release): X.Y.Z`.
+4. **Tag and push**: `git tag vX.Y.Z && git push origin main --tags` — the tag
    push triggers `release.yml`.
+
+The catalog snapshot is **not** your job: the pipeline refreshes it and fixes
+the tag if the live catalog drifted (see ADR 0002). Running
+`npm run refresh:snapshot` locally beforehand is optional — do it if you want
+the diff visible before tagging.
 
 ## What the pipeline does (no action needed)
 
-Asserts tag == `v<package.json.version>` → build + full test suite →
-snapshot-freshness guard → OIDC npm publish (trusted publishing, provenance
-automatic) → GitHub Release from the CHANGELOG section. Provenance requires
-the repository to be public.
+Asserts tag == `v<package.json.version>` → refreshes the catalog snapshot; if
+stale, commits it, moves the tag, and re-triggers itself (that run fails with
+an explanatory error; the re-triggered run publishes) → build + full test
+suite → OIDC npm publish (trusted publishing, provenance automatic) → GitHub
+Release from the CHANGELOG section. Provenance requires the repository to be
+public.
 
 ## Verify after push
 
@@ -50,6 +53,9 @@ the repository to be public.
 
 ## Failure recovery
 
+- **A stale snapshot produces a failed run + a re-triggered run** — that's
+  normal: the first run committed the snapshot and moved the tag; the second
+  run publishes. Verify with the second run's status.
 - **Publish fails** — nothing shipped (npm rejects before writing) → fix, then
   `gh run rerun <run-id>`.
 - **Workflow file changes** — if a fix touches `.github/workflows/release.yml`,

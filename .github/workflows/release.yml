@@ -33,13 +33,25 @@ jobs:
       - run: npm run build
       - run: npm test
 
-      - name: Fail if catalog snapshot is stale
+      - name: Refresh catalog snapshot, fix the tag if stale
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           npm run refresh:snapshot
-          if ! git diff --exit-code -- src/catalog/snapshot.ts; then
-            echo "::error::catalog snapshot is stale. Run 'npm run refresh:snapshot' locally, commit the change, and re-tag."
-            exit 1
+          if git diff --exit-code -- src/catalog/snapshot.ts; then
+            echo "snapshot is fresh"
+            exit 0
           fi
+          echo "::warning::catalog snapshot is stale; refreshing, committing, and moving the tag"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add src/catalog/snapshot.ts
+          git commit -m "chore(snapshot): refresh catalog snapshot"
+          git push origin main
+          git tag -f "${GITHUB_REF_NAME}"
+          git push origin "${GITHUB_REF_NAME}" --force
+          echo "::error::snapshot refreshed and ${GITHUB_REF_NAME} moved; the re-triggered release run will publish"
+          exit 1
 
       - name: Extract changelog entry
         id: notes
