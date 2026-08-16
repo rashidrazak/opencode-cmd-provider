@@ -1,13 +1,12 @@
 ## Agent skills
 
-### Map execution loop
+### Releases
 
-When the user asks to execute the implementation map (#15) — "run the map",
-"execute the tickets", "work the queue" — the `run-map` project skill
-(`.pi/skills/run-map/`) is the trigger; it drives
-`scripts/run-wayfinder-loop.sh` (sequential: frontier query via native issue
-dependencies, claim, one fresh agent session per ticket, verify, close) in a
-hands-free overlay the user can watch, background (`Ctrl+B`), and re-attach.
+When the user asks to cut a release — "release", "bump to X", "tag vX.Y.Z" —
+the `release` project skill (`.pi/skills/release/`) is the trigger: version
+bump + CHANGELOG entry + snapshot refresh + tag, then the pipeline
+(`.github/workflows/release.yml`, ADR 0002) publishes to npm and creates the
+GitHub Release.
 
 ### Issue tracker
 
