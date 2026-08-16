@@ -58,18 +58,12 @@ jobs:
           fi
 
       - name: Publish to npm
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
+          npm install -g npm@latest
           version="$(node -p "require('./package.json').version")"
           publish_args=""
           if [[ "$version" == *-* ]]; then
             publish_args="--tag beta"
-          fi
-          if curl -fsSI "https://api.github.com/repos/${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
-            publish_args="${publish_args} --provenance"
-          else
-            echo "::warning::repo is private; --provenance requires a public repository, skipping it"
           fi
           npm publish ${publish_args}
 
