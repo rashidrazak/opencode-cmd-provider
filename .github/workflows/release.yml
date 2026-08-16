@@ -30,8 +30,8 @@ jobs:
           fi
           echo "version=${version}" >> "$GITHUB_OUTPUT"
 
-      - run: npm test
       - run: npm run build
+      - run: npm test
 
       - name: Fail if catalog snapshot is stale
         run: |
