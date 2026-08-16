@@ -23,7 +23,7 @@ Single-context: one `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agent
 ### Spec and plan
 
 Specs and plans live in GitHub Issues. Domain vocabulary lives in `CONTEXT.md`;
-architectural decisions (including verified opencode loader behavior) live in
+architectural decisions (including verified OpenCode loader behavior) live in
 `docs/adr/`. When working on any issue, read the issue, `CONTEXT.md`, and any
 ADRs touching the area first. If a ticket and an ADR disagree, note the
 discrepancy in the ticket.

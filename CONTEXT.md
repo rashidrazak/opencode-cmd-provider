@@ -1,6 +1,6 @@
 # opencode-cmd-provider
 
-Plugin + provider package that lets opencode use Command Code as a model provider.
+Plugin + provider package that lets OpenCode use Command Code as a model provider.
 
 ## Language
 
@@ -13,7 +13,7 @@ A copy of the model catalog bundled inside the plugin package; the runtime sourc
 _Avoid_: embedded catalog, static catalog, shipped list
 
 **Auto-registration**:
-The plugin making the `commandcode` provider and its models available to opencode without the user declaring them in `opencode.json`.
+The plugin making the `commandcode` provider and its models available to OpenCode without the user declaring them in `opencode.json`.
 _Avoid_: config injection, zero-config, self-registration
 
 **Declared models**:
@@ -29,5 +29,5 @@ A versioned publication of the package: a git tag `vX.Y.Z` matching the `package
 _Avoid_: publish, deploy, ship (when meaning the whole publication)
 
 **Display name**:
-The name shown for a model in opencode's picker: the raw catalog name with the `[CMD]` prefix (`[CMD] Claude Sonnet 5`).
+The name shown for a model in OpenCode's picker: the raw catalog name with the `[CMD]` prefix (`[CMD] Claude Sonnet 5`).
 _Avoid_: label, model name, pretty name
