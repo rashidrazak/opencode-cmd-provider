@@ -3,13 +3,13 @@
 [![CI](https://github.com/rashidrazak/opencode-cmd-provider/actions/workflows/ci.yml/badge.svg)](https://github.com/rashidrazak/opencode-cmd-provider/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/opencode-cmd-provider)](https://www.npmjs.com/package/opencode-cmd-provider)
 
-A provider and plugin for [opencode](https://opencode.ai) that connects to the [Command Code](https://commandcode.ai) Provider API. This enables you to use ALL Command Code plans — Go, GOAT, Pro, Max 10×, Max 20×, Provider, Team, and Enterprise — with opencode.
+A provider and plugin for [OpenCode](https://opencode.ai) that connects to the [Command Code](https://commandcode.ai) Provider API. This enables you to use ALL Command Code plans — Go, GOAT, Pro, Max 10×, Max 20×, Provider, Team, and Enterprise — with OpenCode.
 
 > **Disclaimer:** This is an unofficial, community-maintained integration. It is not affiliated with, endorsed by, or supported by Command Code. You need your own Command Code account and API key or subscription. Command Code's terms, availability, and pricing apply.
 
 ## Install
 
-Add the package to your opencode configuration:
+Add the package to your OpenCode configuration:
 
 ```jsonc
 // opencode.json
@@ -21,7 +21,7 @@ Add the package to your opencode configuration:
 
 That's it. The plugin bundles a snapshot of the Command Code model catalog and
 auto-registers the `commandcode` provider — npm package, name, API key env var,
-and every model — when opencode loads. No `provider.commandcode` block, no
+and every model — when OpenCode loads. No `provider.commandcode` block, no
 `models` map, no network access needed. All Command Code models appear in
 `/models` with the `[CMD]` display-name prefix (e.g. `[CMD] Claude Sonnet 5`) so
 they aren't confused with same-named models from other providers.
@@ -40,7 +40,7 @@ missing:
 The catalog snapshot is refreshed at every release; newly published Command
 Code models appear after a plugin update.
 
-Start or reload opencode, then authenticate:
+Start or reload OpenCode, then authenticate:
 
 ```txt
 /connect
@@ -52,7 +52,7 @@ Select **Command Code**, complete the browser flow, and pick a model with `/mode
 
 ### Browser login
 
-Run `/connect` in opencode and select **Command Code**. The browser flow stores the returned credential in opencode's auth store.
+Run `/connect` in OpenCode and select **Command Code**. The browser flow stores the returned credential in OpenCode's auth store.
 
 If automatic transfer from the browser fails, copy the API key shown by Command Code and export it as `COMMANDCODE_API_KEY` (see below).
 
@@ -104,11 +104,11 @@ opencode run --model commandcode/claude-sonnet-5 "hello"
 ## Model discovery and offline behavior
 
 The plugin ships a snapshot of the Command Code model catalog (`src/catalog/snapshot.ts`)
-and auto-registers every model into opencode's config at startup. Model
+and auto-registers every model into OpenCode's config at startup. Model
 availability changes when the package is updated: the snapshot is regenerated
 from the live catalog at every release via `npm run refresh:snapshot`.
 
-Auto-registration adds no network latency to opencode startup — the snapshot is
+Auto-registration adds no network latency to OpenCode startup — the snapshot is
 bundled, and the plugin never contacts the Command Code API to list models. The
 plugin works fully offline; model availability never depends on the catalog
 endpoint being reachable.
@@ -134,13 +134,13 @@ For vision-capable models, image blocks from user messages and tool results are 
 
 ## Pricing display
 
-The Command Code Provider API does not currently include prices in its model catalog. This provider keeps a static table for models with known prices so opencode can display estimated request costs.
+The Command Code Provider API does not currently include prices in its model catalog. This provider keeps a static table for models with known prices so OpenCode can display estimated request costs.
 
-Models missing from that table display zero cost in opencode. This does **not** mean Command Code will bill the request at zero. Check the current [Command Code pricing](https://commandcode.ai/docs/resources/pricing-limits) before relying on the displayed value.
+Models missing from that table display zero cost in OpenCode. This does **not** mean Command Code will bill the request at zero. Check the current [Command Code pricing](https://commandcode.ai/docs/resources/pricing-limits) before relying on the displayed value.
 
 ## Update and remove
 
-Update the installed package, or remove it from the `plugin` array in your `opencode.json` (the auto-registered `provider.commandcode` entry is injected by the plugin, so there is no config block to remove). The npm package is cached under opencode's plugin cache (`~/.cache/opencode/packages/`); remove the cached directory to fully uninstall.
+Update the installed package, or remove it from the `plugin` array in your `opencode.json` (the auto-registered `provider.commandcode` entry is injected by the plugin, so there is no config block to remove). The npm package is cached under OpenCode's plugin cache (`~/.cache/opencode/packages/`); remove the cached directory to fully uninstall.
 
 ## Development
 
@@ -153,7 +153,7 @@ npm test
 npm run format:check
 ```
 
-The headless end-to-end test runs the real opencode CLI against a mock Command Code server through the built package:
+The headless end-to-end test runs the real OpenCode CLI against a mock Command Code server through the built package:
 
 ```sh
 npm run build && npm run test:e2e

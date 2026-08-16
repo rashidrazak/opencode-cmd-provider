@@ -2,23 +2,23 @@
 
 Status: accepted
 
-opencode only fires a plugin's `provider.models` hook for providers present in its
+OpenCode only fires a plugin's `provider.models` hook for providers present in its
 models.dev catalog, and `commandcode` is not in that catalog — so users had to declare
 every model by hand in `opencode.json`, which was the plugin's biggest UX wart. We decided
 to bundle a snapshot of the Command Code model catalog in the package and have the plugin
-inject the whole `provider.commandcode` entry (npm, name, models) into opencode's config
-during the `config` hook, which opencode runs before it parses `config.provider`
-(verified against opencode 1.18.18 source). Users no longer declare anything.
+inject the whole `provider.commandcode` entry (npm, name, models) into OpenCode's config
+during the `config` hook, which OpenCode runs before it parses `config.provider`
+(verified against OpenCode 1.18.18 source). Users no longer declare anything.
 
 ## Considered Options
 
-- **Live catalog fetch on plugin load (pi's approach)** — would delay every opencode
+- **Live catalog fetch on plugin load (pi's approach)** — would delay every OpenCode
   startup, needs a cache, and fails cold. Rejected for simplicity; git history keeps the
   fetch/cache code if live refresh ever returns.
 - **models.dev PR** — would make the `provider.models` hook fire natively, but the
   catalog is not in our control and acceptance is unbounded. Revisit later if it ever
   lands; no code needed then.
-- **opencode v2 catalog-transform API** — can create providers from scratch, but is wired
+- **OpenCode v2 catalog-transform API** — can create providers from scratch, but is wired
   to the new app, not the CLI provider path in 1.18.18. Not usable today.
 
 ## Consequences
@@ -35,5 +35,5 @@ during the `config` hook, which opencode runs before it parses `config.provider`
   marks the provider connected in `/models`.
 - With no opt-out, users control picker clutter via `whitelist`/`blacklist` on a declared
   `provider.commandcode` entry.
-- First-run default model is deterministically `commandcode/gpt-5.6-terra` (opencode's
+- First-run default model is deterministically `commandcode/gpt-5.6-terra` (OpenCode's
   hardcoded priority list + id-desc sort); no provider-scoped default mechanism exists.

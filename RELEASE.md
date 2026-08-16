@@ -5,7 +5,7 @@ This project uses npm semver releases.
 Recommended flow:
 
 - publish prereleases with the `next` dist-tag
-- smoke-test the npm package directly in opencode
+- smoke-test the npm package directly in OpenCode
 - publish stable releases with the `latest` dist-tag
 - commit the release on a branch, open a PR, and merge after CI passes
 - tag the stable release on `main` after merge
@@ -41,13 +41,13 @@ Expected:
 - `next` points to the prerelease version
 - `latest` still points to the previous stable version
 
-## Test the npm package in opencode
+## Test the npm package in OpenCode
 
 Always test from npm, not the local checkout.
 
 ### 1. Model discovery smoke test
 
-Build a fixture config that points opencode at the published package and the mock endpoints, then verify the model is discovered:
+Build a fixture config that points OpenCode at the published package and the mock endpoints, then verify the model is discovered:
 
 ```sh
 npm run build
@@ -56,9 +56,9 @@ npm run test:e2e
 
 The e2e writes a throwaway `opencode.json` via `scripts/opencode-fixture.mjs` (plugin only — no declared provider or models) and runs `opencode models` against the built package. Expected: `ok - plugin auto-registers commandcode/claude-sonnet-5 with no declared config`.
 
-### 2. Manual `/connect` + run test with isolated opencode config
+### 2. Manual `/connect` + run test with isolated OpenCode config
 
-Use temporary opencode config and data directories so the test does not touch your real opencode auth:
+Use temporary OpenCode config and data directories so the test does not touch your real OpenCode auth:
 
 ```sh
 export HOME="$(mktemp -d)"
@@ -98,7 +98,7 @@ Expected:
 manual-npm-ok
 ```
 
-### 4. Cleanup isolated opencode config
+### 4. Cleanup isolated OpenCode config
 
 Only run this if these variables were created by the test above:
 
