@@ -24,6 +24,10 @@ _Avoid_: user models, custom models, overrides
 Updating the snapshot to match the live model catalog; happens on plugin release, never at runtime.
 _Avoid_: model sync, catalog update, live refresh
 
+**Release**:
+A versioned publication of the package: a git tag `vX.Y.Z` matching the `package.json` version, a GitHub Release, and an npm publish. The catalog snapshot is regenerated before every release — a release never ships a stale snapshot.
+_Avoid_: publish, deploy, ship (when meaning the whole publication)
+
 **Display name**:
 The name shown for a model in opencode's picker: the raw catalog name with the `[CMD]` prefix (`[CMD] Claude Sonnet 5`).
 _Avoid_: label, model name, pretty name
