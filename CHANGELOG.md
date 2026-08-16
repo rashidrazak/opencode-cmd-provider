@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.0 - 2026-08-16
+
+First stable release: API and behavior locked in, shipping now runs through a tag-driven pipeline.
+
+- Tag-driven release pipeline: pushing `vX.Y.Z` asserts the tag matches `package.json`, refreshes the bundled model-catalog snapshot (committing it and re-triggering itself if stale), builds, runs the full test suite, publishes to npm via OIDC trusted publishing with provenance, and creates the GitHub Release from the CHANGELOG section (ADR 0002).
+- Added the `release` skill documenting the pre-tag ritual and post-push verification; removed the run-map skill and the wayfinder-loop script.
+- Docs: spell the product name as OpenCode everywhere, list Command Code plans, credit pi-commandcode-provider, and note provenance requires a public repository.
+- The e2e test now uses the inherited PATH instead of a hardcoded home directory.
+
 ## 0.1.3 - 2026-08-16
 
 Feature: zero-config install via auto-registration from a bundled model snapshot.
