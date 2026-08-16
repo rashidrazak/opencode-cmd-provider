@@ -1,1 +1,1 @@
-../../.pi/skills/release/SKILL.md
+../../../.pi/skills/release/SKILL.md
