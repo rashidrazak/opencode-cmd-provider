@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.1 - 2026-08-16
+
+Chore: harden the release flow so a tag push can no longer publish from an unmerged tree or rewrite tags.
+
+- The release pipeline now refuses to run unless the tag's commit is an ancestor of `origin/main` — a tag pushed before the version bump lands on main fails with an explicit error instead of publishing (ADR 0003).
+- A stale catalog snapshot now fails the run with remediation instructions instead of committing on the tag's tree, force-pushing main, and re-pointing the tag.
+- The release skill ritual was updated: the bump and CHANGELOG entry land on main via PR before tagging; the tag push is all that triggers the pipeline.
+
 ## 1.0.0 - 2026-08-16
 
 First stable release: API and behavior locked in, shipping now runs through a tag-driven pipeline.
