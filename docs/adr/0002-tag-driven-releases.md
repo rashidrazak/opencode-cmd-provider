@@ -6,4 +6,4 @@ Releases are cut by pushing a `vX.Y.Z` tag: a GitHub Actions workflow asserts th
 
 `package.json` stays the single source of truth for the version, and a human stays in control of what ships: version bump, CHANGELOG entry, and snapshot refresh happen before tagging. We rejected automated versioning (semantic-release, changesets, workflow_dispatch bumping) — machinery with no benefit at this project's one-maintainer scale. The snapshot-freshness guard exists because a stale model catalog is the one failure mode that tests and builds cannot catch: the code would be perfect while the shipped snapshot silently lags the live catalog.
 
-Consequences: releasing requires the pre-tag steps to be done by hand; the workflow refuses stale snapshots rather than publishing them.
+Consequences: releasing requires the pre-tag steps to be done by hand; the workflow refuses stale snapshots rather than publishing them. Provenance requires a public source repository — the first trusted-publishing release (0.1.3, published while the repo was still private) shipped without an attestation; later releases carry one automatically.
