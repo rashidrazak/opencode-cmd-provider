@@ -25,7 +25,7 @@ import { join } from "node:path"
 // leak into the test.
 const isoHome = mkdtempSync(join(tmpdir(), "oc-e2e-home-"))
 const isoEnv = {
-  PATH: "/usr/bin:/bin",
+  PATH: process.env.PATH ?? "/usr/bin:/bin",
   HOME: isoHome,
   OPENCODE_DISABLE_AUTOUPDATE: "1",
   XDG_CACHE_HOME: join(isoHome, ".cache"),
