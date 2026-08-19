@@ -1,9 +1,10 @@
 // tests/parse-facts.test.ts — models.md facts parser (facts auto-sync design)
 import { readFile } from "node:fs/promises"
+import { join } from "node:path"
 import { parseFactsMarkdown } from "../scripts/parse-facts.mjs"
-import { assert, assertEqual, run, throws } from "./harness.js"
+import { assertEqual, run, throws } from "./harness.js"
 
-const FIXTURE = "tests/fixtures/models.md"
+const FIXTURE = join(import.meta.dirname, "fixtures", "models.md")
 
 run([
   [
@@ -61,6 +62,22 @@ run([
     "unparseable pricing rows fail loudly",
     () => {
       const md = "| `x/y` | X Y | 1M | low | $nope/$1 · cache $0.2 | Go | best |\n"
+      throws(() => parseFactsMarkdown(md), /could not parse price for x\/y/)
+    },
+  ],
+
+  [
+    "table rows missing a backticked id fail loudly",
+    () => {
+      const md = "| x/y | X Y | 1M | low | $1/$1 · cache $0.1 | Go | best |\n"
+      throws(() => parseFactsMarkdown(md), /could not parse row: \| x\/y \|/)
+    },
+  ],
+
+  [
+    "non-finite parsed prices fail loudly",
+    () => {
+      const md = "| `x/y` | X Y | 1M | low | $1..2/$3 · cache $0.1 | Go | best |\n"
       throws(() => parseFactsMarkdown(md), /could not parse price for x\/y/)
     },
   ],
