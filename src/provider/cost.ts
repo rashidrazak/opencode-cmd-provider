@@ -1,5 +1,5 @@
 // src/provider/cost.ts — local cost calculation for Command Code usage
-// (PLAN #6, port of pi's cost.ts; tier logic and longWrite arithmetic verbatim)
+// (PLAN #6, port of pi's cost.ts; longWrite arithmetic verbatim)
 import type { CommandCodeModelCost } from "./pricing.js"
 
 export interface CostUsage {
@@ -16,15 +16,7 @@ export interface CostModel {
 }
 
 export function calculateCommandCodeCost(model: CostModel, usage: CostUsage): void {
-  const inputTokens = usage.input + usage.cacheRead + usage.cacheWrite
-  let rates = model.cost
-  let matchedThreshold = -1
-  for (const tier of model.cost.tiers ?? []) {
-    if (inputTokens > tier.inputTokensAbove && tier.inputTokensAbove > matchedThreshold) {
-      rates = tier
-      matchedThreshold = tier.inputTokensAbove
-    }
-  }
+  const rates = model.cost
 
   const longWrite = usage.cacheWrite1h ?? 0
   const shortWrite = usage.cacheWrite - longWrite

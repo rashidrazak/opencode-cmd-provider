@@ -30,10 +30,12 @@ pre-tag ritual and post-push verification.
 5. **Tag**: `git tag vX.Y.Z && git push origin vX.Y.Z` — the tag push triggers
    `release.yml`. Push the tag only; main is already up to date.
 
-The catalog snapshot is **not** your job: the pipeline refreshes it and fails
-loudly if the live catalog drifted (see ADR 0003). Running
-`npm run refresh:snapshot` locally beforehand is optional — do it if you want
-the diff visible before tagging.
+The catalog snapshot and capability facts are **not** your job: the pipeline
+refreshes both and fails loudly if the live catalog drifted (see ADR 0003).
+The gate ignores the date-stamp-only `FACTS_LAST_REFRESHED` line
+(`-I 'FACTS_LAST_REFRESHED'`), so a same-day tag passes as long as the data is
+fresh. Running `npm run refresh:snapshot` locally beforehand is optional — do
+it if you want the diff visible before tagging.
 
 ## What the pipeline does (no action needed)
 
@@ -57,8 +59,8 @@ the repository to be public.
 ## Failure recovery
 
 - **A stale snapshot fails the run** — nothing shipped. Refresh locally
-  (`npm run refresh:snapshot`), commit `src/catalog/snapshot.ts`, land it on
-  main via PR, then re-tag.
+  (`npm run refresh:snapshot`), commit `src/catalog/snapshot.ts` and
+  `src/catalog/facts.ts`, land them on main via PR, then re-tag.
 - **Publish fails** — nothing shipped (npm rejects before writing) → fix, then
   `gh run rerun <run-id>`.
 - **Workflow file changes** — if a fix touches `.github/workflows/release.yml`,

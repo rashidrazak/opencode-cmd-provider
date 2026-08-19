@@ -13,6 +13,11 @@ const OPTIONS = {
 const SNAPSHOT: readonly CatalogModel[] = [
   { id: "claude-sonnet-5", name: "Claude Sonnet 5", contextLength: 200000 },
   { id: "deepseek/deepseek-v4-flash", name: "DeepSeek V4 Flash (latest)", contextLength: 1000000 },
+  {
+    id: "meta/muse-spark-1.2-contributor",
+    name: "Muse Spark 1.2 Contributor",
+    contextLength: 1048576,
+  },
   { id: "unknown/foo", name: "Foo", contextLength: 16000 },
 ]
 
@@ -29,7 +34,7 @@ run([
       assertEqual(entry.name, "Command Code")
       assertEqual(entry.env, ["COMMANDCODE_API_KEY"])
       assertEqual(entry.options, { baseURL: "https://api.commandcode.ai" })
-      assertEqual(Object.keys(entry.models ?? {}).length, 3)
+      assertEqual(Object.keys(entry.models ?? {}).length, 4)
 
       const sonnet = entry.models["claude-sonnet-5"]
       assertEqual(sonnet.name, "[CMD] Claude Sonnet 5")
@@ -45,6 +50,15 @@ run([
       assertEqual(flash.limit, { context: 1000000, output: 65536 })
       assertEqual(flash.reasoning, true)
       assertEqual(Object.keys(flash.variants ?? {}), ["high", "max"])
+
+      const muse = entry.models["meta/muse-spark-1.2-contributor"]
+      assertEqual(muse.name, "[CMD] Muse Spark 1.2 Contributor")
+      assertEqual(muse.limit, { context: 1048576, output: 65536 })
+      assertEqual(muse.reasoning, true)
+      assertEqual(muse.variants, undefined)
+      assertEqual(muse.modalities, { input: ["text", "image"] })
+      assertEqual(muse.cost, { input: 0.1, output: 0.2, cache_read: 0.002, cache_write: 0 })
+      assertEqual(muse.status, "active")
 
       const unknown = entry.models["unknown/foo"]
       assertEqual(unknown.name, "[CMD] Foo")
@@ -151,6 +165,18 @@ run([
   ],
 
   [
+    "auto-registered models advertise tool call support",
+    () => {
+      const config = {}
+      autoRegister(config, SNAPSHOT, OPTIONS)
+      const entry = config.provider.commandcode
+      for (const [id, model] of Object.entries(entry.models ?? {})) {
+        assertEqual(model.tool_call, true, `${id} must set tool_call`)
+      }
+    },
+  ],
+
+  [
     "config hook augments config-declared commandcode models with variants",
     () => {
       const config = {
@@ -184,6 +210,92 @@ run([
       }
       assertEqual(unknown.reasoning, undefined)
       assertEqual(unknown.variants, undefined)
+    },
+  ],
+
+  [
+    "config hook fills reasoning metadata only where the user left it unset",
+    () => {
+      const config = {
+        provider: {
+          commandcode: {
+            name: "Command Code",
+            models: {
+              "deepseek/deepseek-v4-flash": {
+                name: "DeepSeek V4 Flash",
+                limit: { context: 1000000, output: 384000 },
+                reasoning: false,
+              },
+              "meta/muse-spark-1.2-contributor": {
+                name: "Muse Spark 1.2 Contributor",
+                limit: { context: 1048576, output: 65536 },
+                reasoning: false,
+              },
+              "moonshotai/Kimi-K2.6": {
+                name: "Kimi K2.6",
+                limit: { context: 256000, output: 65536 },
+              },
+            },
+          },
+        },
+      } as const
+      augmentConfigCommandCodeModels(config as never)
+      const flash = config.provider.commandcode.models["deepseek/deepseek-v4-flash"] as {
+        reasoning?: boolean
+        variants?: Record<string, { reasoningEffort: string }>
+      }
+      assertEqual(flash.reasoning, false, "declared reasoning: false must survive augmentation")
+      assertEqual(
+        flash.variants,
+        undefined,
+        "variants must not be injected when reasoning is disabled",
+      )
+      const muse = config.provider.commandcode.models["meta/muse-spark-1.2-contributor"] as {
+        reasoning?: boolean
+        variants?: Record<string, { reasoningEffort: string }>
+      }
+      assertEqual(muse.reasoning, false, "declared reasoning: false must survive augmentation")
+      assertEqual(muse.variants, undefined)
+      const kimi = config.provider.commandcode.models["moonshotai/Kimi-K2.6"] as {
+        reasoning?: boolean
+      }
+      assertEqual(kimi.reasoning, undefined)
+    },
+  ],
+
+  [
+    "config hook marks reasoning-capable models without variants as reasoning",
+    () => {
+      const config = {
+        provider: {
+          commandcode: {
+            name: "Command Code",
+            models: {
+              "meta/muse-spark-1.2-contributor": {
+                name: "Muse Spark 1.2 Contributor",
+                limit: { context: 1048576, output: 65536 },
+              },
+              "moonshotai/Kimi-K2.6": {
+                name: "Kimi K2.6",
+                limit: { context: 256000, output: 65536 },
+              },
+            },
+          },
+        },
+      } as const
+      augmentConfigCommandCodeModels(config as never)
+      const muse = config.provider.commandcode.models["meta/muse-spark-1.2-contributor"] as {
+        reasoning?: boolean
+        variants?: Record<string, { reasoningEffort: string }>
+      }
+      assertEqual(muse.reasoning, true)
+      assertEqual(muse.variants, undefined)
+      const kimi = config.provider.commandcode.models["moonshotai/Kimi-K2.6"] as {
+        reasoning?: boolean
+        variants?: Record<string, { reasoningEffort: string }>
+      }
+      assertEqual(kimi.reasoning, undefined)
+      assertEqual(kimi.variants, undefined)
     },
   ],
 ])

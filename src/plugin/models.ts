@@ -2,7 +2,7 @@
 import type { Config, ProviderConfig } from "@opencode-ai/sdk/v2"
 import type { CatalogModel } from "../catalog/snapshot.js"
 import { MODEL_COSTS, ZERO_MODEL_COST, type CommandCodeModelCost } from "../provider/pricing.js"
-import { reasoningVariantsForModel } from "../provider/reasoning.js"
+import { reasoningVariantsForModel, isReasoningModel } from "../provider/reasoning.js"
 import { inputModalitiesForModel } from "../provider/modalities.js"
 
 const DEFAULT_MAX_OUTPUT_TOKENS = 65_536
@@ -69,6 +69,11 @@ export function autoRegister(
  * Augments config-declared commandcode models with reasoning metadata and
  * variants so opencode's `ctrl+t` can cycle reasoning effort.
  *
+ * Gap-fill only: a user-declared `reasoning` value is never overwritten, and
+ * no variants are injected when the user explicitly disabled reasoning
+ * (variants without `reasoning: true` would make `ctrl+t` cycle an effort the
+ * model was told not to use).
+ *
  * In-place mutation of the config object (the plugin `config` hook contract).
  */
 export function augmentConfigCommandCodeModels(config: Config): void {
@@ -76,9 +81,10 @@ export function augmentConfigCommandCodeModels(config: Config): void {
   if (!provider?.models) return
   for (const [modelId, model] of Object.entries(provider.models)) {
     if (!model) continue
+    if (model.reasoning === undefined && isReasoningModel(modelId)) model.reasoning = true
+    if (model.reasoning === false) continue
     const variants = reasoningVariantsForModel(modelId)
     if (variants) {
-      model.reasoning = true
       model.variants = variants as ConfigVariants
     }
   }
@@ -99,8 +105,14 @@ function configModelFor(model: CatalogModel): ConfigModel {
       context: model.contextLength,
       output: Math.min(model.contextLength, DEFAULT_MAX_OUTPUT_TOKENS),
     },
-    reasoning: variants ? true : undefined,
+    reasoning: isReasoningModel(model.id) ? true : undefined,
     variants: variants as ConfigVariants | undefined,
+    // `tool_call: true` advertises tool use (the runtime already sends tools).
+    // `attachment` is deliberately unset: Command Code's published catalog
+    // exposes no per-model attachment support, and the runtime converter only
+    // handles text + image content parts — claiming attachment support would
+    // promise file uploads the plugin cannot deliver.
+    tool_call: true,
     modalities: {
       input: [...inputModalitiesForModel(model.id)],
     },

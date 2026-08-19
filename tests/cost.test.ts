@@ -27,14 +27,7 @@ run([
     () => {
       const u = usage(1_000_000, 500_000, 0, 0)
       calculateCommandCodeCost(
-        {
-          cost: MODEL_COSTS["deepseek/deepseek-v4-flash"] ?? {
-            input: 0.14,
-            output: 0.28,
-            cacheRead: 0,
-            cacheWrite: 0,
-          },
-        },
+        { cost: { input: 0.14, output: 0.28, cacheRead: 0, cacheWrite: 0 } },
         u,
       )
       assertEqual(u.cost.input, 0.14)
@@ -50,24 +43,6 @@ run([
       const u = usage(100_000, 0, 100_000, 0)
       calculateCommandCodeCost({ cost: rates }, u)
       assertEqual(u.cost.cacheRead, 0.01)
-    },
-  ],
-
-  [
-    "tiers select the highest threshold exceeded",
-    () => {
-      const rates = {
-        input: 1,
-        output: 2,
-        cacheRead: 0.1,
-        cacheWrite: 0,
-        tiers: [
-          { input: 0.5, output: 1, cacheRead: 0.05, cacheWrite: 0, inputTokensAbove: 200_000 },
-        ],
-      }
-      const u = usage(300_000, 0, 0, 0)
-      calculateCommandCodeCost({ cost: rates }, u)
-      assertEqual(u.cost.input, 0.15)
     },
   ],
 

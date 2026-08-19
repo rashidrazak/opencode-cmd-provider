@@ -1,43 +1,51 @@
 // src/provider/reasoning.ts — reasoning-effort metadata tables (PLAN #5 Part A,
-// port of pi's models.ts:67-150; catalog parsing deferred to #6/#7)
+// port of pi's models.ts:67-150). Reasoning metadata now comes from the
+// generated catalog facts (`src/catalog/facts.ts`), with hand-maintained
+// classification sets (`REASONING_MODELS`) layered on top.
+
+import { MODEL_EFFORTS as GENERATED_MODEL_EFFORTS } from "../catalog/facts.js"
+
+/**
+ * Models omitted here let Command Code choose their reasoning depth.
+ */
+// facts.ts types MODEL_EFFORTS values as `readonly string[]`, wider than the
+// local `CommandCodeReasoningEffort` union ("minimal" | "low" | ... | "max"),
+// so a literal `export { MODEL_EFFORTS }` fails typecheck where
+// `ThinkingMetadata` uses the union. The cast assumes every effort string the
+// generated catalog emits is a valid `PiThinkingLevel` (the models.md Efforts
+// column is constrained to those levels; the release gate catches drift). Do
+// NOT "simplify" this back to a direct re-export — it breaks the build.
+export const MODEL_EFFORTS: Readonly<Record<string, readonly CommandCodeReasoningEffort[]>> =
+  GENERATED_MODEL_EFFORTS as Readonly<Record<string, readonly CommandCodeReasoningEffort[]>>
 
 export type PiThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
 type CommandCodeReasoningEffort = Exclude<PiThinkingLevel, "off">
 
 /**
- * Per-model reasoning efforts supported by Command Code's generate endpoint.
- *
- * The Provider API does not expose reasoning metadata. This is an exact
- * snapshot of `reasoningEfforts` from the command-code@1.15.1 model catalog
- * (`packages/shared/src/model-catalog.ts`, also published in the generated
- * `dist/bundled/command-code-knowledge/reference/models.md`). Models omitted
- * here let Command Code choose their reasoning depth, matching the CLI.
+ * Models Command Code advertises as reasoning-capable without exposing
+ * explicit effort levels (Command Code chooses the reasoning depth). These
+ * advertise `reasoning: true` in opencode but never generate `variants`.
  */
-export const MODEL_EFFORTS: Readonly<Record<string, readonly CommandCodeReasoningEffort[]>> = {
-  "Qwen/Qwen3.8-Max": ["low", "medium", "xhigh"],
-  "claude-fable-5": ["low", "medium", "high", "xhigh", "max"],
-  "claude-opus-4-7": ["low", "medium", "high", "xhigh", "max"],
-  "claude-opus-4-8": ["low", "medium", "high", "xhigh", "max"],
-  "claude-opus-5": ["low", "medium", "high", "xhigh", "max"],
-  "claude-sonnet-4-6": ["low", "medium", "high", "xhigh", "max"],
-  "claude-sonnet-5": ["low", "medium", "high", "xhigh", "max"],
-  "deepseek/deepseek-v4-flash": ["high", "max"],
-  "deepseek/deepseek-v4-pro": ["high", "max"],
-  "gpt-5.3-codex": ["low", "medium", "high", "xhigh"],
-  "gpt-5.4": ["low", "medium", "high", "xhigh"],
-  "gpt-5.4-mini": ["low", "medium", "high"],
-  "gpt-5.5": ["low", "medium", "high", "xhigh"],
-  "gpt-5.6-luna": ["low", "medium", "high", "xhigh", "max"],
-  "gpt-5.6-sol": ["low", "medium", "high", "xhigh", "max"],
-  "gpt-5.6-terra": ["low", "medium", "high", "xhigh", "max"],
-  "google/gemini-3.1-flash-lite": ["low", "medium", "high"],
-  "google/gemini-3.5-flash": ["low", "medium", "high"],
-  "google/gemini-3.5-flash-lite": ["low", "medium", "high"],
-  "google/gemini-3.6-flash": ["low", "medium", "high"],
-  "sakana/fugu-ultra": ["high", "xhigh"],
-  "xai/grok-4.5": ["low", "medium", "high"],
-  "zai-org/GLM-5.2": ["high", "max"],
-}
+export const REASONING_MODELS: ReadonlySet<string> = new Set([
+  "MiniMaxAI/MiniMax-M3",
+  "Qwen/Qwen3.6-Max-Preview",
+  "Qwen/Qwen3.6-Plus",
+  "Qwen/Qwen3.7-Flash",
+  "Qwen/Qwen3.7-Max",
+  "Qwen/Qwen3.7-Plus",
+  "meta/muse-spark-1.1",
+  "meta/muse-spark-1.2",
+  "meta/muse-spark-1.2-contributor",
+  "moonshotai/Kimi-K2.7-Code",
+  "moonshotai/Kimi-K2.7-Code-Highspeed",
+  "moonshotai/Kimi-K3",
+  "nvidia/nemotron-3-ultra-550b-a55b",
+  "poolside/laguna-s-2.1-free",
+  "stepfun/Step-3.7-Flash",
+  "tencent/hy3-paid",
+  "thinkingmachines/inkling",
+  "thinkingmachines/inkling-small",
+])
 
 const PI_THINKING_LEVELS: readonly PiThinkingLevel[] = [
   "off",
@@ -77,7 +85,7 @@ export function thinkingMetadataForModel(modelId: string): ThinkingMetadata | un
 }
 
 export function isReasoningModel(modelId: string): boolean {
-  return MODEL_EFFORTS[modelId] !== undefined
+  return MODEL_EFFORTS[modelId] !== undefined || REASONING_MODELS.has(modelId)
 }
 
 /**

@@ -14,6 +14,12 @@ export interface MockCcOptions {
   errorBody?: string
   /** called with the parsed /alpha/generate request body and headers */
   onGenerate?: (body: Record<string, unknown>, headers: Record<string, string>) => void
+  /** served at GET /registry (npm registry JSON: { "dist-tags": { latest } }) */
+  registry?: unknown
+  /** served at GET /registry as-is (non-JSON body, e.g. to exercise parse failure) */
+  registryRaw?: string
+  /** served at GET /models.md (raw command-code models.md text) */
+  factsMd?: string
 }
 
 export interface MockCcHits {
@@ -59,6 +65,21 @@ export function startMockCc(
           res.write(`data: ${JSON.stringify(evt)}\n\n`)
           index++
         }, 5)
+        return
+      }
+      if (req.url === "/registry" && req.method === "GET") {
+        if (options.registryRaw !== undefined) {
+          res.writeHead(200, { "content-type": "text/plain" })
+          res.end(options.registryRaw)
+          return
+        }
+        res.writeHead(200, { "content-type": "application/json" })
+        res.end(JSON.stringify(options.registry ?? { "dist-tags": { latest: "9.9.9" } }))
+        return
+      }
+      if (req.url === "/models.md" && req.method === "GET") {
+        res.writeHead(200, { "content-type": "text/markdown" })
+        res.end(options.factsMd ?? "")
         return
       }
       res.writeHead(404)
