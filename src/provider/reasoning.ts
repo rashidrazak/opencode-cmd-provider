@@ -34,10 +34,40 @@ export const MODEL_EFFORTS: Readonly<Record<string, readonly CommandCodeReasonin
   "google/gemini-3.5-flash": ["low", "medium", "high"],
   "google/gemini-3.5-flash-lite": ["low", "medium", "high"],
   "google/gemini-3.6-flash": ["low", "medium", "high"],
+  "google/gemini-3.7-flash": ["low", "medium", "high"],
+  "Qwen/Qwen3.8-27B": ["low", "medium", "xhigh"],
   "sakana/fugu-ultra": ["high", "xhigh"],
   "xai/grok-4.5": ["low", "medium", "high"],
+  "xai/grok-4.6": ["low", "medium", "high", "xhigh"],
+  "zai-org/GLM-5.3": ["low", "high", "max"],
   "zai-org/GLM-5.2": ["high", "max"],
 }
+
+/**
+ * Models Command Code advertises as reasoning-capable without exposing
+ * explicit effort levels (Command Code chooses the reasoning depth). These
+ * advertise `reasoning: true` in opencode but never generate `variants`.
+ */
+export const REASONING_MODELS: ReadonlySet<string> = new Set([
+  "MiniMaxAI/MiniMax-M3",
+  "Qwen/Qwen3.6-Max-Preview",
+  "Qwen/Qwen3.6-Plus",
+  "Qwen/Qwen3.7-Flash",
+  "Qwen/Qwen3.7-Max",
+  "Qwen/Qwen3.7-Plus",
+  "meta/muse-spark-1.1",
+  "meta/muse-spark-1.2",
+  "meta/muse-spark-1.2-contributor",
+  "moonshotai/Kimi-K2.7-Code",
+  "moonshotai/Kimi-K2.7-Code-Highspeed",
+  "moonshotai/Kimi-K3",
+  "nvidia/nemotron-3-ultra-550b-a55b",
+  "poolside/laguna-s-2.1-free",
+  "stepfun/Step-3.7-Flash",
+  "tencent/hy3-paid",
+  "thinkingmachines/inkling",
+  "thinkingmachines/inkling-small",
+])
 
 const PI_THINKING_LEVELS: readonly PiThinkingLevel[] = [
   "off",
@@ -77,7 +107,7 @@ export function thinkingMetadataForModel(modelId: string): ThinkingMetadata | un
 }
 
 export function isReasoningModel(modelId: string): boolean {
-  return MODEL_EFFORTS[modelId] !== undefined
+  return MODEL_EFFORTS[modelId] !== undefined || REASONING_MODELS.has(modelId)
 }
 
 /**

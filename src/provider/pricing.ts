@@ -51,6 +51,7 @@ export const MODEL_COSTS: Readonly<Record<string, CommandCodeModelCost>> = {
   },
   "moonshotai/Kimi-K2.6": { input: 0.95, output: 4, cacheRead: 0.16, cacheWrite: 0 },
   "moonshotai/Kimi-K2.5": { input: 0.6, output: 3, cacheRead: 0.1, cacheWrite: 0 },
+  "zai-org/GLM-5.3": { input: 1.4, output: 4.4, cacheRead: 0.26, cacheWrite: 0 },
   "zai-org/GLM-5.2": { input: 1.4, output: 4.4, cacheRead: 0.26, cacheWrite: 0 },
   "zai-org/GLM-5.2-Fast": { input: 3, output: 10.25, cacheRead: 0.5, cacheWrite: 0 },
   "zai-org/GLM-5.1": { input: 1.4, output: 4.4, cacheRead: 0.26, cacheWrite: 0 },
@@ -72,6 +73,7 @@ export const MODEL_COSTS: Readonly<Record<string, CommandCodeModelCost>> = {
     cacheWrite: 0,
   },
   "Qwen/Qwen3.8-Max": { input: 2, output: 6, cacheRead: 0.25, cacheWrite: 2.5 },
+  "Qwen/Qwen3.8-27B": { input: 0.4, output: 3, cacheRead: 0.04, cacheWrite: 0 },
   "Qwen/Qwen3.7-Max": { input: 2.5, output: 7.5, cacheRead: 0.5, cacheWrite: 3.13 },
   "Qwen/Qwen3.7-Plus": {
     input: 0.4,
@@ -137,6 +139,13 @@ export const MODEL_COSTS: Readonly<Record<string, CommandCodeModelCost>> = {
     cacheWrite: 0,
   },
   "meta/muse-spark-1.1": { input: 1.25, output: 4.25, cacheRead: 0.15, cacheWrite: 0 },
+  "meta/muse-spark-1.2": { input: 1.25, output: 4.25, cacheRead: 0.15, cacheWrite: 0 },
+  "meta/muse-spark-1.2-contributor": {
+    input: 0.1,
+    output: 0.2,
+    cacheRead: 0.002,
+    cacheWrite: 0,
+  },
 
   // Anthropic
   // Introductory pricing through 2026-08-31.
@@ -193,6 +202,12 @@ export const MODEL_COSTS: Readonly<Record<string, CommandCodeModelCost>> = {
 
   // Google and xAI
   "google/gemini-3.6-flash": { input: 1.5, output: 7.5, cacheRead: 0.15, cacheWrite: 0 },
+  "google/gemini-3.7-flash": {
+    input: 0.75,
+    output: 3.75,
+    cacheRead: 0.075,
+    cacheWrite: 0.04167,
+  },
   "google/gemini-3.5-flash": { input: 1.5, output: 9, cacheRead: 0.15, cacheWrite: 0 },
   "google/gemini-3.5-flash-lite": {
     input: 0.3,
@@ -207,4 +222,5 @@ export const MODEL_COSTS: Readonly<Record<string, CommandCodeModelCost>> = {
     cacheWrite: 0,
   },
   "xai/grok-4.5": { input: 2, output: 6, cacheRead: 0.5, cacheWrite: 0 },
+  "xai/grok-4.6": { input: 2, output: 6, cacheRead: 0.5, cacheWrite: 0 },
 }

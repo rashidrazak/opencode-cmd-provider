@@ -2,7 +2,7 @@
 import type { Config, ProviderConfig } from "@opencode-ai/sdk/v2"
 import type { CatalogModel } from "../catalog/snapshot.js"
 import { MODEL_COSTS, ZERO_MODEL_COST, type CommandCodeModelCost } from "../provider/pricing.js"
-import { reasoningVariantsForModel } from "../provider/reasoning.js"
+import { reasoningVariantsForModel, isReasoningModel } from "../provider/reasoning.js"
 import { inputModalitiesForModel } from "../provider/modalities.js"
 
 const DEFAULT_MAX_OUTPUT_TOKENS = 65_536
@@ -76,9 +76,9 @@ export function augmentConfigCommandCodeModels(config: Config): void {
   if (!provider?.models) return
   for (const [modelId, model] of Object.entries(provider.models)) {
     if (!model) continue
+    if (isReasoningModel(modelId)) model.reasoning = true
     const variants = reasoningVariantsForModel(modelId)
     if (variants) {
-      model.reasoning = true
       model.variants = variants as ConfigVariants
     }
   }
@@ -99,8 +99,9 @@ function configModelFor(model: CatalogModel): ConfigModel {
       context: model.contextLength,
       output: Math.min(model.contextLength, DEFAULT_MAX_OUTPUT_TOKENS),
     },
-    reasoning: variants ? true : undefined,
+    reasoning: isReasoningModel(model.id) ? true : undefined,
     variants: variants as ConfigVariants | undefined,
+    tool_call: true,
     modalities: {
       input: [...inputModalitiesForModel(model.id)],
     },
