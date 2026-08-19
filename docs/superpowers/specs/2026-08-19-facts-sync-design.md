@@ -143,8 +143,9 @@ are refreshed, forcing the release to carry the metadata.
 - `tests/parse-modalities.test.ts` — AST parsing, field reordering, duplicate
   entries, unsupported values, and malformed bundles.
 - `tests/cost.test.ts` — tier test removed; flat-rate arithmetic unchanged.
-- `tests/catalog-metadata.test.ts` — unchanged (imports via re-export);
-  verifies snapshot coverage against the generated facts.
+- `tests/catalog-metadata.test.ts` — verifies snapshot coverage against the
+  generated facts; the vision assertions now derive from the generated
+  modalities (the hand-maintained fixture was removed with the table).
 - `tests/plugin-models.test.ts` — unchanged.
 
 ## Out of scope
