@@ -121,4 +121,37 @@ run([
       }
     },
   ],
+
+  [
+    "refresh-snapshot fails loudly when the registry body is not JSON",
+    async () => {
+      const dir = await mkdtemp(join(tmpdir(), "cc-registry-parse-"))
+      const out = join(dir, "snapshot.ts")
+      const factsOut = join(dir, "facts.ts")
+      const mock = await startMockCc({
+        models: MODELS_PAYLOAD,
+        registryRaw: "<html>not json</html>",
+        factsMd: FACTS_MD,
+      })
+      try {
+        const result = await runScript(
+          ["scripts/refresh-snapshot.mjs", "--out", out, "--facts-out", factsOut],
+          {
+            ...process.env,
+            COMMANDCODE_API_BASE: mock.url,
+            COMMANDCODE_REGISTRY_URL: `${mock.url}/registry`,
+            COMMANDCODE_FACTS_URL: `${mock.url}/models.md`,
+          },
+        )
+        assert(result.status !== 0, `expected non-zero exit, got ${result.status}`)
+        assert(
+          result.stderr.includes("could not parse"),
+          `expected 'could not parse' in stderr, got: ${result.stderr}`,
+        )
+      } finally {
+        await mock.close()
+        await rm(dir, { recursive: true, force: true })
+      }
+    },
+  ],
 ])

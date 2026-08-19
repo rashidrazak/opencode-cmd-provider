@@ -16,6 +16,8 @@ export interface MockCcOptions {
   onGenerate?: (body: Record<string, unknown>, headers: Record<string, string>) => void
   /** served at GET /registry (npm registry JSON: { "dist-tags": { latest } }) */
   registry?: unknown
+  /** served at GET /registry as-is (non-JSON body, e.g. to exercise parse failure) */
+  registryRaw?: string
   /** served at GET /models.md (raw command-code models.md text) */
   factsMd?: string
 }
@@ -66,6 +68,11 @@ export function startMockCc(
         return
       }
       if (req.url === "/registry" && req.method === "GET") {
+        if (options.registryRaw !== undefined) {
+          res.writeHead(200, { "content-type": "text/plain" })
+          res.end(options.registryRaw)
+          return
+        }
         res.writeHead(200, { "content-type": "application/json" })
         res.end(JSON.stringify(options.registry ?? { "dist-tags": { latest: "9.9.9" } }))
         return

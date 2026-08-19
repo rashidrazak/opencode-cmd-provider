@@ -33,17 +33,26 @@ function fail(message) {
   process.exit(1)
 }
 
-async function fetchJson(url) {
+async function fetchOrFail(url, headers) {
   let response
   try {
-    response = await fetch(url, { headers: { accept: "application/json" } })
+    response = await fetch(url, headers)
   } catch (error) {
     fail(`could not fetch ${url}: ${error instanceof Error ? error.message : String(error)}`)
   }
   if (!response.ok) {
     fail(`failed to fetch ${url}: ${response.status} ${response.statusText}`)
   }
-  return response.json()
+  return response
+}
+
+async function fetchJson(url) {
+  const response = await fetchOrFail(url, { headers: { accept: "application/json" } })
+  try {
+    return await response.json()
+  } catch (error) {
+    fail(`could not parse ${url}: ${error instanceof Error ? error.message : String(error)}`)
+  }
 }
 
 function parseCatalog(body) {
@@ -136,11 +145,10 @@ if (models.length === 0) fail("Command Code returned an empty model catalog")
 
 const out = argValue("--out") ?? DEFAULT_OUT
 const factsOut = argValue("--facts-out") ?? resolve(dirname(out), "facts.ts")
-await mkdir(dirname(out), { recursive: true })
-await writeFile(out, renderSnapshot(models), "utf-8")
-console.log(`refresh-snapshot: wrote ${models.length} models to ${out}`)
 
 // --- Capability facts (reasoning efforts + rates) from the CLI catalog ---
+// Both parses complete before either file is written so a failure never
+// leaves a partial refresh (a fresh snapshot.ts next to stale/missing facts).
 const { parseFactsMarkdown } = await import("./parse-facts.mjs")
 const registry = await fetchJson(registryUrl)
 const latest = registry?.["dist-tags"]?.latest
@@ -148,17 +156,14 @@ if (typeof latest !== "string" || latest.length === 0) {
   fail(`could not resolve latest command-code version from ${registryUrl}`)
 }
 const factsUrl = process.env.COMMANDCODE_FACTS_URL ?? DEFAULT_FACTS_URL(latest)
-let factsResponse
-try {
-  factsResponse = await fetch(factsUrl, { headers: { accept: "text/markdown" } })
-} catch (error) {
-  fail(`could not fetch ${factsUrl}: ${error instanceof Error ? error.message : String(error)}`)
-}
-if (!factsResponse.ok) {
-  fail(`failed to fetch ${factsUrl}: ${factsResponse.status} ${factsResponse.statusText}`)
-}
-const factsMarkdown = await factsResponse.text()
+const factsMarkdown = await (
+  await fetchOrFail(factsUrl, { headers: { accept: "text/markdown" } })
+).text()
 const { efforts, costs } = parseFactsMarkdown(factsMarkdown)
+
+await mkdir(dirname(out), { recursive: true })
+await writeFile(out, renderSnapshot(models), "utf-8")
+console.log(`refresh-snapshot: wrote ${models.length} models to ${out}`)
 await writeFile(
   factsOut,
   renderFacts({
@@ -171,5 +176,5 @@ await writeFile(
   "utf-8",
 )
 console.log(
-  `refresh-snapshot: wrote ${models.length} models to ${out} and facts (${Object.keys(efforts).length} efforts, ${Object.keys(costs).length} costs) to ${factsOut}`,
+  `refresh-snapshot: wrote facts (${Object.keys(efforts).length} efforts, ${Object.keys(costs).length} costs) for command-code@${latest} to ${factsOut}`,
 )
