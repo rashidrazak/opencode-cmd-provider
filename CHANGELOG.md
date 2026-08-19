@@ -13,6 +13,8 @@ Fix: generate image-input modalities from the Command Code CLI catalog.
   entries, malformed bundles, and text-only fallback behavior.
 - Docs: the release skill and facts-sync spec now describe the modality
   refresh and the new release-gate failure mode.
+- Thanks to @ericpastorm for #31, which auto-syncs the input-modality table
+  from the CLI catalog.
 
 ## 1.1.0 - 2026-08-20
 
