@@ -159,7 +159,13 @@ const factsUrl = process.env.COMMANDCODE_FACTS_URL ?? DEFAULT_FACTS_URL(latest)
 const factsMarkdown = await (
   await fetchOrFail(factsUrl, { headers: { accept: "text/markdown" } })
 ).text()
-const { efforts, costs } = parseFactsMarkdown(factsMarkdown)
+let efforts, costs
+try {
+  ;({ efforts, costs } = parseFactsMarkdown(factsMarkdown))
+} catch (error) {
+  fail(`could not parse ${factsUrl}: ${error instanceof Error ? error.message : String(error)}`)
+}
+if (Object.keys(costs).length === 0) fail("Command Code catalog facts contain no cost rows")
 
 await mkdir(dirname(out), { recursive: true })
 await writeFile(out, renderSnapshot(models), "utf-8")

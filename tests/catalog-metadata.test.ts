@@ -184,6 +184,16 @@ run([
   ],
 
   [
+    "MODEL_COSTS has no stale entries outside the snapshot",
+    () => {
+      const snapshotIds = new Set(MODEL_SNAPSHOT.map((model) => model.id))
+      for (const id of Object.keys(MODEL_COSTS)) {
+        assert(snapshotIds.has(id), `${id} is not in the snapshot`)
+      }
+    },
+  ],
+
+  [
     "reasoning classification matches the published catalog",
     () => {
       for (const model of MODEL_SNAPSHOT) {
