@@ -66,7 +66,7 @@ to be public.
 - **The refresh cannot generate facts** ("CLI modality catalog is missing API
   models" or "could not parse ... cli.mjs") — nothing shipped. Unlike a stale
   snapshot, this cannot be fixed by refreshing locally: `npm run
-  refresh:snapshot` fails the same way. It means the API catalog lists a model
+refresh:snapshot` fails the same way. It means the API catalog lists a model
   the CLI bundle does not carry yet (upstream timing), or the bundle shape
   changed and `scripts/parse-modalities.mjs` needs updating. Resolve that on
   main via PR, then re-tag.
