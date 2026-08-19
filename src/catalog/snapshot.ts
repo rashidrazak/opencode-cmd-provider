@@ -43,6 +43,7 @@ export const MODEL_SNAPSHOT: readonly CatalogModel[] = [
   { id: "xiaomi/mimo-v2.5-pro", name: "MiMo V2.5 Pro", contextLength: 1000000 },
   { id: "xiaomi/mimo-v2.5", name: "MiMo V2.5", contextLength: 1000000 },
   { id: "Qwen/Qwen3.8-Max", name: "Qwen 3.8 Max", contextLength: 1000000 },
+  { id: "Qwen/Qwen3.8-27B", name: "Qwen 3.8 27B", contextLength: 262144 },
   { id: "Qwen/Qwen3.7-Max", name: "Qwen 3.7 Max", contextLength: 1000000 },
   { id: "Qwen/Qwen3.7-Plus", name: "Qwen 3.7 Plus", contextLength: 1000000 },
   { id: "Qwen/Qwen3.7-Flash", name: "Qwen 3.7 Flash", contextLength: 1000000 },
