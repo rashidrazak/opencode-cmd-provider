@@ -1,47 +1,13 @@
 // src/provider/reasoning.ts — reasoning-effort metadata tables (PLAN #5 Part A,
 // port of pi's models.ts:67-150; catalog parsing deferred to #6/#7)
 
+import { MODEL_EFFORTS as GENERATED_MODEL_EFFORTS } from "../catalog/facts.js"
+
+export const MODEL_EFFORTS: Readonly<Record<string, readonly CommandCodeReasoningEffort[]>> =
+  GENERATED_MODEL_EFFORTS as Readonly<Record<string, readonly CommandCodeReasoningEffort[]>>
+
 export type PiThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
 type CommandCodeReasoningEffort = Exclude<PiThinkingLevel, "off">
-
-/**
- * Per-model reasoning efforts supported by Command Code's generate endpoint.
- *
- * The Provider API does not expose reasoning metadata. This is an exact
- * snapshot of `reasoningEfforts` from the command-code@1.15.1 model catalog
- * (`packages/shared/src/model-catalog.ts`, also published in the generated
- * `dist/bundled/command-code-knowledge/reference/models.md`). Models omitted
- * here let Command Code choose their reasoning depth, matching the CLI.
- */
-export const MODEL_EFFORTS: Readonly<Record<string, readonly CommandCodeReasoningEffort[]>> = {
-  "Qwen/Qwen3.8-Max": ["low", "medium", "xhigh"],
-  "claude-fable-5": ["low", "medium", "high", "xhigh", "max"],
-  "claude-opus-4-7": ["low", "medium", "high", "xhigh", "max"],
-  "claude-opus-4-8": ["low", "medium", "high", "xhigh", "max"],
-  "claude-opus-5": ["low", "medium", "high", "xhigh", "max"],
-  "claude-sonnet-4-6": ["low", "medium", "high", "xhigh", "max"],
-  "claude-sonnet-5": ["low", "medium", "high", "xhigh", "max"],
-  "deepseek/deepseek-v4-flash": ["high", "max"],
-  "deepseek/deepseek-v4-pro": ["high", "max"],
-  "gpt-5.3-codex": ["low", "medium", "high", "xhigh"],
-  "gpt-5.4": ["low", "medium", "high", "xhigh"],
-  "gpt-5.4-mini": ["low", "medium", "high"],
-  "gpt-5.5": ["low", "medium", "high", "xhigh"],
-  "gpt-5.6-luna": ["low", "medium", "high", "xhigh", "max"],
-  "gpt-5.6-sol": ["low", "medium", "high", "xhigh", "max"],
-  "gpt-5.6-terra": ["low", "medium", "high", "xhigh", "max"],
-  "google/gemini-3.1-flash-lite": ["low", "medium", "high"],
-  "google/gemini-3.5-flash": ["low", "medium", "high"],
-  "google/gemini-3.5-flash-lite": ["low", "medium", "high"],
-  "google/gemini-3.6-flash": ["low", "medium", "high"],
-  "google/gemini-3.7-flash": ["low", "medium", "high"],
-  "Qwen/Qwen3.8-27B": ["low", "medium", "xhigh"],
-  "sakana/fugu-ultra": ["high", "xhigh"],
-  "xai/grok-4.5": ["low", "medium", "high"],
-  "xai/grok-4.6": ["low", "medium", "high", "xhigh"],
-  "zai-org/GLM-5.3": ["low", "high", "max"],
-  "zai-org/GLM-5.2": ["high", "max"],
-}
 
 /**
  * Models Command Code advertises as reasoning-capable without exposing
