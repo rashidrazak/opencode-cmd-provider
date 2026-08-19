@@ -108,6 +108,13 @@ and auto-registers every model into OpenCode's config at startup. Model
 availability changes when the package is updated: the snapshot is regenerated
 from the live catalog at every release via `npm run refresh:snapshot`.
 
+The same refresh also regenerates the static reasoning-effort
+(`src/provider/reasoning.ts`) and input-modality (`src/provider/modalities.ts`)
+tables from the `command-code` CLI bundle (`npm run refresh:snapshot -- --tables`).
+The Provider API does not expose reasoning or modality metadata, so these tables
+are the source of truth for which models get `ctrl+t` variants and image input;
+without the refresh they drift silently as Command Code ships new models.
+
 Auto-registration adds no network latency to OpenCode startup — the snapshot is
 bundled, and the plugin never contacts the Command Code API to list models. The
 plugin works fully offline; model availability never depends on the catalog
@@ -116,9 +123,11 @@ endpoint being reachable.
 The following environment variable is intended for tests, local mocks, and
 compatible API endpoints:
 
-| Variable               | Purpose                                |
-| ---------------------- | -------------------------------------- |
-| `COMMANDCODE_API_BASE` | Override the Command Code API base URL |
+| Variable                        | Purpose                                                                   |
+| ------------------------------- | ------------------------------------------------------------------------- |
+| `COMMANDCODE_API_BASE`          | Override the Command Code API base URL                                    |
+| `COMMANDCODE_CLI_VERSION`       | `command-code` version to pack when running `--tables` (default `latest`) |
+| `COMMANDCODE_CLI_VERSION_LABEL` | Version label written into the regenerated table doc-comments             |
 
 ### Reasoning support
 

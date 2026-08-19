@@ -16,7 +16,7 @@ Recommended flow:
 Use `next` for beta/alpha/manual validation builds.
 
 ```sh
-npm run refresh:snapshot
+npm run refresh:snapshot -- --tables
 npm version prepatch --preid next --no-git-tag-version
 npm test
 npm run format:check
@@ -24,9 +24,15 @@ npm pack --dry-run
 npm publish --tag next --access public
 ```
 
-`npm run refresh:snapshot` regenerates `src/catalog/snapshot.ts` from the live
-Command Code catalog so the release ships the current model list; commit the
-updated snapshot with the release.
+`npm run refresh:snapshot -- --tables` regenerates `src/catalog/snapshot.ts`
+from the live Command Code catalog **and** the static reasoning-effort and
+input-modality tables (`src/provider/reasoning.ts`,
+`src/provider/modalities.ts`) from the `command-code` CLI bundle, so the release
+ships the current model list with matching `ctrl+t` variants and vision support;
+commit the updated files with the release.
+
+If the table rewrite reorders existing entries or adds new ones, run
+`npm run format` before committing.
 
 If npm asks for browser or OTP auth, run the publish command manually and complete the npm prompt.
 

@@ -1,18 +1,39 @@
 // scripts/refresh-snapshot.mjs — regenerate src/catalog/snapshot.ts from the
-// live Command Code model catalog. Runs at release time; never at runtime.
+// live Command Code model catalog, and optionally regenerate the static
+// reasoning-effort (src/provider/reasoning.ts) and input-modality
+// (src/provider/modalities.ts) tables from the command-code CLI bundle.
+// Runs at release time; never at runtime.
 //
-// Usage: node scripts/refresh-snapshot.mjs [--out path]
-//   --out  write the snapshot to this path (default src/catalog/snapshot.ts)
+// Usage: node scripts/refresh-snapshot.mjs [--out path] [--tables]
+//   --out     write the snapshot to this path (default src/catalog/snapshot.ts)
+//   --tables  also regenerate MODEL_EFFORTS and MODEL_INPUT_MODALITIES in place
+//   --cli-js <path>  read the CLI bundle from this path instead of npm
+//                    (offline/tests); implies --tables
+//   --reasoning-out <path>    override the reasoning.ts rewrite target (tests)
+//   --modalities-out <path>   override the modalities.ts rewrite target (tests)
 //   env COMMANDCODE_API_BASE overrides the API base (tests point at the mock)
-import { mkdir, writeFile } from "node:fs/promises"
-import { dirname, resolve } from "node:path"
+//   env COMMANDCODE_CLI_VERSION overrides the CLI version to pack (default latest)
+import { mkdir, readFile, writeFile, mkdtemp, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { dirname, join, resolve } from "node:path"
+import { execFile } from "node:child_process"
+import { promisify } from "node:util"
+import { extractCatalog } from "./lib/extract-catalog.mjs"
+
+const execFileAsync = promisify(execFile)
 
 const DEFAULT_API_BASE = "https://api.commandcode.ai"
 const DEFAULT_OUT = resolve(import.meta.dirname, "..", "src", "catalog", "snapshot.ts")
+const REASONING_PATH = resolve(import.meta.dirname, "..", "src", "provider", "reasoning.ts")
+const MODALITIES_PATH = resolve(import.meta.dirname, "..", "src", "provider", "modalities.ts")
 
 function argValue(name) {
   const index = process.argv.indexOf(name)
   return index >= 0 ? process.argv[index + 1] : undefined
+}
+
+function hasFlag(name) {
+  return process.argv.includes(name)
 }
 
 function isRecord(value) {
@@ -75,6 +96,121 @@ function renderSnapshot(models) {
   ].join("\n")
 }
 
+/**
+ * Download and extract the command-code CLI bundle (dist/cli.mjs) via npm pack.
+ * Returns the bundle source. A --cli-js path short-circuits this for offline
+ * use and tests.
+ */
+async function loadCliBundleSource() {
+  const explicit = argValue("--cli-js")
+  if (explicit) return readFile(explicit, "utf-8")
+
+  const version = process.env.COMMANDCODE_CLI_VERSION ?? "latest"
+  const dir = await mkdtemp(join(tmpdir(), "cc-cli-"))
+  try {
+    await execFileAsync("npm", ["pack", `command-code@${version}`, "--silent"], { cwd: dir })
+    const { readdir } = await import("node:fs/promises")
+    const files = await readdir(dir)
+    const tarball = files.find((name) => name.endsWith(".tgz"))
+    if (!tarball) fail(`npm pack produced no tarball for command-code@${version}`)
+    const { execFile: execFileCb } = await import("node:child_process")
+    await promisify(execFileCb)("tar", ["-xzf", tarball, "-C", dir, "package/dist/cli.mjs"], {
+      cwd: dir,
+    })
+    return readFile(join(dir, "package", "dist", "cli.mjs"), "utf-8")
+  } catch (error) {
+    fail(
+      `could not fetch the command-code CLI bundle: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    )
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+}
+
+function renderEffortsEntry(id, efforts) {
+  return `${JSON.stringify(id)}: [${efforts.map((effort) => JSON.stringify(effort)).join(", ")}],`
+}
+
+function renderModalitiesEntry(id, modalities) {
+  return `${JSON.stringify(id)}: [${modalities.map((modality) => JSON.stringify(modality)).join(", ")}],`
+}
+
+/**
+ * Replace the object literal assigned to `export const NAME: ... = { ... }` in
+ * `source` with newly rendered entries, preserving everything else in the file.
+ */
+function replaceTableBody(source, constName, entries) {
+  const startMarker = `export const ${constName}`
+  const start = source.indexOf(startMarker)
+  if (start === -1) fail(`${constName} not found in its source file`)
+  const openBrace = source.indexOf("{", start)
+  const closeBrace = source.indexOf("\n}", openBrace)
+  if (openBrace === -1 || closeBrace === -1) fail(`could not locate ${constName} table body`)
+  const indent = "  "
+  const body =
+    entries.length === 0 ? "" : "\n" + entries.map((line) => indent + line).join("\n") + "\n"
+  return source.slice(0, openBrace + 1) + body + source.slice(closeBrace + 1)
+}
+
+/**
+ * Replace the object literal assigned to `export const NAME: ... = { ... }` in
+ * `source` with newly rendered entries, preserving everything else in the file.
+ */
+function updateDocCommentVersion(source, newVersion) {
+  return source.replace(/command-code@\d+\.\d+\.\d+[^)\s]*/g, `command-code@${newVersion}`)
+}
+
+/**
+ * Resolve the command-code CLI version for doc-comment provenance.
+ * Prefers an explicit label (env or the bundled package.json when reading a
+ * local path), then `npm view`, then "latest".
+ */
+async function resolveCliVersion() {
+  const label = process.env.COMMANDCODE_CLI_VERSION_LABEL
+  if (label) return label
+  try {
+    const { stdout } = await execFileAsync("npm", ["view", "command-code", "version", "--silent"])
+    const version = stdout.trim()
+    if (version) return version
+  } catch {
+    // offline or npm unavailable — fall through
+  }
+  return "latest"
+}
+
+async function refreshTables() {
+  const cliVersion = await resolveCliVersion()
+  const bundleSource = await loadCliBundleSource()
+  const reasoningPath = argValue("--reasoning-out") ?? REASONING_PATH
+  const modalitiesPath = argValue("--modalities-out") ?? MODALITIES_PATH
+  let catalog
+  try {
+    catalog = extractCatalog(bundleSource)
+  } catch (error) {
+    fail(error instanceof Error ? error.message : String(error))
+  }
+
+  const reasoningEntries = catalog
+    .filter((model) => model.reasoningEfforts.length > 0)
+    .map((model) => renderEffortsEntry(model.id, model.reasoningEfforts))
+  const modalitiesEntries = catalog
+    .filter((model) => model.inputModalities.includes("image"))
+    .map((model) => renderModalitiesEntry(model.id, model.inputModalities))
+
+  for (const [path, constName, entries] of [
+    [reasoningPath, "MODEL_EFFORTS", reasoningEntries],
+    [modalitiesPath, "MODEL_INPUT_MODALITIES", modalitiesEntries],
+  ]) {
+    let source = await readFile(path, "utf-8")
+    source = updateDocCommentVersion(source, cliVersion)
+    source = replaceTableBody(source, constName, entries)
+    await writeFile(path, source, "utf-8")
+    console.log(`refresh-snapshot: regenerated ${constName} (${entries.length} entries) in ${path}`)
+  }
+}
+
 const base = process.env.COMMANDCODE_API_BASE ?? DEFAULT_API_BASE
 const url = `${base}/provider/v1/models`
 let response
@@ -100,3 +236,7 @@ const out = argValue("--out") ?? DEFAULT_OUT
 await mkdir(dirname(out), { recursive: true })
 await writeFile(out, renderSnapshot(models), "utf-8")
 console.log(`refresh-snapshot: wrote ${models.length} models to ${out}`)
+
+if (hasFlag("--tables") || argValue("--cli-js")) {
+  await refreshTables()
+}

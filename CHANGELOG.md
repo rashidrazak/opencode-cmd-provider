@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+Fix: sync the reasoning-effort and input-modality tables with the
+`command-code@1.28.1` catalog.
+
+- `MODEL_EFFORTS` gains `zai-org/GLM-5.3` (low, high, max), `Qwen/Qwen3.8-27B`
+  (low, medium, xhigh), `google/gemini-3.7-flash` (low, medium, high), and
+  `xai/grok-4.6` (low, medium, high, xhigh) — these models now expose `ctrl+t`
+  reasoning variants in OpenCode.
+- `MODEL_INPUT_MODALITIES` gains `Qwen/Qwen3.8-27B` and
+  `google/gemini-3.7-flash` (image input). `xai/grok-4.6` is text-only per the
+  catalog and is not listed.
+- `scripts/refresh-snapshot.mjs` now supports `--tables`: it regenerates both
+  tables from the `command-code` CLI bundle (`dist/cli.mjs`) at release time,
+  so these tables no longer drift silently as Command Code ships new models.
+  Offline/tests can pass `--cli-js <path>`. New parser lives in
+  `scripts/lib/extract-catalog.mjs` with unit coverage.
+
+This addresses the reasoning/vision part of #22.
+
 ## 1.0.2 - 2026-08-19
 
 Chore: refresh the bundled model catalog snapshot after the live catalog drifted.
