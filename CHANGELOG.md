@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+Fix: generate image-input modalities from the Command Code CLI catalog.
+
+- `MODEL_INPUT_MODALITIES` now comes from `inputModalities` fields in the
+  parsed `command-code` CLI bundle instead of a hand-maintained table.
+- The release refresh validates that every API snapshot model is represented
+  in the CLI bundle and fails loudly on unsupported or conflicting modality
+  data.
+- Added AST parser and offline coverage for reordered fields, duplicate model
+  entries, malformed bundles, and text-only fallback behavior.
+
 ## 1.0.2 - 2026-08-19
 
 Chore: refresh the bundled model catalog snapshot after the live catalog drifted.

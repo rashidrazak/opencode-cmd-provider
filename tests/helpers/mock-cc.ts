@@ -20,6 +20,8 @@ export interface MockCcOptions {
   registryRaw?: string
   /** served at GET /models.md (raw command-code models.md text) */
   factsMd?: string
+  /** served at GET /cli.mjs (raw command-code CLI bundle) */
+  modalitiesBundle?: string
 }
 
 export interface MockCcHits {
@@ -80,6 +82,11 @@ export function startMockCc(
       if (req.url === "/models.md" && req.method === "GET") {
         res.writeHead(200, { "content-type": "text/markdown" })
         res.end(options.factsMd ?? "")
+        return
+      }
+      if (req.url === "/cli.mjs" && req.method === "GET") {
+        res.writeHead(200, { "content-type": "text/javascript" })
+        res.end(options.modalitiesBundle ?? "")
         return
       }
       res.writeHead(404)

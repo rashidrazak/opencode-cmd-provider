@@ -25,8 +25,12 @@ npm publish --tag next --access public
 ```
 
 `npm run refresh:snapshot` regenerates `src/catalog/snapshot.ts` from the live
-Command Code catalog so the release ships the current model list; commit the
-updated snapshot with the release.
+Command Code catalog and `src/catalog/facts.ts` from the CLI package's
+`models.md` plus `dist/cli.mjs` input-modality fields. The release therefore
+ships the current model list, reasoning/cost facts, and vision metadata;
+commit the updated generated files with the release. The refresh fails if an
+API model is missing from the CLI modality catalog or if the bundle structure
+changes in a way the parser cannot verify.
 
 If npm asks for browser or OTP auth, run the publish command manually and complete the npm prompt.
 
