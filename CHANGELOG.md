@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.1.0 - 2026-08-20
+
+Feature: complete capability metadata for every catalog model, with automatic sync of reasoning and pricing facts at release time.
+
+- Every auto-registered model now advertises tool calls, reasoning (efforts or reasoning-capable classification), image input, and cost — no more blank CAPABILITIES, blank MODALITIES, or $0.00 rows (fixes #22).
+- Reasoning efforts and per-1M-token rates are generated from the command-code package's bundled `models.md` at snapshot-refresh time (`src/catalog/facts.ts`); the release pipeline now fails loudly if the committed facts drifted (ADR 0003).
+- Corrected real pricing drift: `deepseek-v4-pro`/`flash` rates were stale, and the expired `gpt-5.6-terra`/`luna` discounts are gone. Context-tier pricing was removed — Command Code publishes flat rates only.
+- Added vision entries for `Qwen/Qwen3.8-27B` and `google/gemini-3.7-flash`, and reasoning efforts for `zai-org/GLM-5.3`, `Qwen/Qwen3.8-27B`, `google/gemini-3.7-flash`, and `xai/grok-4.6`.
+
 ## 1.0.2 - 2026-08-19
 
 Chore: refresh the bundled model catalog snapshot after the live catalog drifted.
