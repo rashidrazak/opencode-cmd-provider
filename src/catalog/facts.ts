@@ -4,39 +4,38 @@
 // command-code npm package's bundled model catalog (models.md). Regenerate
 // with `npm run refresh:snapshot`.
 
-export const FACTS_SOURCE_URL =
-  "https://unpkg.com/command-code@1.28.1/dist/bundled/command-code-knowledge/reference/models.md"
+export const FACTS_SOURCE_URL = "https://unpkg.com/command-code@1.28.1/dist/bundled/command-code-knowledge/reference/models.md"
 export const FACTS_PACKAGE_VERSION = "1.28.1"
 export const FACTS_LAST_REFRESHED = "2026-08-19"
 
 export const MODEL_EFFORTS: Readonly<Record<string, readonly string[]>> = {
-  "deepseek/deepseek-v4-pro": ["high", "max"],
-  "deepseek/deepseek-v4-flash": ["high", "max"],
-  "zai-org/GLM-5.3": ["low", "high", "max"],
-  "zai-org/GLM-5.2": ["high", "max"],
-  "Qwen/Qwen3.8-Max": ["low", "medium", "xhigh"],
-  "Qwen/Qwen3.8-27B": ["low", "medium", "xhigh"],
-  "claude-sonnet-5": ["low", "medium", "high", "xhigh", "max"],
-  "claude-sonnet-4-6": ["low", "medium", "high", "xhigh", "max"],
-  "claude-fable-5": ["low", "medium", "high", "xhigh", "max"],
-  "claude-opus-5": ["low", "medium", "high", "xhigh", "max"],
-  "claude-opus-4-8": ["low", "medium", "high", "xhigh", "max"],
-  "claude-opus-4-7": ["low", "medium", "high", "xhigh", "max"],
-  "gpt-5.6-sol": ["low", "medium", "high", "xhigh", "max"],
-  "gpt-5.6-terra": ["low", "medium", "high", "xhigh", "max"],
-  "gpt-5.6-luna": ["low", "medium", "high", "xhigh", "max"],
-  "gpt-5.5": ["low", "medium", "high", "xhigh"],
-  "gpt-5.4": ["low", "medium", "high", "xhigh"],
-  "gpt-5.3-codex": ["low", "medium", "high", "xhigh"],
-  "gpt-5.4-mini": ["low", "medium", "high"],
-  "google/gemini-3.7-flash": ["low", "medium", "high"],
-  "google/gemini-3.6-flash": ["low", "medium", "high"],
-  "google/gemini-3.5-flash": ["low", "medium", "high"],
-  "google/gemini-3.5-flash-lite": ["low", "medium", "high"],
-  "google/gemini-3.1-flash-lite": ["low", "medium", "high"],
-  "sakana/fugu-ultra": ["high", "xhigh"],
-  "xai/grok-4.5": ["low", "medium", "high"],
-  "xai/grok-4.6": ["low", "medium", "high", "xhigh"],
+  "deepseek/deepseek-v4-pro": ["high","max"],
+  "deepseek/deepseek-v4-flash": ["high","max"],
+  "zai-org/GLM-5.3": ["low","high","max"],
+  "zai-org/GLM-5.2": ["high","max"],
+  "Qwen/Qwen3.8-Max": ["low","medium","xhigh"],
+  "Qwen/Qwen3.8-27B": ["low","medium","xhigh"],
+  "claude-sonnet-5": ["low","medium","high","xhigh","max"],
+  "claude-sonnet-4-6": ["low","medium","high","xhigh","max"],
+  "claude-fable-5": ["low","medium","high","xhigh","max"],
+  "claude-opus-5": ["low","medium","high","xhigh","max"],
+  "claude-opus-4-8": ["low","medium","high","xhigh","max"],
+  "claude-opus-4-7": ["low","medium","high","xhigh","max"],
+  "gpt-5.6-sol": ["low","medium","high","xhigh","max"],
+  "gpt-5.6-terra": ["low","medium","high","xhigh","max"],
+  "gpt-5.6-luna": ["low","medium","high","xhigh","max"],
+  "gpt-5.5": ["low","medium","high","xhigh"],
+  "gpt-5.4": ["low","medium","high","xhigh"],
+  "gpt-5.3-codex": ["low","medium","high","xhigh"],
+  "gpt-5.4-mini": ["low","medium","high"],
+  "google/gemini-3.7-flash": ["low","medium","high"],
+  "google/gemini-3.6-flash": ["low","medium","high"],
+  "google/gemini-3.5-flash": ["low","medium","high"],
+  "google/gemini-3.5-flash-lite": ["low","medium","high"],
+  "google/gemini-3.1-flash-lite": ["low","medium","high"],
+  "sakana/fugu-ultra": ["high","xhigh"],
+  "xai/grok-4.5": ["low","medium","high"],
+  "xai/grok-4.6": ["low","medium","high","xhigh"],
 }
 
 export const MODEL_COSTS: Readonly<

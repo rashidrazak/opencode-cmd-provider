@@ -46,12 +46,12 @@ jobs:
       - name: Refresh catalog snapshot
         run: npm run refresh:snapshot
 
-      - name: Fail on stale catalog snapshot
+      - name: Fail on stale catalog snapshot or facts
         run: |
-          if git diff --exit-code -- src/catalog/snapshot.ts; then
-            echo "snapshot is fresh"
+          if git diff --exit-code -- src/catalog/snapshot.ts src/catalog/facts.ts; then
+            echo "catalog snapshot and facts are fresh"
           else
-            echo "::error::catalog snapshot is stale. Run 'npm run refresh:snapshot' locally, commit src/catalog/snapshot.ts, land it on main, then re-tag ${GITHUB_REF_NAME}."
+            echo "::error::catalog snapshot or capability facts are stale. Run 'npm run refresh:snapshot' locally, commit src/catalog/snapshot.ts and src/catalog/facts.ts, land them on main, then re-tag ${GITHUB_REF_NAME}."
             exit 1
           fi
 
