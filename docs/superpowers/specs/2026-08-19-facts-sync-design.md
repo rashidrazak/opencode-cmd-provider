@@ -7,16 +7,17 @@ Status: proposed
 ## Problem
 
 The plugin's capability matrix — reasoning efforts (`MODEL_EFFORTS`), pricing
-(`MODEL_COSTS`), and image modalities (`MODEL_INPUT_MODALITIES`) — is
-hand-maintained. Command Code changes its catalog; the tables go stale with no
-detection. Evidence: `gpt-5.6-terra`/`luna` discount rows expired 2026-08-14,
-and `deepseek-v4-pro`/`flash` rates drifted from the live page; only a manual
-verification caught it.
+(`MODEL_COSTS`), and image modalities (`MODEL_INPUT_MODALITIES`) — was
+hand-maintained. Command Code changes its catalog; the tables went stale with
+no detection. Evidence: `gpt-5.6-terra`/`luna` discount rows expired
+2026-08-14, and `deepseek-v4-pro`/`flash` rates drifted from the live page;
+only a manual verification caught it.
 
 ## Goals
 
-- Capability facts (reasoning efforts, pricing, context) update automatically
-  when the snapshot refresh runs, exactly like `src/catalog/snapshot.ts`.
+- Capability facts (reasoning efforts, pricing, context, and image modalities)
+  update automatically when the snapshot refresh runs, exactly like
+  `src/catalog/snapshot.ts`.
 - Drift is detected and compared at refresh/release time; shipping a new
   release version is how drift lands.
 - Runtime never touches the network.
@@ -35,6 +36,9 @@ footer).
 
 Fetched at refresh time from:
 `https://unpkg.com/command-code@<latest>/dist/bundled/command-code-knowledge/reference/models.md`
+
+Input modalities are fetched from the same package's CLI bundle:
+`https://unpkg.com/command-code@<latest>/dist/cli.mjs`.
 
 Columns parsed: Id, Name, Context, Efforts, $/1M in/out · cache read (write).
 
@@ -60,7 +64,11 @@ scripts/refresh-snapshot.mjs. Do not edit."):
   publish context-dependent tiers; the existing tier entries were ported from
   pi without a verifiable source).
 - Header records facts source URL, fetched package version, and fetch date:
-  `FACTS_SOURCE_URL`, `FACTS_PACKAGE_VERSION`, `FACTS_LAST_REFRESHED`.
+  `FACTS_SOURCE_URL`, `MODALITIES_SOURCE_URL`, `FACTS_PACKAGE_VERSION`,
+  `FACTS_LAST_REFRESHED`.
+- `MODEL_INPUT_MODALITIES: Readonly<Record<string, readonly ("text" | "image")[]>>`
+  — image-capable entries from `inputModalities` in the CLI bundle. Text-only
+  models are omitted and retain the provider's `['text']` fallback.
 - The model list mirrors the Provider API snapshot (both derive from the same
   registry); any model missing from `models.md` has no cost/effort entry and
   is caught by the existing coverage tests.
@@ -91,10 +99,13 @@ After the existing Provider API fetch + snapshot write, the script:
    (`https://registry.npmjs.org/command-code`, `dist-tags.latest`).
 2. Fetches `models.md` at that version (unpkg).
 3. Parses the markdown tables into efforts + costs.
-4. Writes `src/catalog/facts.ts` (default `--facts-out`, overridable for
+4. Fetches and parses `dist/cli.mjs` input-modality fields with an AST parser.
+5. Verifies every Provider API snapshot model exists in the CLI modality
+   catalog.
+6. Writes `src/catalog/facts.ts` (default `--facts-out`, overridable for
    tests; env override for the registry/unpkg base URLs, mirroring
    `COMMANDCODE_API_BASE`).
-5. Prints a summary: models written, efforts entries, cost entries, and the
+7. Prints a summary: models written, efforts entries, cost entries, and the
    fetched package version — so the release ritual can eyeball the drift.
 
 Failure behavior mirrors the existing script: network/parse errors fail with
@@ -115,23 +126,22 @@ ADR 0003 gets a short amendment paragraph documenting the facts gate.
 
 No deterministic fetchable source exists for:
 
-- `MODEL_INPUT_MODALITIES` (vision) — Command Code publishes no structured
-  modality data (Provider API returns only id/name/context; models.md has
-  only prose hints in "Best for"). Staying hand-maintained. Web scraping is
-  explicitly rejected.
 - `REASONING_MODELS` / `NON_REASONING_MODELS` (reasoning-capable-without-
   explicit-efforts classification) — judgement call, not published as data.
 
 The existing coverage tests (`tests/catalog-metadata.test.ts`) continue to
 guarantee every snapshot model resolves modalities/reasoning/cost — so a new
-model entering via facts generation fails the suite until the hand-maintained
-tables are updated, forcing the release to carry the metadata.
+model entering via facts generation fails the suite until its generated facts
+are refreshed, forcing the release to carry the metadata.
 
 ## Testing
 
 - `tests/refresh-snapshot.test.ts` — extended: facts parsing (efforts,
   flat pricing, `(write ...)` handling, `—`/absent write, free models),
-  generated-file rendering, failure on unparseable input, env overrides.
+  generated-file rendering, modality coverage, failure on unparseable input,
+  env overrides.
+- `tests/parse-modalities.test.ts` — AST parsing, field reordering, duplicate
+  entries, unsupported values, and malformed bundles.
 - `tests/cost.test.ts` — tier test removed; flat-rate arithmetic unchanged.
 - `tests/catalog-metadata.test.ts` — unchanged (imports via re-export);
   verifies snapshot coverage against the generated facts.
@@ -140,7 +150,6 @@ tables are updated, forcing the release to carry the metadata.
 ## Out of scope
 
 - Fetching facts at runtime (runtime stays offline).
-- Modality (vision) automation — no deterministic source exists.
 - The three extra models on the docs pricing page (Claude Sonnet 4.5, Claude
   Opus 4.6, Ling 3.0 Flash) that the Provider API and models.md do not
   expose; they appear only when the CLI catalog ships them.

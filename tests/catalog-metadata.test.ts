@@ -5,8 +5,10 @@
 // bundled models.md (see FACTS_SOURCE_URL / FACTS_PACKAGE_VERSION in that
 // file). These tests guarantee every snapshot model resolves capability + cost
 // metadata instead of silently falling back to text-only / no-reasoning /
-// zero-cost. The hand-maintained modality + reasoning-classification fixtures
-// in this test remain ports of Command Code's published pages
+// zero-cost. Reasoning classification remains a hand-maintained set because
+// Command Code can advertise reasoning without explicit effort levels;
+// modalities are generated from the CLI bundle's inputModalities fields.
+// The remaining classification fixtures are ports of Command Code's published pages
 // (https://commandcode.ai/docs/resources/pricing-limits and
 // https://commandcode.ai/docs/reference/cli/models).
 import { MODEL_SNAPSHOT } from "../src/catalog/snapshot.js"
@@ -16,48 +18,6 @@ import { MODEL_COSTS } from "../src/provider/pricing.js"
 import { assert, assertEqual, run } from "./harness.js"
 
 const FREE_MODELS = new Set(["poolside/laguna-s-2.1-free"])
-
-const VISION_MODELS = new Set([
-  "claude-sonnet-5",
-  "claude-sonnet-4-6",
-  "claude-fable-5",
-  "claude-opus-5",
-  "claude-opus-4-8",
-  "claude-opus-4-7",
-  "claude-haiku-4-5-20251001",
-  "gpt-5.6-sol",
-  "gpt-5.6-terra",
-  "gpt-5.6-luna",
-  "gpt-5.5",
-  "gpt-5.4",
-  "gpt-5.3-codex",
-  "gpt-5.4-mini",
-  "moonshotai/Kimi-K3",
-  "moonshotai/Kimi-K2.7-Code",
-  "moonshotai/Kimi-K2.7-Code-Highspeed",
-  "moonshotai/Kimi-K2.6",
-  "moonshotai/Kimi-K2.5",
-  "MiniMaxAI/MiniMax-M3",
-  "Qwen/Qwen3.8-Max",
-  "Qwen/Qwen3.8-27B",
-  "Qwen/Qwen3.7-Plus",
-  "Qwen/Qwen3.7-Flash",
-  "Qwen/Qwen3.6-Plus",
-  "stepfun/Step-3.7-Flash",
-  "thinkingmachines/inkling",
-  "thinkingmachines/inkling-small",
-  "google/gemini-3.7-flash",
-  "google/gemini-3.6-flash",
-  "google/gemini-3.5-flash",
-  "google/gemini-3.5-flash-lite",
-  "google/gemini-3.1-flash-lite",
-  "sakana/fugu-ultra",
-  "meta/muse-spark-1.1",
-  "meta/muse-spark-1.2",
-  "meta/muse-spark-1.2-contributor",
-  "xai/grok-4.5",
-  "xiaomi/mimo-v2.5",
-])
 
 // Models Command Code advertises as reasoning-capable but with no explicit
 // effort levels (Command Code picks the depth). These must advertise
@@ -160,16 +120,20 @@ run([
   ],
 
   [
-    "vision models advertise image input; others stay text-only",
+    "generated modality facts advertise image input and keep text fallback",
     () => {
       for (const model of MODEL_SNAPSHOT) {
-        const expectsImage = VISION_MODELS.has(model.id)
+        const modalities = inputModalitiesForModel(model.id)
         assertEqual(
-          inputModalitiesForModel(model.id).includes("image"),
-          expectsImage,
-          `${model.id}: expected image=${expectsImage}, got ${JSON.stringify(inputModalitiesForModel(model.id))}`,
+          modalities.includes("text"),
+          true,
+          `${model.id}: expected text input, got ${JSON.stringify(modalities)}`,
         )
+        assert(modalities.every((modality) => modality === "text" || modality === "image"))
       }
+      assertEqual(inputModalitiesForModel("Qwen/Qwen3.8-27B"), ["text", "image"])
+      assertEqual(inputModalitiesForModel("google/gemini-3.7-flash"), ["text", "image"])
+      assertEqual(inputModalitiesForModel("xai/grok-4.6"), ["text"])
     },
   ],
 

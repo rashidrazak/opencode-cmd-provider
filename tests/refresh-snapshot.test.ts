@@ -24,6 +24,10 @@ const FACTS_MD =
   "|---|---|---|---|---|---|---|\n" +
   "| `claude-sonnet-5` | Claude Sonnet 5 | 1M | low, medium, high, xhigh, max | $2/$10 · cache $0.2 (write $2.5) | Pro and above | best |\n"
 
+const MODALITIES_BUNDLE =
+  'const models={SONNET:{name:"Claude Sonnet 5",id:"claude-sonnet-5",inputModalities:["text","image"],contextWindow:2e5},' +
+  'FLASH:{inputModalities:["text"],id:"deepseek/deepseek-v4-flash",label:"DeepSeek",contextWindow:1e6}}'
+
 // Async spawn: the in-process mock server must keep serving while the child
 // process fetches the catalog, so the parent event loop cannot be blocked.
 function runScript(args, env): Promise<{ status: number | null; stdout: string; stderr: string }> {
@@ -48,6 +52,7 @@ run([
         models: MODELS_PAYLOAD,
         registry: { "dist-tags": { latest: "1.28.1" } },
         factsMd: FACTS_MD,
+        modalitiesBundle: MODALITIES_BUNDLE,
       })
       try {
         const result = await runScript(["scripts/refresh-snapshot.mjs", "--out", out], {
@@ -55,6 +60,7 @@ run([
           COMMANDCODE_API_BASE: mock.url,
           COMMANDCODE_REGISTRY_URL: `${mock.url}/registry`,
           COMMANDCODE_FACTS_URL: `${mock.url}/models.md`,
+          COMMANDCODE_MODALITIES_URL: `${mock.url}/cli.mjs`,
         })
         assert(result.status === 0, result.stderr || result.stdout)
         assertEqual(mock.hits.models, 1)
@@ -89,6 +95,7 @@ run([
         models: MODELS_PAYLOAD,
         registry: { "dist-tags": { latest: "1.28.1" } },
         factsMd: FACTS_MD,
+        modalitiesBundle: MODALITIES_BUNDLE,
       })
       try {
         const result = await runScript(
@@ -98,6 +105,7 @@ run([
             COMMANDCODE_API_BASE: mock.url,
             COMMANDCODE_REGISTRY_URL: `${mock.url}/registry`,
             COMMANDCODE_FACTS_URL: `${mock.url}/models.md`,
+            COMMANDCODE_MODALITIES_URL: `${mock.url}/cli.mjs`,
           },
         )
         assert(result.status === 0, result.stderr || result.stdout)
@@ -113,6 +121,10 @@ run([
         })
         assertEqual(mod.MODEL_COSTS, {
           "claude-sonnet-5": { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 },
+        })
+        assertEqual(mod.MODALITIES_SOURCE_URL, `${mock.url}/cli.mjs`)
+        assertEqual(mod.MODEL_INPUT_MODALITIES, {
+          "claude-sonnet-5": ["text", "image"],
         })
         assertEqual(mod.FACTS_LAST_REFRESHED, new Date().toISOString().split("T")[0])
       } finally {
@@ -132,6 +144,7 @@ run([
         models: MODELS_PAYLOAD,
         registryRaw: "<html>not json</html>",
         factsMd: FACTS_MD,
+        modalitiesBundle: MODALITIES_BUNDLE,
       })
       try {
         const result = await runScript(
@@ -141,12 +154,50 @@ run([
             COMMANDCODE_API_BASE: mock.url,
             COMMANDCODE_REGISTRY_URL: `${mock.url}/registry`,
             COMMANDCODE_FACTS_URL: `${mock.url}/models.md`,
+            COMMANDCODE_MODALITIES_URL: `${mock.url}/cli.mjs`,
           },
         )
         assert(result.status !== 0, `expected non-zero exit, got ${result.status}`)
         assert(
           result.stderr.includes("could not parse"),
           `expected 'could not parse' in stderr, got: ${result.stderr}`,
+        )
+      } finally {
+        await mock.close()
+        await rm(dir, { recursive: true, force: true })
+      }
+    },
+  ],
+
+  [
+    "refresh-snapshot fails when the CLI bundle omits an API model",
+    async () => {
+      const dir = await mkdtemp(join(tmpdir(), "cc-modalities-coverage-"))
+      const out = join(dir, "snapshot.ts")
+      const mock = await startMockCc({
+        models: {
+          ...MODELS_PAYLOAD,
+          data: [
+            ...MODELS_PAYLOAD.data,
+            { id: "missing/model", name: "Missing", context_length: 1000 },
+          ],
+        },
+        registry: { "dist-tags": { latest: "1.28.1" } },
+        factsMd: FACTS_MD,
+        modalitiesBundle: MODALITIES_BUNDLE,
+      })
+      try {
+        const result = await runScript(["scripts/refresh-snapshot.mjs", "--out", out], {
+          ...process.env,
+          COMMANDCODE_API_BASE: mock.url,
+          COMMANDCODE_REGISTRY_URL: `${mock.url}/registry`,
+          COMMANDCODE_FACTS_URL: `${mock.url}/models.md`,
+          COMMANDCODE_MODALITIES_URL: `${mock.url}/cli.mjs`,
+        })
+        assert(result.status !== 0, `expected non-zero exit, got ${result.status}`)
+        assert(
+          result.stderr.includes("missing/model"),
+          `expected missing model in stderr, got: ${result.stderr}`,
         )
       } finally {
         await mock.close()

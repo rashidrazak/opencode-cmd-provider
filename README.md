@@ -113,12 +113,14 @@ bundled, and the plugin never contacts the Command Code API to list models. The
 plugin works fully offline; model availability never depends on the catalog
 endpoint being reachable.
 
-The following environment variable is intended for tests, local mocks, and
+The following environment variables are intended for tests, local mocks, and
 compatible API endpoints:
 
-| Variable               | Purpose                                |
-| ---------------------- | -------------------------------------- |
-| `COMMANDCODE_API_BASE` | Override the Command Code API base URL |
+| Variable                     | Purpose                                |
+| ---------------------------- | -------------------------------------- |
+| `COMMANDCODE_API_BASE`       | Override the Command Code API base URL |
+| `COMMANDCODE_FACTS_URL`      | Override the bundled `models.md` URL   |
+| `COMMANDCODE_MODALITIES_URL` | Override the CLI bundle URL            |
 
 ### Reasoning support
 
@@ -128,13 +130,13 @@ Reasoning blocks from completed assistant turns are not replayed to Command Code
 
 ## Image input
 
-Image input is advertised only for models marked with the `image` input modality in the Command Code model catalog. The capability snapshot follows the current official CLI catalog; unknown models default to text-only until their upstream metadata is reviewed.
+Image input is advertised only for models marked with the `image` input modality in the Command Code CLI bundle. The release-time refresh generates this map into `src/catalog/facts.ts`; unknown models default to text-only until their upstream metadata is reviewed.
 
 For vision-capable models, image blocks from user messages and tool results are forwarded in Command Code's data-URL wire format. Text-only models reject image content before making a network request instead of silently dropping it.
 
 ## Pricing display
 
-The Command Code Provider API does not currently include prices in its model catalog. This provider keeps a static table for models with known prices so OpenCode can display estimated request costs.
+The Command Code Provider API does not currently include prices in its model catalog. This provider generates a table from the bundled `models.md` catalog so OpenCode can display estimated request costs.
 
 Models missing from that table display zero cost in OpenCode. This does **not** mean Command Code will bill the request at zero. Check the current [Command Code pricing](https://commandcode.ai/docs/resources/pricing-limits) before relying on the displayed value.
 
