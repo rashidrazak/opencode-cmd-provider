@@ -4,6 +4,10 @@
 // Command Code's published catalog. These tests guarantee every snapshot model
 // resolves capability + cost metadata instead of silently falling back to
 // text-only / no-reasoning / zero-cost.
+//
+// Source: https://commandcode.ai/docs/resources/pricing-limits and
+// https://commandcode.ai/docs/reference/cli/models — pricing rows added by #22
+// verified against those pages on 2026-08-19 (see PRICING_LAST_VERIFIED).
 import { MODEL_SNAPSHOT } from "../src/catalog/snapshot.js"
 import { MODEL_INPUT_MODALITIES, inputModalitiesForModel } from "../src/provider/modalities.js"
 import { MODEL_EFFORTS, REASONING_MODELS, isReasoningModel } from "../src/provider/reasoning.js"
@@ -56,27 +60,8 @@ const VISION_MODELS = new Set([
 
 // Models Command Code advertises as reasoning-capable but with no explicit
 // effort levels (Command Code picks the depth). These must advertise
-// reasoning without generating variants.
-const REASONING_WITHOUT_EFFORTS = new Set([
-  "moonshotai/Kimi-K3",
-  "moonshotai/Kimi-K2.7-Code",
-  "moonshotai/Kimi-K2.7-Code-Highspeed",
-  "MiniMaxAI/MiniMax-M3",
-  "Qwen/Qwen3.7-Max",
-  "Qwen/Qwen3.7-Plus",
-  "Qwen/Qwen3.7-Flash",
-  "Qwen/Qwen3.6-Max-Preview",
-  "Qwen/Qwen3.6-Plus",
-  "stepfun/Step-3.7-Flash",
-  "tencent/hy3-paid",
-  "nvidia/nemotron-3-ultra-550b-a55b",
-  "thinkingmachines/inkling",
-  "thinkingmachines/inkling-small",
-  "poolside/laguna-s-2.1-free",
-  "meta/muse-spark-1.1",
-  "meta/muse-spark-1.2",
-  "meta/muse-spark-1.2-contributor",
-])
+// reasoning without generating variants; the production REASONING_MODELS set
+// doubles as the test fixture.
 
 // Models Command Code does not advertise as reasoning-capable (no effort
 // levels and no reasoning flag on the model page).
@@ -144,6 +129,8 @@ run([
   [
     "muse-spark-1.2-contributor pricing matches the published rates",
     () => {
+      // Live page (2026-08-19): In $0.100 / Out $0.200 / Cache $0.0020, and no
+      // cache-write rate is published (shown as "—"), so cacheWrite stays 0.
       assertEqual(MODEL_COSTS["meta/muse-spark-1.2-contributor"], {
         input: 0.1,
         output: 0.2,
@@ -200,7 +187,7 @@ run([
     () => {
       for (const model of MODEL_SNAPSHOT) {
         const hasEfforts = EFFORTS_MODELS.has(model.id)
-        const reasoningWithoutEfforts = REASONING_WITHOUT_EFFORTS.has(model.id)
+        const reasoningWithoutEfforts = REASONING_MODELS.has(model.id)
         const nonReasoning = NON_REASONING_MODELS.has(model.id)
         assert(
           [hasEfforts, reasoningWithoutEfforts, nonReasoning].filter(Boolean).length === 1,
@@ -231,9 +218,6 @@ run([
         assert(snapshotIds.has(id), `${id} is not in the snapshot`)
       }
       for (const id of REASONING_MODELS) {
-        assert(snapshotIds.has(id), `${id} is not in the snapshot`)
-      }
-      for (const id of REASONING_WITHOUT_EFFORTS) {
         assert(snapshotIds.has(id), `${id} is not in the snapshot`)
       }
       for (const id of NON_REASONING_MODELS) {

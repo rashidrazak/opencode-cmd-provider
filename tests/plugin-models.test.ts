@@ -214,6 +214,56 @@ run([
   ],
 
   [
+    "config hook fills reasoning metadata only where the user left it unset",
+    () => {
+      const config = {
+        provider: {
+          commandcode: {
+            name: "Command Code",
+            models: {
+              "deepseek/deepseek-v4-flash": {
+                name: "DeepSeek V4 Flash",
+                limit: { context: 1000000, output: 384000 },
+                reasoning: false,
+              },
+              "meta/muse-spark-1.2-contributor": {
+                name: "Muse Spark 1.2 Contributor",
+                limit: { context: 1048576, output: 65536 },
+                reasoning: false,
+              },
+              "moonshotai/Kimi-K2.6": {
+                name: "Kimi K2.6",
+                limit: { context: 256000, output: 65536 },
+              },
+            },
+          },
+        },
+      } as const
+      augmentConfigCommandCodeModels(config as never)
+      const flash = config.provider.commandcode.models["deepseek/deepseek-v4-flash"] as {
+        reasoning?: boolean
+        variants?: Record<string, { reasoningEffort: string }>
+      }
+      assertEqual(flash.reasoning, false, "declared reasoning: false must survive augmentation")
+      assertEqual(
+        flash.variants,
+        undefined,
+        "variants must not be injected when reasoning is disabled",
+      )
+      const muse = config.provider.commandcode.models["meta/muse-spark-1.2-contributor"] as {
+        reasoning?: boolean
+        variants?: Record<string, { reasoningEffort: string }>
+      }
+      assertEqual(muse.reasoning, false, "declared reasoning: false must survive augmentation")
+      assertEqual(muse.variants, undefined)
+      const kimi = config.provider.commandcode.models["moonshotai/Kimi-K2.6"] as {
+        reasoning?: boolean
+      }
+      assertEqual(kimi.reasoning, undefined)
+    },
+  ],
+
+  [
     "config hook marks reasoning-capable models without variants as reasoning",
     () => {
       const config = {

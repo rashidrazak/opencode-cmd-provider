@@ -17,7 +17,10 @@ export interface CommandCodeModelCost extends CommandCodeModelCostRates {
 }
 
 export const PRICING_SOURCE_URL = "https://commandcode.ai/docs/resources/pricing-limits"
-export const PRICING_LAST_VERIFIED = "2026-08-04"
+// Rates for rows added in #22 were verified against PRICING_SOURCE_URL on
+// 2026-08-19 (input/output/cache-read as published; where the page publishes
+// no cache-write rate — e.g. the muse-spark family — cacheWrite stays 0).
+export const PRICING_LAST_VERIFIED = "2026-08-19"
 
 export const ZERO_MODEL_COST: CommandCodeModelCost = {
   input: 0,
