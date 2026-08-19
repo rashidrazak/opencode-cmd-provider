@@ -21,8 +21,7 @@ run([
     () => {
       assertEqual(modelSupportsImageInput("Qwen/Qwen3.8-27B"), true)
       assertEqual(modelSupportsImageInput("google/gemini-3.7-flash"), true)
-      assertEqual(modelSupportsImageInput("xai/grok-4.6"), true)
-      assertEqual(inputModalitiesForModel("xai/grok-4.6"), ["text", "image"])
+      assertEqual(inputModalitiesForModel("xai/grok-4.6"), ["text"])
     },
   ],
 

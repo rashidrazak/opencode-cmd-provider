@@ -47,7 +47,6 @@ export const MODEL_INPUT_MODALITIES: Readonly<Record<string, readonly CommandCod
   "thinkingmachines/inkling": ["text", "image"],
   "thinkingmachines/inkling-small": ["text", "image"],
   "xai/grok-4.5": ["text", "image"],
-  "xai/grok-4.6": ["text", "image"],
   "xiaomi/mimo-v2.5": ["text", "image"],
 }
 
