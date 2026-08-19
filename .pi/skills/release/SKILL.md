@@ -30,21 +30,23 @@ pre-tag ritual and post-push verification.
 5. **Tag**: `git tag vX.Y.Z && git push origin vX.Y.Z` — the tag push triggers
    `release.yml`. Push the tag only; main is already up to date.
 
-The catalog snapshot and capability facts are **not** your job: the pipeline
-refreshes both and fails loudly if the live catalog drifted (see ADR 0003).
-The gate ignores the date-stamp-only `FACTS_LAST_REFRESHED` line
-(`-I 'FACTS_LAST_REFRESHED'`), so a same-day tag passes as long as the data is
-fresh. Running `npm run refresh:snapshot` locally beforehand is optional — do
-it if you want the diff visible before tagging.
+The catalog snapshot and capability facts (reasoning, pricing, and input
+modalities) are **not** your job: the pipeline refreshes them and fails loudly
+if the live catalog or the CLI bundle drifted (see ADR 0003). The gate ignores
+the date-stamp-only `FACTS_LAST_REFRESHED` line (`-I 'FACTS_LAST_REFRESHED'`),
+so a same-day tag passes as long as the data is fresh. Running
+`npm run refresh:snapshot` locally beforehand is optional — do it if you want
+the diff visible before tagging.
 
 ## What the pipeline does (no action needed)
 
 Asserts the tag's commit is on `origin/main` → asserts tag ==
 `v<package.json.version>` → build + full test suite → refreshes the catalog
-snapshot and fails with instructions if it drifted (never moving the tag or
-pushing to main itself) → OIDC npm publish (trusted publishing, provenance
-automatic) → GitHub Release from the CHANGELOG section. Provenance requires
-the repository to be public.
+snapshot and capability facts (including input modalities from the CLI bundle)
+and fails with instructions if any drifted (never moving the tag or pushing to
+main itself) → OIDC npm publish (trusted publishing, provenance automatic) →
+GitHub Release from the CHANGELOG section. Provenance requires the repository
+to be public.
 
 ## Verify after push
 
@@ -61,6 +63,13 @@ the repository to be public.
 - **A stale snapshot fails the run** — nothing shipped. Refresh locally
   (`npm run refresh:snapshot`), commit `src/catalog/snapshot.ts` and
   `src/catalog/facts.ts`, land them on main via PR, then re-tag.
+- **The refresh cannot generate facts** ("CLI modality catalog is missing API
+  models" or "could not parse ... cli.mjs") — nothing shipped. Unlike a stale
+  snapshot, this cannot be fixed by refreshing locally: `npm run
+refresh:snapshot` fails the same way. It means the API catalog lists a model
+  the CLI bundle does not carry yet (upstream timing), or the bundle shape
+  changed and `scripts/parse-modalities.mjs` needs updating. Resolve that on
+  main via PR, then re-tag.
 - **Publish fails** — nothing shipped (npm rejects before writing) → fix, then
   `gh run rerun <run-id>`.
 - **Workflow file changes** — if a fix touches `.github/workflows/release.yml`,
