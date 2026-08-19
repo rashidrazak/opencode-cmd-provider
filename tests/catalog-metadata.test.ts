@@ -1,13 +1,14 @@
 // tests/catalog-metadata.test.ts — catalog-wide metadata coverage (issue #22).
 //
-// The modality, reasoning, and pricing tables are hand-maintained ports of
-// Command Code's published catalog. These tests guarantee every snapshot model
-// resolves capability + cost metadata instead of silently falling back to
-// text-only / no-reasoning / zero-cost.
-//
-// Source: https://commandcode.ai/docs/resources/pricing-limits and
-// https://commandcode.ai/docs/reference/cli/models — pricing rows added by #22
-// verified against those pages on 2026-08-19 (see PRICING_LAST_VERIFIED).
+// Capability facts (reasoning efforts + per-1M-token rates) come from
+// `src/catalog/facts.ts`, generated from the command-code npm package's
+// bundled models.md (see FACTS_SOURCE_URL / FACTS_PACKAGE_VERSION in that
+// file). These tests guarantee every snapshot model resolves capability + cost
+// metadata instead of silently falling back to text-only / no-reasoning /
+// zero-cost. The hand-maintained modality + reasoning-classification fixtures
+// in this test remain ports of Command Code's published pages
+// (https://commandcode.ai/docs/resources/pricing-limits and
+// https://commandcode.ai/docs/reference/cli/models).
 import { MODEL_SNAPSHOT } from "../src/catalog/snapshot.js"
 import { MODEL_INPUT_MODALITIES, inputModalitiesForModel } from "../src/provider/modalities.js"
 import { MODEL_EFFORTS, REASONING_MODELS, isReasoningModel } from "../src/provider/reasoning.js"

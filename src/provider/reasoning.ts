@@ -1,8 +1,20 @@
 // src/provider/reasoning.ts — reasoning-effort metadata tables (PLAN #5 Part A,
-// port of pi's models.ts:67-150; catalog parsing deferred to #6/#7)
+// port of pi's models.ts:67-150). Reasoning metadata now comes from the
+// generated catalog facts (`src/catalog/facts.ts`), with hand-maintained
+// classification sets (`REASONING_MODELS`) layered on top.
 
 import { MODEL_EFFORTS as GENERATED_MODEL_EFFORTS } from "../catalog/facts.js"
 
+/**
+ * Models omitted here let Command Code choose their reasoning depth.
+ */
+// facts.ts types MODEL_EFFORTS values as `readonly string[]`, wider than the
+// local `CommandCodeReasoningEffort` union ("minimal" | "low" | ... | "max"),
+// so a literal `export { MODEL_EFFORTS }` fails typecheck where
+// `ThinkingMetadata` uses the union. The cast assumes every effort string the
+// generated catalog emits is a valid `PiThinkingLevel` (the models.md Efforts
+// column is constrained to those levels; the release gate catches drift). Do
+// NOT "simplify" this back to a direct re-export — it breaks the build.
 export const MODEL_EFFORTS: Readonly<Record<string, readonly CommandCodeReasoningEffort[]>> =
   GENERATED_MODEL_EFFORTS as Readonly<Record<string, readonly CommandCodeReasoningEffort[]>>
 
