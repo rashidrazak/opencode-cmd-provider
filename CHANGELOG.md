@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.2 - 2026-08-19
+
+Chore: refresh the bundled model catalog snapshot after the live catalog drifted.
+
+- Added `Qwen/Qwen3.8-27B` (262144 context) to the bundled snapshot — the release pipeline's stale-snapshot gate would otherwise fail the next tag push (ADR 0003).
+
 ## 1.0.1 - 2026-08-16
 
 Chore: harden the release flow so a tag push can no longer publish from an unmerged tree or rewrite tags.
