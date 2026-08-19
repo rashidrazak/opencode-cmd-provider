@@ -8,12 +8,13 @@ type CommandCodeReasoningEffort = Exclude<PiThinkingLevel, "off">
  * Per-model reasoning efforts supported by Command Code's generate endpoint.
  *
  * The Provider API does not expose reasoning metadata. This is an exact
- * snapshot of `reasoningEfforts` from the command-code@1.15.1 model catalog
+ * snapshot of `reasoningEfforts` from the command-code@1.28.1 model catalog
  * (`packages/shared/src/model-catalog.ts`, also published in the generated
  * `dist/bundled/command-code-knowledge/reference/models.md`). Models omitted
  * here let Command Code choose their reasoning depth, matching the CLI.
  */
 export const MODEL_EFFORTS: Readonly<Record<string, readonly CommandCodeReasoningEffort[]>> = {
+  "Qwen/Qwen3.8-27B": ["low", "medium", "xhigh"],
   "Qwen/Qwen3.8-Max": ["low", "medium", "xhigh"],
   "claude-fable-5": ["low", "medium", "high", "xhigh", "max"],
   "claude-opus-4-7": ["low", "medium", "high", "xhigh", "max"],
@@ -34,9 +35,12 @@ export const MODEL_EFFORTS: Readonly<Record<string, readonly CommandCodeReasonin
   "google/gemini-3.5-flash": ["low", "medium", "high"],
   "google/gemini-3.5-flash-lite": ["low", "medium", "high"],
   "google/gemini-3.6-flash": ["low", "medium", "high"],
+  "google/gemini-3.7-flash": ["low", "medium", "high"],
   "sakana/fugu-ultra": ["high", "xhigh"],
   "xai/grok-4.5": ["low", "medium", "high"],
+  "xai/grok-4.6": ["low", "medium", "high", "xhigh"],
   "zai-org/GLM-5.2": ["high", "max"],
+  "zai-org/GLM-5.3": ["low", "high", "max"],
 }
 
 const PI_THINKING_LEVELS: readonly PiThinkingLevel[] = [

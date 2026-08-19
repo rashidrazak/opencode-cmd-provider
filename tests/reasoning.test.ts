@@ -23,6 +23,18 @@ run([
   ],
 
   [
+    "models added in the command-code 1.28.1 catalog expose efforts",
+    () => {
+      assertEqual(MODEL_EFFORTS["zai-org/GLM-5.3"], ["low", "high", "max"])
+      assertEqual(MODEL_EFFORTS["Qwen/Qwen3.8-27B"], ["low", "medium", "xhigh"])
+      assertEqual(MODEL_EFFORTS["google/gemini-3.7-flash"], ["low", "medium", "high"])
+      assertEqual(MODEL_EFFORTS["xai/grok-4.6"], ["low", "medium", "high", "xhigh"])
+      assertEqual(isReasoningModel("zai-org/GLM-5.3"), true)
+      assertEqual(isReasoningModel("xai/grok-4.6"), true)
+    },
+  ],
+
+  [
     "unknown models have no metadata",
     () => {
       assertEqual(thinkingMetadataForModel("brand-new/model"), undefined)
@@ -107,6 +119,16 @@ run([
       assert(variants, "expected variants")
       assertEqual(Object.keys(variants), ["high", "max"])
       assertEqual(variants.high, { reasoningEffort: "high" })
+      assertEqual(variants.max, { reasoningEffort: "max" })
+    },
+  ],
+
+  [
+    "reasoningVariantsForModel covers models added in the 1.28.1 catalog",
+    () => {
+      const variants = reasoningVariantsForModel("zai-org/GLM-5.3")
+      assert(variants, "expected variants")
+      assertEqual(Object.keys(variants), ["low", "high", "max"])
       assertEqual(variants.max, { reasoningEffort: "max" })
     },
   ],

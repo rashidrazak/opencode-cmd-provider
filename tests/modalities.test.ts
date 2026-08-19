@@ -17,6 +17,16 @@ run([
   ],
 
   [
+    "vision models added in the command-code 1.28.1 catalog support image input",
+    () => {
+      assertEqual(modelSupportsImageInput("Qwen/Qwen3.8-27B"), true)
+      assertEqual(modelSupportsImageInput("google/gemini-3.7-flash"), true)
+      assertEqual(modelSupportsImageInput("xai/grok-4.6"), true)
+      assertEqual(inputModalitiesForModel("xai/grok-4.6"), ["text", "image"])
+    },
+  ],
+
+  [
     "unknown models default to text-only",
     () => {
       assertEqual(modelSupportsImageInput("brand-new/model"), false)

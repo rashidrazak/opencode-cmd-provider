@@ -4,7 +4,7 @@
 export type CommandCodeInputType = "text" | "image"
 
 /**
- * Model input modalities from the command-code@1.15.1 bundled catalog.
+ * Model input modalities from the command-code@1.28.1 bundled catalog.
  * Models omitted here remain text-only so newly discovered IDs never claim
  * image support without upstream evidence.
  */
@@ -13,6 +13,7 @@ export const MODEL_INPUT_MODALITIES: Readonly<Record<string, readonly CommandCod
   "Qwen/Qwen3.6-Plus": ["text", "image"],
   "Qwen/Qwen3.7-Flash": ["text", "image"],
   "Qwen/Qwen3.7-Plus": ["text", "image"],
+  "Qwen/Qwen3.8-27B": ["text", "image"],
   "Qwen/Qwen3.8-Max": ["text", "image"],
   "claude-fable-5": ["text", "image"],
   "claude-haiku-4-5-20251001": ["text", "image"],
@@ -25,6 +26,7 @@ export const MODEL_INPUT_MODALITIES: Readonly<Record<string, readonly CommandCod
   "google/gemini-3.5-flash": ["text", "image"],
   "google/gemini-3.5-flash-lite": ["text", "image"],
   "google/gemini-3.6-flash": ["text", "image"],
+  "google/gemini-3.7-flash": ["text", "image"],
   "gpt-5.3-codex": ["text", "image"],
   "gpt-5.4": ["text", "image"],
   "gpt-5.4-mini": ["text", "image"],
@@ -45,6 +47,7 @@ export const MODEL_INPUT_MODALITIES: Readonly<Record<string, readonly CommandCod
   "thinkingmachines/inkling": ["text", "image"],
   "thinkingmachines/inkling-small": ["text", "image"],
   "xai/grok-4.5": ["text", "image"],
+  "xai/grok-4.6": ["text", "image"],
   "xiaomi/mimo-v2.5": ["text", "image"],
 }
 
