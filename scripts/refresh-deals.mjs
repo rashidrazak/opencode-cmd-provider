@@ -110,6 +110,25 @@ export function modelDealEntry(record) {
     ...(benchmarkFor(record) ? { benchmark: benchmarkFor(record) } : {}),
     ...(peakOffPeakFor(record) ? { peakOffPeak: peakOffPeakFor(record) } : {}),
   }
+  if (tiers.length > 1) {
+    const longTier = tiers[tiers.length - 1]
+    const base = ratesFor(longTier)
+    if (base) {
+      const cacheWrite = num(longTier.rates?.cacheWrite) ?? 0
+      const over = { ...base, cacheWrite }
+      const differsFromNow =
+        !now ||
+        over.input !== now.input ||
+        over.output !== now.output ||
+        over.cacheRead !== now.cacheRead
+      const hasCacheWrite = over.cacheWrite !== 0
+      if (differsFromNow || hasCacheWrite) {
+        // Only emit when long-context rates are distinct — MiniMax M3's
+        // >512K tier is byte-identical to its ≤512K tier, so we omit it.
+        entry.overContext = over
+      }
+    }
+  }
   if (!entry.free && free === false) {
     // non-free models always get the explicit flag so the shape is stable
     entry.free = false

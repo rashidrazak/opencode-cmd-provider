@@ -14,12 +14,12 @@ export function enrichCommandCodeModels(
   if (!provider?.models) return
   for (const [modelId, model] of Object.entries(provider.models)) {
     if (!model) continue
-    const entry = deals[modelId]
-    if (!entry) continue
     if (model.family === undefined) {
       const family = vendorFamilyForModel(modelId)
       if (family !== undefined) model.family = family
     }
+    const entry = deals[modelId]
+    if (!entry) continue
     if (model.options?.["cmd"] === undefined) {
       model.options ??= {}
       model.options["cmd"] = buildCmdOptions(entry)

@@ -88,4 +88,36 @@ run([
       assertEqual(dealsRows({ options: { cmd: { free: false } } }), [])
     },
   ],
+  [
+    "handles discount without endsAt and tier case-insensitive",
+    () => {
+      const rows = dealsRows({
+        options: {
+          cmd: {
+            discount: { pct: 50 },
+            tier: "premium",
+            free: false,
+          },
+        },
+      })
+      assertEqual(rows, [
+        ["Tier", "Premium"],
+        ["Deal", "50% off"],
+      ])
+    },
+  ],
+  [
+    "renders allowance for teampro via PLAN_CATALOG display",
+    () => {
+      const rows = dealsRows({
+        options: {
+          cmd: {
+            allowance: { teampro: 40 },
+            free: false,
+          },
+        },
+      })
+      assertEqual(rows, [["Team Pro allowance", "$40/mo"]])
+    },
+  ],
 ])

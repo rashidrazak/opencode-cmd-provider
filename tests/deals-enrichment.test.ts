@@ -119,20 +119,40 @@ run([
   ],
 
   [
-    "empty deals leaves the config untouched (degradation contract)",
+    "empty deals still enriches family but leaves options untouched (degradation contract)",
     () => {
       const config = {
         provider: {
           commandcode: {
             models: {
               "Qwen/Qwen3.8-27B": { name: "Qwen", limit: { context: 262144, output: 65536 } },
+              "unknown/foo": { name: "Foo", limit: { context: 16000, output: 4096 } },
             },
           },
         },
-      }
-      const baseline = JSON.parse(JSON.stringify(config))
+      } as const
       enrichCommandCodeModels(config as never, {})
-      assertEqual(config, baseline, "config must be byte-identical with empty deals")
+      const models = (
+        config as never as {
+          provider: { commandcode: { models: Record<string, Record<string, unknown>> } }
+        }
+      ).provider.commandcode.models
+      assertEqual(
+        models["Qwen/Qwen3.8-27B"].family,
+        "qwen",
+        "family is vendor-derived, never from deals",
+      )
+      assertEqual(
+        models["Qwen/Qwen3.8-27B"].options,
+        undefined,
+        "no options.cmd without deals entry",
+      )
+      assertEqual(
+        models["unknown/foo"].family,
+        undefined,
+        "unknown ids get no family even with empty deals",
+      )
+      assertEqual(models["unknown/foo"].options, undefined)
     },
   ],
 

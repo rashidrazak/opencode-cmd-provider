@@ -31,6 +31,16 @@ run([
     () => {
       assertEqual(vendorFamilyForModel("unknown/foo"), undefined)
       assertEqual(vendorFamilyForModel("gemini-flash"), undefined)
+      assertEqual(vendorFamilyForModel("qwen/foo"), undefined, "Qwen is case-sensitive (capital Q)")
+      assertEqual(vendorFamilyForModel(""), undefined)
+    },
+  ],
+  [
+    "is prefix-sensitive: gpt- maps but gpt without dash does not",
+    () => {
+      assertEqual(vendorFamilyForModel("gpt-5.6-sol"), "gpt")
+      assertEqual(vendorFamilyForModel("gpt-x"), "gpt")
+      assertEqual(vendorFamilyForModel("gpt"), undefined)
     },
   ],
 ])
