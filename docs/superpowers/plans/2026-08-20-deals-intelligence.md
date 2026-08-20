@@ -1530,6 +1530,7 @@ plugin API exposes `api.state.provider` + `api.state.session` (Session has
 `model: { id, providerID }`).
 
 **Files:**
+
 - Modify: `package.json` (add `./tui` export; add deps)
 - Modify: `tsconfig.json` (include tsx; jsx settings)
 - Create: `src/tui/index.tsx`
@@ -1669,8 +1670,14 @@ export function dealsRows(
     ])
   }
   if (cmd.benchmark) {
-    rows.push(["Intelligence", typeof cmd.benchmark.intelligence === "number" ? String(cmd.benchmark.intelligence) : "—"])
-    rows.push(["Tok/s", typeof cmd.benchmark.tokPerSec === "number" ? String(cmd.benchmark.tokPerSec) : "—"])
+    rows.push([
+      "Intelligence",
+      typeof cmd.benchmark.intelligence === "number" ? String(cmd.benchmark.intelligence) : "—",
+    ])
+    rows.push([
+      "Tok/s",
+      typeof cmd.benchmark.tokPerSec === "number" ? String(cmd.benchmark.tokPerSec) : "—",
+    ])
   }
   if (cmd.peakOffPeak) {
     rows.push([
@@ -1699,9 +1706,9 @@ function DealsPanel(props: { api: TuiPluginApi; session_id: string }) {
   const model = createMemo(() => {
     const session = props.api.state.session.get(props.session_id)
     if (!session?.model) return undefined
-    return props.api.state.provider
-      .find((provider: Provider) => provider.id === session.model?.providerID)
-      ?.models[session.model.id]
+    return props.api.state.provider.find(
+      (provider: Provider) => provider.id === session.model?.providerID,
+    )?.models[session.model.id]
   })
   const rows = createMemo(() => dealsRows(model()))
   return (
@@ -1762,7 +1769,10 @@ Modify `scripts/opencode-fixture.mjs` to accept an optional `--tui` argument: wh
 // after the existing config write:
 if (process.argv.includes("--tui")) {
   const tuiPluginPath = resolve(import.meta.dirname, "..", "dist", "tui.js")
-  writeFileSync(join(dir, "tui.json"), JSON.stringify({ plugin: [`file://${tuiPluginPath}`] }, null, 2))
+  writeFileSync(
+    join(dir, "tui.json"),
+    JSON.stringify({ plugin: [`file://${tuiPluginPath}`] }, null, 2),
+  )
   writeFileSync(
     join(dir, ".opencode", "package.json"),
     JSON.stringify(
