@@ -113,9 +113,13 @@ function DealsPanel(props: { api: TuiPluginApi; session_id: string }) {
   })
   const model = createMemo(() => {
     const current = switchedModel() ?? props.api.state.session.get(props.session_id)?.model
+    debugLog(`panel resolve session_id=${props.session_id} current=${JSON.stringify(current)}`)
     if (!current) return undefined
-    return props.api.state.provider.find((provider: Provider) => provider.id === current.providerID)
-      ?.models[current.id]
+    const found = props.api.state.provider.find(
+      (provider: Provider) => provider.id === current.providerID,
+    )?.models[current.id]
+    debugLog(`panel model resolved=${JSON.stringify(found?.options?.cmd ?? null)?.slice(0, 200)}`)
+    return found
   })
   const rows = createMemo(() => dealsRows(model()))
   return (
