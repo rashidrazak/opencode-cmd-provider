@@ -4,6 +4,8 @@
 // enriched options.cmd (produced by the server plugin's config hook). Renders
 // nothing when the model has no deals data — zero sidebar noise.
 import { Show, createMemo, onMount } from "solid-js"
+import { appendFileSync } from "node:fs"
+import { join } from "node:path"
 import type { Provider } from "@opencode-ai/sdk/v2"
 import type { TuiPlugin, TuiPluginApi, TuiPluginModule } from "@opencode-ai/plugin/tui"
 
@@ -58,30 +60,40 @@ const id = "commandcode.deals"
 
 type ModelRef = { id: string; providerID: string; variant?: string }
 
+const DEBUG_LOG = join(process.env.HOME ?? "/tmp", ".commandcode-deals-debug.log")
+
+function debugLog(line: string) {
+  try {
+    appendFileSync(DEBUG_LOG, `${Date.now()} ${line}\n`)
+  } catch {
+    // ignore
+  }
+}
+
+let mountCount = 0
+
 const tui: TuiPlugin = async (api) => {
-  // The slot host freezes plugin output after mount (solid `children()`
-  // wrapper), so reactive memo updates never repaint the sidebar. The host
-  // DOES re-render a slot entry when the registry changes, so on a mid-session
-  // model switch we unregister + re-register the entry to force a fresh panel.
-  let dispose: (() => void) | undefined
-  const register = () => {
-    dispose?.()
-    // The @opencode-ai/plugin type says register returns a string id, but the
-    // host's slots.tsx actually returns registry.register(...) — the dispose
-    // function. Cast to the runtime shape.
-    dispose = api.slots.register({
+  debugLog(`tui init; registerCount will log per call`)
+  let lastRegistered: string | undefined
+  const register = (modelId: string | undefined) => {
+    debugLog(`register called modelId=${modelId} last=${lastRegistered}`)
+    if (modelId === lastRegistered) return
+    lastRegistered = modelId
+    api.slots.register({
       order: 200,
       slots: {
         sidebar_content(_ctx, props) {
           return <DealsPanel api={api} session_id={props.session_id} onModelChange={register} />
         },
       },
-    }) as unknown as () => void
+    })
+    debugLog(`register done modelId=${modelId}`)
   }
-  register()
+  register(undefined)
 }
 
 function DealsPanel(props: { api: TuiPluginApi; session_id: string; onModelChange: () => void }) {
+  const myMount = ++mountCount
   const theme = () => props.api.theme.current
   const model = createMemo(() => {
     const current = props.api.state.session.get(props.session_id)?.model
@@ -89,16 +101,17 @@ function DealsPanel(props: { api: TuiPluginApi; session_id: string; onModelChang
     return props.api.state.provider.find((provider: Provider) => provider.id === current.providerID)
       ?.models[current.id]
   })
-  const rows = createMemo(() => dealsRows(model()))
-  let lastModelId = props.api.state.session.get(props.session_id)?.model?.id
+  const rows = createMemo(() => {
+    const r = dealsRows(model())
+    debugLog(`panel#${myMount} rows=${JSON.stringify(r)}`)
+    return r
+  })
   onMount(() => {
+    debugLog(`panel#${myMount} mounted session_id=${props.session_id}`)
     const off = props.api.event.on("session.updated", (event) => {
       if (event.properties.info.id !== props.session_id) return
-      const next = event.properties.info.model?.id
-      if (next !== lastModelId) {
-        lastModelId = next
-        props.onModelChange()
-      }
+      debugLog(`panel#${myMount} session.updated model=${event.properties.info.model?.id}`)
+      props.onModelChange(event.properties.info.model?.id)
     })
     props.api.lifecycle.onDispose(off)
   })
@@ -107,6 +120,7 @@ function DealsPanel(props: { api: TuiPluginApi; session_id: string; onModelChang
     if (r.length === 0) return undefined
     return ["Command Code", ...r.map(([key, value]) => `${key}: ${value}`)].join("\n")
   })
+  debugLog(`panel#${myMount} rendered lines=${JSON.stringify(lines())?.slice(0, 100)}`)
   return (
     <Show when={lines()}>
       <text fg={theme().textMuted}>{lines()}</text>
