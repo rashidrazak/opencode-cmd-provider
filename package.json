@@ -6,7 +6,8 @@
   "main": "./dist/index.js",
   "exports": {
     ".": "./dist/index.js",
-    "./server": "./dist/index.js"
+    "./server": "./dist/index.js",
+    "./tui": "./dist/tui.js"
   },
   "files": [
     "dist",
@@ -39,7 +40,10 @@
     "url": "git+https://github.com/rashidrazak/opencode-cmd-provider.git"
   },
   "dependencies": {
-    "@ai-sdk/provider": "^4.0.7"
+    "@ai-sdk/provider": "^4.0.7",
+    "@opentui/core": "^0.5.4",
+    "@opentui/solid": "^0.5.4",
+    "solid-js": "1.9.12"
   },
   "devDependencies": {
     "@opencode-ai/plugin": "*",
