@@ -30,23 +30,26 @@ pre-tag ritual and post-push verification.
 5. **Tag**: `git tag vX.Y.Z && git push origin vX.Y.Z` — the tag push triggers
    `release.yml`. Push the tag only; main is already up to date.
 
-The catalog snapshot and capability facts (reasoning, pricing, and input
-modalities) are **not** your job: the pipeline refreshes them and fails loudly
-if the live catalog or the CLI bundle drifted (see ADR 0003). The gate ignores
-the date-stamp-only `FACTS_LAST_REFRESHED` line (`-I 'FACTS_LAST_REFRESHED'`),
-so a same-day tag passes as long as the data is fresh. Running
-`npm run refresh:snapshot` locally beforehand is optional — do it if you want
-the diff visible before tagging.
+Catalog freshness (`snapshot.ts` / `facts.ts` / `deals.ts`) is a **gate, not an auto-fix**:
+the pipeline regenerates each catalog and fails loudly if any drifted — it never
+moves the tag or pushes to `main` itself (see ADR 0003). Date-stamp lines are
+ignored (`-I 'FACTS_LAST_REFRESHED'` / `-I 'DEAL_LAST_REFRESHED'`), so a
+same-day tag passes as long as the data is fresh. Running `npm run refresh`
+(both catalogs at once, offline from `tests/fixtures/*.html`) or the individual
+`npm run refresh:snapshot` / `npm run refresh:deals` (add `-- --fixtures` for
+offline) locally beforehand is optional — do it if you want the diff visible
+before tagging. `npm run build` needs `bun` on PATH (TUI solid transform).
 
 ## What the pipeline does (no action needed)
 
 Asserts the tag's commit is on `origin/main` → asserts tag ==
-`v<package.json.version>` → build + full test suite → refreshes the catalog
-snapshot and capability facts (including input modalities from the CLI bundle)
-and fails with instructions if any drifted (never moving the tag or pushing to
-main itself) → OIDC npm publish (trusted publishing, provenance automatic) →
-GitHub Release from the CHANGELOG section. Provenance requires the repository
-to be public.
+`v<package.json.version>` → build + full test suite (`bun` required) →
+refreshes the catalog snapshot + capability facts (including input modalities
+from the CLI bundle) + deals catalog (tier/benchmarks/deals from docs) and fails
+with instructions if any drifted (never moving the tag or pushing to main
+itself) → OIDC npm publish (trusted publishing, provenance automatic) → GitHub
+Release from the CHANGELOG section. Provenance requires the repository to be
+public.
 
 ## Verify after push
 
@@ -60,9 +63,11 @@ to be public.
 
 ## Failure recovery
 
-- **A stale snapshot fails the run** — nothing shipped. Refresh locally
-  (`npm run refresh:snapshot`), commit `src/catalog/snapshot.ts` and
-  `src/catalog/facts.ts`, land them on main via PR, then re-tag.
+- **A stale catalog fails the run** — nothing shipped. Refresh locally
+  (`npm run refresh` for both, or `npm run refresh:snapshot` /
+  `npm run refresh:deals -- --fixtures`), commit the changed
+  `src/catalog/{snapshot,facts,deals}.ts` (and `tests/fixtures/*.html` if you
+  re-captured docs pages), land on main via PR, then re-tag.
 - **The refresh cannot generate facts** ("CLI modality catalog is missing API
   models" or "could not parse ... cli.mjs") — nothing shipped. Unlike a stale
   snapshot, this cannot be fixed by refreshing locally: `npm run
