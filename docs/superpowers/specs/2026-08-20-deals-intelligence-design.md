@@ -56,25 +56,37 @@ mock, the scraper replaces the file.
 
 ```ts
 export interface DealRates {
-  input: number; output: number; cacheRead: number; cacheWrite: number
+  input: number
+  output: number
+  cacheRead: number
+  cacheWrite: number
 }
 
 export interface ModelDeals {
-  allowance: Partial<Record<"go"|"goat"|"pro"|"max"|"max20", number>>  // $/mo
-  discount?: { pct: number; endsAt?: string }   // "permanent" | "while capacity lasts" | ISO date
-  was?: { input: number; output: number; cacheRead: number }  // pre-deal prices
+  allowance: Partial<Record<"go" | "goat" | "pro" | "max" | "max20", number>> // $/mo
+  discount?: { pct: number; endsAt?: string } // "permanent" | "while capacity lasts" | ISO date
+  was?: { input: number; output: number; cacheRead: number } // pre-deal prices
   peakOffPeak?: {
-    peak: DealRates; offPeak: DealRates
-    windows: string  // e.g. "01-04 & 06-10 UTC"
+    peak: DealRates
+    offPeak: DealRates
+    windows: string // e.g. "01-04 & 06-10 UTC"
   }
   benchmark?: { intelligence?: number; tokPerSec?: number }
   free: boolean
 }
 
 export const MODEL_DEALS: Readonly<Record<string, ModelDeals>>
-export const PLAN_CATALOG: Readonly<Record<string, {
-  price: number; credits: number; window5h: number; windowWeek: number
-}>>
+export const PLAN_CATALOG: Readonly<
+  Record<
+    string,
+    {
+      price: number
+      credits: number
+      window5h: number
+      windowWeek: number
+    }
+  >
+>
 export const DEAL_SOURCE_URL: string
 export const DEAL_LAST_REFRESHED: string
 export const DEAL_PACKAGE_VERSION: string
@@ -119,7 +131,7 @@ is present.
 ### Degradation contract (hard rule)
 
 Every enrichment site is guarded: a missing field, empty map, or absent module
-skips *that enrichment only*. Never throw; never emit schema-invalid config.
+skips _that enrichment only_. Never throw; never emit schema-invalid config.
 Snapshot registration, reasoning, modalities, and facts-based cost are
 untouched. A test asserts that with a stub/empty `deals.ts`, the generated
 config is byte-identical to today's output.
