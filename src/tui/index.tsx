@@ -3,7 +3,7 @@
 // sidebar (sidebar_content slot). Renders deal details from the picked model's
 // enriched options.cmd (produced by the server plugin's config hook). Renders
 // nothing when the model has no deals data — zero sidebar noise.
-import { For, Show, createMemo } from "solid-js"
+import { Show, createMemo } from "solid-js"
 import { appendFileSync } from "node:fs"
 import { join } from "node:path"
 import type { Provider } from "@opencode-ai/sdk/v2"
@@ -85,7 +85,9 @@ function DealsPanel(props: { api: TuiPluginApi; session_id: string }) {
   const theme = () => props.api.theme.current
   const session = createMemo(() => {
     const s = props.api.state.session.get(props.session_id)
-    debugLog(`panel session session_id=${props.session_id} model=${JSON.stringify(s?.model ?? null)}`)
+    debugLog(
+      `panel session session_id=${props.session_id} model=${JSON.stringify(s?.model ?? null)}`,
+    )
     return s
   })
   const model = createMemo(() => {
@@ -103,28 +105,19 @@ function DealsPanel(props: { api: TuiPluginApi; session_id: string }) {
     debugLog(`panel rows count=${r.length} rows=${JSON.stringify(r)}`)
     return r
   })
-  const shown = createMemo(() => {
+  // Render as a single text node: the slot host wraps plugin output in solid's
+  // `children()`, which freezes structured JSX (Show/For) after mount. Text
+  // nodes update reactively (the builtin Context panel proves this), so the
+  // whole panel is one computed string.
+  const body = createMemo(() => {
     const r = rows()
-    debugLog(`panel SHOW evaluated when=${r.length > 0} rows=${JSON.stringify(r)}`)
-    return r.length > 0
+    if (r.length === 0) return undefined
+    return ["Command Code", ...r.map(([key, value]) => `${key}: ${value}`)].join("\n")
   })
+  debugLog(`panel body=${JSON.stringify(body())}`)
   return (
-    <Show when={shown()}>
-      <box>
-        <text fg={theme().text}>
-          <b>Command Code</b>
-        </text>
-        <For each={rows()}>
-          {(row) => {
-            debugLog(`panel RENDER row=${JSON.stringify(row)}`)
-            return (
-              <text fg={theme().textMuted}>
-                {row[0]}: {row[1]}
-              </text>
-            )
-          }}
-        </For>
-      </box>
+    <Show when={body()}>
+      <text fg={theme().textMuted}>{body()}</text>
     </Show>
   )
 }
