@@ -72,10 +72,20 @@ function debugLog(line: string) {
 
 const tui: TuiPlugin = async (api) => {
   debugLog(`plugin init; version=${api.app.version}`)
-  api.event.on("event", (event) => {
-    const props = (event as { properties?: Record<string, unknown> }).properties
-    debugLog(`event type=${event.type} sessionID=${String(props?.sessionID ?? "?")} props=${JSON.stringify(props)?.slice(0, 300)}`)
-  })
+  const probe = <T extends Parameters<typeof api.event.on>[0]>(type: T) => {
+    api.event.on(type, (event) => {
+      const props = (event as { properties?: Record<string, unknown> }).properties
+      debugLog(
+        `event type=${event.type} sessionID=${String(props?.sessionID ?? "?")} props=${JSON.stringify(props)?.slice(0, 300)}`,
+      )
+    })
+  }
+  probe("session.updated")
+  probe("session.status")
+  probe("message.updated")
+  probe("session.next.model.switched")
+  probe("session.next.agent.switched")
+  probe("session.next.step.started")
   api.slots.register({
     order: 200,
     slots: {
