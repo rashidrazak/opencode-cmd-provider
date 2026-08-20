@@ -16,4 +16,27 @@ const config = {
 mkdirSync(join(dir, ".opencode"), { recursive: true })
 writeFileSync(join(dir, "opencode.json"), JSON.stringify(config, null, 2))
 writeFileSync(join(dir, ".opencode", "package.json"), JSON.stringify({ private: true }))
+if (process.argv.includes("--tui")) {
+  const tuiPluginPath = resolve(import.meta.dirname, "..", "dist", "tui.js")
+  writeFileSync(
+    join(dir, "tui.json"),
+    JSON.stringify({ plugin: [`file://${tuiPluginPath}`] }, null, 2),
+  )
+  writeFileSync(
+    join(dir, ".opencode", "package.json"),
+    JSON.stringify(
+      {
+        private: true,
+        dependencies: {
+          "@opencode-ai/plugin": "*",
+          "@opentui/core": "^0.5.4",
+          "@opentui/solid": "^0.5.4",
+          "solid-js": "1.9.12",
+        },
+      },
+      null,
+      2,
+    ),
+  )
+}
 process.stdout.write(dir)
