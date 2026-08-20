@@ -1516,8 +1516,292 @@ git commit -m "docs(deals): release ritual + README for deals intelligence"
 
 ---
 
+# Task 11: TUI sidebar deals panel (visible surface)
+
+User validation of Milestone 0 found that `family`/`options.cmd` are invisible in
+OpenCode's model pickers (neither the TUI nor the web picker renders them). The
+picked surface: a TUI plugin that registers the `sidebar_content` slot and shows
+a "Command Code" section in the session's right sidebar with the picked model's
+deal details. Verified against opencode source: the sidebar is a slot system
+(`TuiHostSlotMap.sidebar_content`, multi-contributor — builtin Context/Todo/MCP
+panels stack via the same slot), external npm packages can ship TUI plugins
+(`exports["./tui"]` → target-only module `default export { id, tui }`), and the
+plugin API exposes `api.state.provider` + `api.state.session` (Session has
+`model: { id, providerID }`).
+
+**Files:**
+- Modify: `package.json` (add `./tui` export; add deps)
+- Modify: `tsconfig.json` (include tsx; jsx settings)
+- Create: `src/tui/index.tsx`
+- Create: `tests/tui-deals-panel.test.ts`
+- Modify: `scripts/opencode-fixture.mjs` (optional `--tui` flag for the demo)
+
+- [ ] **Step 1: Install the TUI runtime dependencies**
+
+```bash
+npm install @opentui/core@^0.5.4 @opentui/solid@^0.5.4 && npm install --save-exact solid-js@1.9.12
+```
+
+(`solid-js@1.9.12` is `@opentui/solid`'s peer dep; pin exact to match.)
+
+- [ ] **Step 2: Add the `./tui` export and deps to `package.json`**
+
+In `exports`, after `"./server"`, add:
+
+```json
+"./tui": "./dist/tui.js"
+```
+
+- [ ] **Step 3: Update `tsconfig.json`**
+
+Add to `include`: `"src/**/*.tsx"`. Add to `compilerOptions`:
+
+```json
+"jsx": "react-jsx",
+"jsxImportSource": "@opentui/solid"
+```
+
+- [ ] **Step 4: Write the failing test `tests/tui-deals-panel.test.ts`**
+
+```ts
+// tests/tui-deals-panel.test.ts — deals sidebar panel data extraction
+import { dealsRows } from "../src/tui/index.js"
+import { assertEqual, run } from "./harness.js"
+
+run([
+  [
+    "extracts rows from a model with full deals data",
+    () => {
+      const rows = dealsRows({
+        options: {
+          cmd: {
+            tier: "premium",
+            allowance: { goat: 40, pro: 60 },
+            discount: { pct: 50, endsAt: "2026-12-31" },
+            benchmark: { intelligence: 56, tokPerSec: 339 },
+            free: false,
+          },
+        },
+      })
+      assertEqual(rows, [
+        ["Tier", "premium"],
+        ["goat allowance", "$40/mo"],
+        ["pro allowance", "$60/mo"],
+        ["Deal", "50% off until 2026-12-31"],
+        ["Intelligence", "56"],
+        ["Tok/s", "339"],
+      ])
+    },
+  ],
+
+  [
+    "handles free models and peak/off-peak",
+    () => {
+      const rows = dealsRows({
+        options: {
+          cmd: {
+            free: true,
+            peakOffPeak: { windows: "01-04 & 06-10 UTC" },
+          },
+        },
+      })
+      assertEqual(rows, [
+        ["Status", "FREE"],
+        ["Rates", "peak/off-peak (01-04 & 06-10 UTC)"],
+      ])
+    },
+  ],
+
+  [
+    "returns an empty list when there is no cmd data",
+    () => {
+      assertEqual(dealsRows({ options: {} }), [])
+      assertEqual(dealsRows(undefined), [])
+      assertEqual(dealsRows({ options: { cmd: { free: false } } }), [])
+    },
+  ],
+])
+```
+
+- [ ] **Step 5: Run test to verify it fails**
+
+Run: `npx tsx tests/tui-deals-panel.test.ts`
+Expected: FAIL with "module not found" / "dealsRows is not a function".
+
+- [ ] **Step 6: Write `src/tui/index.tsx`**
+
+```tsx
+/** @jsxImportSource @opentui/solid */
+// src/tui/index.tsx — TUI plugin: "Command Code" deals section in the session
+// sidebar (sidebar_content slot). Renders deal details from the picked model's
+// enriched options.cmd (produced by the server plugin's config hook). Renders
+// nothing when the model has no deals data — zero sidebar noise.
+import { For, Show, createMemo } from "solid-js"
+import type { Provider } from "@opencode-ai/sdk/v2"
+import type { TuiPlugin, TuiPluginApi, TuiPluginModule } from "@opencode-ai/plugin/tui"
+
+type Cmd = {
+  free?: unknown
+  tier?: unknown
+  allowance?: Record<string, unknown> | undefined
+  discount?: { pct?: unknown; endsAt?: unknown } | undefined
+  benchmark?: { intelligence?: unknown; tokPerSec?: unknown } | undefined
+  peakOffPeak?: { windows?: unknown } | undefined
+}
+
+export function dealsRows(
+  model: { options?: { cmd?: Record<string, unknown> } } | undefined,
+): Array<[string, string]> {
+  const cmd = model?.options?.cmd as Cmd | undefined
+  if (!cmd) return []
+  const rows: Array<[string, string]> = []
+  if (cmd.free === true) rows.push(["Status", "FREE"])
+  if (typeof cmd.tier === "string") rows.push(["Tier", cmd.tier])
+  if (cmd.allowance) {
+    for (const [plan, value] of Object.entries(cmd.allowance)) {
+      if (typeof value === "number") rows.push([`${plan} allowance`, `$${value}/mo`])
+    }
+  }
+  if (cmd.discount && typeof cmd.discount.pct === "number") {
+    rows.push([
+      "Deal",
+      `${cmd.discount.pct}% off${typeof cmd.discount.endsAt === "string" ? ` until ${cmd.discount.endsAt}` : ""}`,
+    ])
+  }
+  if (cmd.benchmark) {
+    rows.push(["Intelligence", typeof cmd.benchmark.intelligence === "number" ? String(cmd.benchmark.intelligence) : "—"])
+    rows.push(["Tok/s", typeof cmd.benchmark.tokPerSec === "number" ? String(cmd.benchmark.tokPerSec) : "—"])
+  }
+  if (cmd.peakOffPeak) {
+    rows.push([
+      "Rates",
+      `peak/off-peak${typeof cmd.peakOffPeak.windows === "string" ? ` (${cmd.peakOffPeak.windows})` : ""}`,
+    ])
+  }
+  return rows
+}
+
+const id = "commandcode.deals"
+
+const tui: TuiPlugin = async (api) => {
+  api.slots.register({
+    order: 200,
+    slots: {
+      sidebar_content(_ctx, props) {
+        return <DealsPanel api={api} session_id={props.session_id} />
+      },
+    },
+  })
+}
+
+function DealsPanel(props: { api: TuiPluginApi; session_id: string }) {
+  const theme = () => props.api.theme.current
+  const model = createMemo(() => {
+    const session = props.api.state.session.get(props.session_id)
+    if (!session?.model) return undefined
+    return props.api.state.provider
+      .find((provider: Provider) => provider.id === session.model?.providerID)
+      ?.models[session.model.id]
+  })
+  const rows = createMemo(() => dealsRows(model()))
+  return (
+    <Show when={rows().length > 0}>
+      <box>
+        <text fg={theme().text}>
+          <b>Command Code</b>
+        </text>
+        <For each={rows()}>
+          {(row) => (
+            <text fg={theme().textMuted}>
+              {row[0]}: {row[1]}
+            </text>
+          )}
+        </For>
+      </box>
+    </Show>
+  )
+}
+
+const plugin: TuiPluginModule & { id: string } = { id, tui }
+
+export default plugin
+```
+
+Note: `session.model` is optional in the SDK — guard it. `provider.models[session.model.id]` is `Provider["models"]` keyed by model id.
+
+- [ ] **Step 7: Run the test, typecheck, format**
+
+```bash
+npx tsx tests/tui-deals-panel.test.ts   # expect all ok, exit 0
+npm run typecheck                        # expect clean
+npx prettier --write src/tui/index.tsx tests/tui-deals-panel.test.ts
+npm run format:check                     # expect clean
+```
+
+- [ ] **Step 8: Build and verify the module shape**
+
+```bash
+npm run build
+node -e "import('./dist/tui.js').then((m) => console.log(m.default.id, typeof m.default.tui))"
+```
+
+Expected: `commandcode.deals function`.
+
+- [ ] **Step 9: Commit**
+
+```bash
+git add package.json package-lock.json tsconfig.json src/tui/index.tsx tests/tui-deals-panel.test.ts
+git commit -m "feat(deals): TUI sidebar deals panel"
+```
+
+- [ ] **Step 10: Demo wiring — fixture `--tui` flag**
+
+Modify `scripts/opencode-fixture.mjs` to accept an optional `--tui` argument: when present, additionally write `tui.json` into the fixture dir and add the TUI deps to `.opencode/package.json`:
+
+```js
+// after the existing config write:
+if (process.argv.includes("--tui")) {
+  const tuiPluginPath = resolve(import.meta.dirname, "..", "dist", "tui.js")
+  writeFileSync(join(dir, "tui.json"), JSON.stringify({ plugin: [`file://${tuiPluginPath}`] }, null, 2))
+  writeFileSync(
+    join(dir, ".opencode", "package.json"),
+    JSON.stringify(
+      {
+        private: true,
+        dependencies: {
+          "@opencode-ai/plugin": "*",
+          "@opentui/core": "^0.5.4",
+          "@opentui/solid": "^0.5.4",
+          "solid-js": "1.9.12",
+        },
+      },
+      null,
+      2,
+    ),
+  )
+}
+```
+
+Then run `bun install` in the fixture dir (or `npm install`), build, and verify:
+
+```bash
+npm run build
+FIXTURE=$(node scripts/opencode-fixture.mjs --tui)
+cd "$FIXTURE" && bun install
+opencode   # open the fixture dir; start a session with a deals model
+```
+
+Expected: right sidebar shows a "Command Code" section with the picked model's rows (allowance, deal, benchmark). Models without deals data show nothing.
+
+Commit: `git add scripts/opencode-fixture.mjs && git commit -m "feat(deals): fixture tui mode for demo"`.
+
+- [ ] **Step 11: User validation**
+
+Update Task 6's sign-off to include the sidebar panel check. Ask the user to confirm the panel renders as desired before Milestone 1.
+
 # Self-review notes
 
-- **Spec coverage:** plan covers all spec sections — data model (Tasks 1, 9), scraper (Tasks 7-9), runtime integration + degradation (Tasks 2-5), validation milestone (Task 6), testing (all tasks), release (Task 10).
+- **Spec coverage:** plan covers all spec sections — data model (Tasks 1, 9), scraper (Tasks 7-9), runtime integration + degradation (Tasks 2-5), validation milestone (Tasks 6, 11), testing (all tasks), release (Task 10).
+- **Visible surface:** Task 11 (TUI sidebar panel) was added after user validation rejected the invisible-metadata-only UX. The panel reads the enriched `options.cmd` from `api.state.provider` — same data, now visible.
 - **Known deviation:** `context_over_200k` — the docs show identical MiniMax M3 rates for both context ranges today, so the mock carries no `overContext` sample; the type, the `options.cmd` passthrough, and the `cost.context_over_200k` enrichment exist and are guarded (tested via the synthetic `DEALS` entry in Task 3).
 - **Type consistency:** `PlanId`, `DealRates`, `PlanInfo`, `ModelDeals`, `PLAN_CATALOG` are defined in Task 1 and emitted verbatim by the Task 9 emitter (explicitly called out in Task 9 Step 3, with `npm run typecheck` as the sync gate). `enrichCommandCodeModels(config, deals = MODEL_DEALS)` and `renderPlanSummary(plan, deals, catalog)` signatures match their consumers in Tasks 3-5. The emitter's `PLAN_CATALOG` literal matches Task 1's, so `cmd_plan_summary` keeps working after Milestone 1 replaces the mock.
