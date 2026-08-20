@@ -4,6 +4,8 @@
 // enriched options.cmd (produced by the server plugin's config hook). Renders
 // nothing when the model has no deals data — zero sidebar noise.
 import { For, Show, createMemo, createSignal, onMount } from "solid-js"
+import { writeFileSync, appendFileSync, mkdirSync } from "node:fs"
+import { join } from "node:path"
 import type { Provider } from "@opencode-ai/sdk/v2"
 import type { TuiPlugin, TuiPluginApi, TuiPluginModule } from "@opencode-ai/plugin/tui"
 
@@ -58,7 +60,22 @@ const id = "commandcode.deals"
 
 type ModelRef = { id: string; providerID: string; variant?: string }
 
+const DEBUG_LOG = join(process.env.HOME ?? "/tmp", ".commandcode-deals-debug.log")
+
+function debugLog(line: string) {
+  try {
+    appendFileSync(DEBUG_LOG, `${Date.now()} ${line}\n`)
+  } catch {
+    // ignore
+  }
+}
+
 const tui: TuiPlugin = async (api) => {
+  debugLog(`plugin init; version=${api.app.version}`)
+  api.event.on("event", (event) => {
+    const props = (event as { properties?: Record<string, unknown> }).properties
+    debugLog(`event type=${event.type} sessionID=${String(props?.sessionID ?? "?")} props=${JSON.stringify(props)?.slice(0, 300)}`)
+  })
   api.slots.register({
     order: 200,
     slots: {
