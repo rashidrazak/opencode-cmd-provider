@@ -92,7 +92,11 @@ const tui: TuiPlugin = async (api) => {
   register(undefined)
 }
 
-function DealsPanel(props: { api: TuiPluginApi; session_id: string; onModelChange: () => void }) {
+function DealsPanel(props: {
+  api: TuiPluginApi
+  session_id: string
+  onModelChange: (modelId: string | undefined) => void
+}) {
   const myMount = ++mountCount
   const theme = () => props.api.theme.current
   const model = createMemo(() => {
