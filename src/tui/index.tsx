@@ -4,7 +4,7 @@
 // enriched options.cmd (produced by the server plugin's config hook). Renders
 // nothing when the model has no deals data — zero sidebar noise.
 import { For, Show, createMemo } from "solid-js"
-import type { Provider } from "@opencode-ai/sdk/v2"
+import type { Message, Provider } from "@opencode-ai/sdk/v2"
 import type { TuiPlugin, TuiPluginApi, TuiPluginModule } from "@opencode-ai/plugin/tui"
 
 type Cmd = {
@@ -56,6 +56,23 @@ export function dealsRows(
 
 const id = "commandcode.deals"
 
+type ModelRef = { id: string; providerID: string; variant?: string }
+
+// The TUI's session store never updates `session.model` on mid-session model
+// switches — the host only prepends a synthetic "model-switched" message
+// (absent from the SDK `Message` type). Derive the current model from the
+// latest such message, falling back to session.model.
+export function currentModelFor(
+  session: { model?: ModelRef } | undefined,
+  messages: ReadonlyArray<Message>,
+): ModelRef | undefined {
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const message = messages[index] as { type?: string; model?: ModelRef } | undefined
+    if (message?.type === "model-switched" && message.model) return message.model
+  }
+  return session?.model
+}
+
 const tui: TuiPlugin = async (api) => {
   api.slots.register({
     order: 200,
@@ -71,10 +88,11 @@ function DealsPanel(props: { api: TuiPluginApi; session_id: string }) {
   const theme = () => props.api.theme.current
   const model = createMemo(() => {
     const session = props.api.state.session.get(props.session_id)
-    if (!session?.model) return undefined
-    return props.api.state.provider.find(
-      (provider: Provider) => provider.id === session.model?.providerID,
-    )?.models[session.model.id]
+    const messages = props.api.state.session.messages(props.session_id)
+    const current = currentModelFor(session, messages)
+    if (!current) return undefined
+    return props.api.state.provider.find((provider: Provider) => provider.id === current.providerID)
+      ?.models[current.id]
   })
   const rows = createMemo(() => dealsRows(model()))
   return (

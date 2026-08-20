@@ -1,5 +1,5 @@
 // tests/tui-deals-panel.test.ts — deals sidebar panel data extraction
-import { dealsRows } from "../src/tui/index.js"
+import { currentModelFor, dealsRows } from "../src/tui/index.js"
 import { assertEqual, run } from "./harness.js"
 
 run([
@@ -52,6 +52,34 @@ run([
       assertEqual(dealsRows({ options: {} }), [])
       assertEqual(dealsRows(undefined), [])
       assertEqual(dealsRows({ options: { cmd: { free: false } } }), [])
+    },
+  ],
+
+  [
+    "currentModelFor picks the latest model-switched message over session.model",
+    () => {
+      const session = { model: { id: "claude-sonnet-5", providerID: "commandcode" } }
+      const messages = [
+        { type: "user" },
+        { type: "model-switched", model: { id: "gpt-5.6-sol", providerID: "commandcode" } },
+        { type: "model-switched", model: { id: "Qwen/Qwen3.8-27B", providerID: "commandcode" } },
+      ] as never
+      assertEqual(currentModelFor(session, messages as never), {
+        id: "Qwen/Qwen3.8-27B",
+        providerID: "commandcode",
+      })
+    },
+  ],
+
+  [
+    "currentModelFor falls back to session.model when no switch happened",
+    () => {
+      const session = { model: { id: "claude-sonnet-5", providerID: "commandcode" } }
+      assertEqual(currentModelFor(session, [{ type: "user" }] as never), {
+        id: "claude-sonnet-5",
+        providerID: "commandcode",
+      })
+      assertEqual(currentModelFor(undefined, [] as never), undefined)
     },
   ],
 ])
