@@ -39,6 +39,19 @@ run([
   ],
 
   [
+    "resolvePlan falls back to default when whoami is unreachable",
+    async () => {
+      assertEqual(
+        await resolvePlan(undefined, {
+          COMMANDCODE_API_KEY: "k",
+          COMMANDCODE_API_BASE: "http://127.0.0.1:1",
+        }),
+        "go",
+      )
+    },
+  ],
+
+  [
     "renderPlanSummary shows plan info and per-model allowances",
     () => {
       const out = renderPlanSummary("goat", MODEL_DEALS, PLAN_CATALOG)
@@ -47,7 +60,8 @@ run([
       assert(out.includes("$14"), "must show 5h window")
       assert(out.includes("$35"), "must show weekly window")
       assert(out.includes("Qwen/Qwen3.8-27B"), "must list an allowed model")
-      assert(out.includes("$70"), "must show the Qwen allowance")
+      assert(out.includes("23,972"), "must show the Qwen monthly request estimate")
+      assert(out.includes("| $70 |"), "must show the Qwen allowance")
       assert(out.includes("50%"), "must show the Gemini discount")
       assert(out.includes("free"), "must mention free models")
       assert(out.includes("pricing-limits"), "must link the pricing page")

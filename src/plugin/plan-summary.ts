@@ -100,6 +100,7 @@ export function renderPlanSummary(
   lines.push("| Model | $/mo allowance | ~requests/mo | Deal |")
   lines.push("| --- | --- | --- | --- |")
   for (const [id, d] of [...rows, ...freeRows]) {
+    const safeId = id.replace(/[|`]/g, " ")
     const allowance = d.allowance?.[plan]
     const estimate =
       allowance && d.free === false
@@ -113,7 +114,7 @@ export function renderPlanSummary(
       )
     if (d.peakOffPeak) dealBits.push(`peak/off-peak (${d.peakOffPeak.windows})`)
     lines.push(
-      `| \`${id}\` | ${allowance !== undefined ? `$${allowance}` : "free"} | ${estimate} | ${dealBits.join("; ") || "—"} |`,
+      `| \`${safeId}\` | ${allowance !== undefined ? `$${allowance}` : "free"} | ${estimate} | ${dealBits.join("; ") || "—"} |`,
     )
   }
   lines.push("")
@@ -124,6 +125,8 @@ export function renderPlanSummary(
 
 function estimateMonthlyRequests(modelId: string, allowance: number): number {
   const cost = MODEL_COSTS[modelId]
+  // No cost row bundled (e.g. not yet in the snapshot): the allowance is the
+  // best estimate we have, so report it directly as a placeholder.
   if (!cost) return Math.round(allowance)
   const perRequest =
     (REQUEST_PROFILE.input * cost.input +
@@ -131,7 +134,7 @@ function estimateMonthlyRequests(modelId: string, allowance: number): number {
       REQUEST_PROFILE.cacheRead * cost.cacheRead) /
     1_000_000
   if (perRequest <= 0) return Math.round(allowance)
-  return Math.floor(allowance / perRequest)
+  return Math.floor(allowance / perRequest + 1e-9)
 }
 
 export function planSummaryTool() {
@@ -139,7 +142,7 @@ export function planSummaryTool() {
     description:
       "Show the Command Code plan's credits, usage windows, and per-model monthly allowances with estimated monthly request counts and active deals. Set COMMANDCODE_PLAN (go|goat|pro|max|max20|provider) to pin the plan without network access.",
     args: {
-      plan: tool.schema.string().optional(),
+      plan: tool.schema.string().optional().describe("go|goat|pro|max|max20|provider"),
     },
     execute: async (args) => renderPlanSummary(await resolvePlan(args.plan)),
   })
