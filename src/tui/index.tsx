@@ -3,9 +3,7 @@
 // sidebar (sidebar_content slot). Renders deal details from the picked model's
 // enriched options.cmd (produced by the server plugin's config hook). Renders
 // nothing when the model has no deals data — zero sidebar noise.
-import { Show, createMemo } from "solid-js"
-import { appendFileSync } from "node:fs"
-import { join } from "node:path"
+import { Show, createMemo, onMount } from "solid-js"
 import type { Provider } from "@opencode-ai/sdk/v2"
 import type { TuiPlugin, TuiPluginApi, TuiPluginModule } from "@opencode-ai/plugin/tui"
 
@@ -60,64 +58,55 @@ const id = "commandcode.deals"
 
 type ModelRef = { id: string; providerID: string; variant?: string }
 
-const DEBUG_LOG = join(process.env.HOME ?? "/tmp", ".commandcode-deals-debug.log")
-
-function debugLog(line: string) {
-  try {
-    appendFileSync(DEBUG_LOG, `${Date.now()} ${line}\n`)
-  } catch {
-    // ignore
-  }
-}
-
 const tui: TuiPlugin = async (api) => {
-  api.slots.register({
-    order: 200,
-    slots: {
-      sidebar_content(_ctx, props) {
-        return <DealsPanel api={api} session_id={props.session_id} />
+  // The slot host freezes plugin output after mount (solid `children()`
+  // wrapper), so reactive memo updates never repaint the sidebar. The host
+  // DOES re-render a slot entry when the registry changes, so on a mid-session
+  // model switch we unregister + re-register the entry to force a fresh panel.
+  let dispose: (() => void) | undefined
+  const register = () => {
+    dispose?.()
+    dispose = api.slots.register({
+      order: 200,
+      slots: {
+        sidebar_content(_ctx, props) {
+          return <DealsPanel api={api} session_id={props.session_id} onModelChange={register} />
+        },
       },
-    },
-  })
+    })
+  }
+  register()
 }
 
-function DealsPanel(props: { api: TuiPluginApi; session_id: string }) {
+function DealsPanel(props: { api: TuiPluginApi; session_id: string; onModelChange: () => void }) {
   const theme = () => props.api.theme.current
-  const session = createMemo(() => {
-    const s = props.api.state.session.get(props.session_id)
-    debugLog(
-      `panel session session_id=${props.session_id} model=${JSON.stringify(s?.model ?? null)}`,
-    )
-    return s
-  })
   const model = createMemo(() => {
-    const current = session()?.model
-    debugLog(`panel model current=${JSON.stringify(current ?? null)}`)
+    const current = props.api.state.session.get(props.session_id)?.model
     if (!current) return undefined
-    const found = props.api.state.provider.find(
-      (provider: Provider) => provider.id === current.providerID,
-    )?.models[current.id]
-    debugLog(`panel model found=${JSON.stringify(found?.options?.cmd ?? null)?.slice(0, 200)}`)
-    return found
+    return props.api.state.provider.find((provider: Provider) => provider.id === current.providerID)
+      ?.models[current.id]
   })
-  const rows = createMemo(() => {
-    const r = dealsRows(model())
-    debugLog(`panel rows count=${r.length} rows=${JSON.stringify(r)}`)
-    return r
+  const rows = createMemo(() => dealsRows(model()))
+  let lastModelId = props.api.state.session.get(props.session_id)?.model?.id
+  onMount(() => {
+    const off = props.api.event.on("session.updated", (event) => {
+      if (event.properties.info.id !== props.session_id) return
+      const next = event.properties.info.model?.id
+      if (next !== lastModelId) {
+        lastModelId = next
+        props.onModelChange()
+      }
+    })
+    props.api.lifecycle.onDispose(off)
   })
-  // Render as a single text node: the slot host wraps plugin output in solid's
-  // `children()`, which freezes structured JSX (Show/For) after mount. Text
-  // nodes update reactively (the builtin Context panel proves this), so the
-  // whole panel is one computed string.
-  const body = createMemo(() => {
+  const lines = createMemo(() => {
     const r = rows()
     if (r.length === 0) return undefined
     return ["Command Code", ...r.map(([key, value]) => `${key}: ${value}`)].join("\n")
   })
-  debugLog(`panel body=${JSON.stringify(body())}`)
   return (
-    <Show when={body()}>
-      <text fg={theme().textMuted}>{body()}</text>
+    <Show when={lines()}>
+      <text fg={theme().textMuted}>{lines()}</text>
     </Show>
   )
 }
