@@ -66,6 +66,9 @@ const tui: TuiPlugin = async (api) => {
   let dispose: (() => void) | undefined
   const register = () => {
     dispose?.()
+    // The @opencode-ai/plugin type says register returns a string id, but the
+    // host's slots.tsx actually returns registry.register(...) — the dispose
+    // function. Cast to the runtime shape.
     dispose = api.slots.register({
       order: 200,
       slots: {
@@ -73,7 +76,7 @@ const tui: TuiPlugin = async (api) => {
           return <DealsPanel api={api} session_id={props.session_id} onModelChange={register} />
         },
       },
-    })
+    }) as unknown as () => void
   }
   register()
 }
