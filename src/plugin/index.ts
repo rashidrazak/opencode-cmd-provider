@@ -2,6 +2,8 @@
 import { MODEL_SNAPSHOT } from "../catalog/snapshot.js"
 import { getApiBase } from "../env.js"
 import { augmentConfigCommandCodeModels, autoRegister } from "./models.js"
+import { enrichCommandCodeModels } from "./deals-enrichment.js"
+import { planSummaryTool } from "./plan-summary.js"
 import { runAuthFlow } from "./auth.js"
 import type { Plugin } from "@opencode-ai/plugin"
 import type { Config } from "@opencode-ai/sdk/v2"
@@ -15,6 +17,7 @@ const server: Plugin = async () => {
         baseURL: getApiBase(),
       })
       augmentConfigCommandCodeModels(config as Config)
+      enrichCommandCodeModels(config as Config)
     },
     auth: {
       provider: "commandcode",
@@ -25,6 +28,9 @@ const server: Plugin = async () => {
           authorize: async () => runAuthFlow(),
         },
       ],
+    },
+    tool: {
+      cmd_plan_summary: planSummaryTool(),
     },
   }
 }
