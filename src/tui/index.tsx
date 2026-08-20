@@ -103,18 +103,26 @@ function DealsPanel(props: { api: TuiPluginApi; session_id: string }) {
     debugLog(`panel rows count=${r.length} rows=${JSON.stringify(r)}`)
     return r
   })
+  const shown = createMemo(() => {
+    const r = rows()
+    debugLog(`panel SHOW evaluated when=${r.length > 0} rows=${JSON.stringify(r)}`)
+    return r.length > 0
+  })
   return (
-    <Show when={rows().length > 0}>
+    <Show when={shown()}>
       <box>
         <text fg={theme().text}>
           <b>Command Code</b>
         </text>
         <For each={rows()}>
-          {(row) => (
-            <text fg={theme().textMuted}>
-              {row[0]}: {row[1]}
-            </text>
-          )}
+          {(row) => {
+            debugLog(`panel RENDER row=${JSON.stringify(row)}`)
+            return (
+              <text fg={theme().textMuted}>
+                {row[0]}: {row[1]}
+              </text>
+            )
+          }}
         </For>
       </box>
     </Show>
