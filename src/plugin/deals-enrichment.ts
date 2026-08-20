@@ -47,6 +47,7 @@ export function buildCmdOptions(deals: ModelDeals): Record<string, unknown> {
   }
   if (deals.discount !== undefined) out.discount = deals.discount
   if (deals.was !== undefined) out.was = deals.was
+  if (deals.now !== undefined) out.now = deals.now
   if (deals.benchmark !== undefined) out.benchmark = deals.benchmark
   if (deals.peakOffPeak !== undefined) out.peakOffPeak = deals.peakOffPeak
   if (deals.overContext !== undefined) out.overContext = deals.overContext

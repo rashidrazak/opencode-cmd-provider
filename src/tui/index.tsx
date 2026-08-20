@@ -6,6 +6,7 @@
 import { For, Show, createMemo } from "solid-js"
 import type { Provider } from "@opencode-ai/sdk/v2"
 import type { TuiPlugin, TuiPluginApi, TuiPluginModule } from "@opencode-ai/plugin/tui"
+import { PLAN_CATALOG, type PlanId } from "../catalog/deals.js"
 
 type Cmd = {
   free?: unknown
@@ -14,6 +15,26 @@ type Cmd = {
   discount?: { pct?: unknown; endsAt?: unknown } | undefined
   benchmark?: { intelligence?: unknown; tokPerSec?: unknown } | undefined
   peakOffPeak?: { windows?: unknown } | undefined
+  was?: { input?: unknown; output?: unknown } | undefined
+  now?: { input?: unknown; output?: unknown } | undefined
+}
+
+function planDisplay(plan: string): string {
+  return PLAN_CATALOG[plan as PlanId]?.display ?? plan
+}
+
+const TIER_DISPLAY: Readonly<Record<string, string>> = {
+  opensource: "Open Source",
+  premium: "Premium",
+}
+
+function tierDisplay(tier: string): string {
+  return TIER_DISPLAY[tier] ?? tier
+}
+
+function rateString(rates: { input?: unknown; output?: unknown }): string | undefined {
+  if (typeof rates.input !== "number" || typeof rates.output !== "number") return undefined
+  return `$${rates.input}/$${rates.output} in/out`
 }
 
 export function dealsRows(
@@ -22,11 +43,11 @@ export function dealsRows(
   const cmd = model?.options?.cmd as Cmd | undefined
   if (!cmd) return []
   const rows: Array<[string, string]> = []
+  if (typeof cmd.tier === "string") rows.push(["Tier", tierDisplay(cmd.tier)])
   if (cmd.free === true) rows.push(["Status", "FREE"])
-  if (typeof cmd.tier === "string") rows.push(["Tier", cmd.tier])
   if (cmd.allowance) {
     for (const [plan, value] of Object.entries(cmd.allowance)) {
-      if (typeof value === "number") rows.push([`${plan} allowance`, `$${value}/mo`])
+      if (typeof value === "number") rows.push([`${planDisplay(plan)} allowance`, `$${value}/mo`])
     }
   }
   if (cmd.discount && typeof cmd.discount.pct === "number") {
@@ -35,6 +56,10 @@ export function dealsRows(
       `${cmd.discount.pct}% off${typeof cmd.discount.endsAt === "string" ? ` until ${cmd.discount.endsAt}` : ""}`,
     ])
   }
+  const was = cmd.was ? rateString(cmd.was) : undefined
+  const now = cmd.now ? rateString(cmd.now) : undefined
+  if (was) rows.push(["Was", was])
+  if (now) rows.push(["Now", now])
   if (cmd.benchmark) {
     rows.push([
       "Intelligence",

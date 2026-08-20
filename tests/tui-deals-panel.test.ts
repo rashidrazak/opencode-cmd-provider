@@ -12,19 +12,33 @@ run([
             tier: "premium",
             allowance: { goat: 40, pro: 60 },
             discount: { pct: 50, endsAt: "2026-12-31" },
+            was: { input: 1.5, output: 7.5 },
+            now: { input: 0.75, output: 3.75 },
             benchmark: { intelligence: 56, tokPerSec: 339 },
             free: false,
           },
         },
       })
       assertEqual(rows, [
-        ["Tier", "premium"],
-        ["goat allowance", "$40/mo"],
-        ["pro allowance", "$60/mo"],
+        ["Tier", "Premium"],
+        ["GOAT allowance", "$40/mo"],
+        ["Pro allowance", "$60/mo"],
         ["Deal", "50% off until 2026-12-31"],
+        ["Was", "$1.5/$7.5 in/out"],
+        ["Now", "$0.75/$3.75 in/out"],
         ["Intelligence", "56"],
         ["Tok/s", "339"],
       ])
+    },
+  ],
+
+  [
+    "displays open source tier name",
+    () => {
+      const rows = dealsRows({
+        options: { cmd: { tier: "opensource", free: false } },
+      })
+      assertEqual(rows, [["Tier", "Open Source"]])
     },
   ],
 
@@ -42,6 +56,26 @@ run([
       assertEqual(rows, [
         ["Status", "FREE"],
         ["Rates", "peak/off-peak (01-04 & 06-10 UTC)"],
+      ])
+    },
+  ],
+
+  [
+    "shows the section for every commandcode model — tier and benchmark are enough",
+    () => {
+      const rows = dealsRows({
+        options: {
+          cmd: {
+            tier: "premium",
+            benchmark: { intelligence: 24.1, tokPerSec: 101.1 },
+            free: false,
+          },
+        },
+      })
+      assertEqual(rows, [
+        ["Tier", "Premium"],
+        ["Intelligence", "24.1"],
+        ["Tok/s", "101.1"],
       ])
     },
   ],

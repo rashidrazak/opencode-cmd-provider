@@ -20,6 +20,9 @@ jobs:
           node-version: 22
           cache: npm
           registry-url: https://registry.npmjs.org
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
 
       - name: Verify tag commit is on main
         run: |

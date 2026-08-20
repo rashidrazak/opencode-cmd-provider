@@ -14,6 +14,8 @@ run([
       assertEqual(normalizePlan("individual-pro-v1"), "pro")
       assertEqual(normalizePlan("individual-max"), "max")
       assertEqual(normalizePlan("individual-ultra"), "max20")
+      assertEqual(normalizePlan("team-pro"), "teampro")
+      assertEqual(normalizePlan("Team Pro"), "teampro")
       assertEqual(normalizePlan("individual-provider"), "provider")
       assertEqual(normalizePlan("teams-pro"), undefined)
       assertEqual(normalizePlan(42), undefined)
@@ -73,7 +75,7 @@ run([
     () => {
       const out = renderPlanSummary("goat", {}, PLAN_CATALOG)
       assert(out.includes("GOAT"), "must still name the plan")
-      assert(out.includes("No allowance data"), "must degrade gracefully")
+      assert(out.includes("No deal data"), "must degrade gracefully")
     },
   ],
 
@@ -83,6 +85,27 @@ run([
       const out = renderPlanSummary("provider", MODEL_DEALS, PLAN_CATALOG)
       assert(out.includes("Provider"), "must name the plan")
       assert(out.includes("pay-as-you-go"), "must note PAYG")
+    },
+  ],
+
+  [
+    "renderPlanSummary shows deals instead of allowances for Max plans",
+    () => {
+      const out = renderPlanSummary("max", MODEL_DEALS, PLAN_CATALOG)
+      assert(out.includes("Max 10×"), "must name the plan")
+      assert(out.includes("no per-model allowances"), "must be honest about max")
+      assert(out.includes("Deal"), "must show a deal column")
+      assert(out.includes("98% off"), "must list the MiMo deal")
+    },
+  ],
+
+  [
+    "renderPlanSummary names Team Pro from the catalog",
+    () => {
+      const out = renderPlanSummary("teampro", MODEL_DEALS, PLAN_CATALOG)
+      assert(out.includes("Team Pro"), "must name the plan")
+      assert(out.includes("$40"), "must show Team Pro price")
+      assert(out.includes("no per-model allowances"), "must be honest about Team Pro")
     },
   ],
 ])

@@ -155,6 +155,8 @@ npm test
 npm run format:check
 ```
 
+`npm run build` needs [bun](https://bun.sh) on PATH — it compiles `src/tui/index.tsx` with the solid transform (`scripts/build-tui.ts`), so the TUI panel's JSX props are reactive and the sidebar repaints on mid-session model switches.
+
 The headless end-to-end test runs the real OpenCode CLI against a mock Command Code server through the built package:
 
 ```sh

@@ -17,8 +17,9 @@ const PLAN_DISPLAY: Record<PlanId, string> = {
   go: "Go",
   goat: "GOAT",
   pro: "Pro",
-  max: "Max 10x",
-  max20: "Max 20x",
+  max: "Max 10×",
+  max20: "Max 20×",
+  teampro: "Team Pro",
   provider: "Provider",
 }
 
@@ -31,9 +32,18 @@ const PLAN_ALIASES: Readonly<Record<string, PlanId>> = {
   "individual-pro": "pro",
   "individual-pro-v1": "pro",
   max: "max",
+  max10: "max",
+  "max-10x": "max",
+  "max 10x": "max",
   "individual-max": "max",
   max20: "max20",
+  "max-20x": "max20",
+  "max 20x": "max20",
   "individual-ultra": "max20",
+  ultra: "max20",
+  teampro: "teampro",
+  "team-pro": "teampro",
+  "team pro": "teampro",
   provider: "provider",
   "individual-provider": "provider",
 }
@@ -88,24 +98,33 @@ export function renderPlanSummary(
     lines.push(
       `$${info.price}/mo buys $${info.credits} of credits; 5-hour window $${info.window5h}, weekly window $${info.windowWeek}.`,
     )
+    if (plan !== "goat" && plan !== "pro") {
+      lines.push(
+        "This plan has no per-model allowances — active deals apply to your full credit balance at the discounted rates below.",
+      )
+    }
   }
   const rows = Object.entries(deals).filter(([, d]) => d.allowance?.[plan] !== undefined)
   const freeRows = Object.entries(deals).filter(([id, d]) => d.free && !d.allowance?.[plan])
-  if (rows.length === 0 && freeRows.length === 0) {
-    lines.push("No allowance data is bundled for this plan.")
+  const hasAllowances = plan === "goat" || plan === "pro"
+  const dealRows = hasAllowances
+    ? []
+    : Object.entries(deals).filter(([, d]) => d.discount || d.peakOffPeak)
+  if (rows.length === 0 && freeRows.length === 0 && dealRows.length === 0) {
+    lines.push("No deal data is bundled for this plan.")
     lines.push("See https://commandcode.ai/docs/resources/pricing-limits for the live table.")
     return lines.join("\n")
   }
   lines.push("")
-  lines.push("| Model | $/mo allowance | ~requests/mo | Deal |")
-  lines.push("| --- | --- | --- | --- |")
-  for (const [id, d] of [...rows, ...freeRows]) {
+  if (hasAllowances) {
+    lines.push("| Model | $/mo allowance | ~requests/mo | Deal |")
+    lines.push("| --- | --- | --- | --- |")
+  } else {
+    lines.push("| Model | Deal | Rates |")
+    lines.push("| --- | --- | --- |")
+  }
+  for (const [id, d] of [...rows, ...freeRows, ...dealRows]) {
     const safeId = id.replace(/[|`]/g, " ")
-    const allowance = d.allowance?.[plan]
-    const estimate =
-      allowance && d.free === false
-        ? estimateMonthlyRequests(id, allowance).toLocaleString("en-US")
-        : "—"
     const dealBits: string[] = []
     if (d.free) dealBits.push("FREE")
     if (d.discount)
@@ -113,9 +132,25 @@ export function renderPlanSummary(
         `${d.discount.pct}% off${d.discount.endsAt ? ` until ${d.discount.endsAt}` : ""}`,
       )
     if (d.peakOffPeak) dealBits.push(`peak/off-peak (${d.peakOffPeak.windows})`)
-    lines.push(
-      `| \`${safeId}\` | ${allowance !== undefined ? `$${allowance}` : "free"} | ${estimate} | ${dealBits.join("; ") || "—"} |`,
-    )
+    const dealText = dealBits.join("; ") || "—"
+    if (hasAllowances) {
+      const allowance = d.allowance?.[plan]
+      const estimate =
+        allowance && d.free === false
+          ? estimateMonthlyRequests(id, allowance).toLocaleString("en-US")
+          : "—"
+      lines.push(
+        `| \`${safeId}\` | ${allowance !== undefined ? `$${allowance}` : "free"} | ${estimate} | ${dealText} |`,
+      )
+    } else {
+      const rates =
+        d.discount && d.was
+          ? `was $${d.was.input}/$${d.was.output} in/out`
+          : d.peakOffPeak
+            ? `$${d.peakOffPeak.peak.input}/$${d.peakOffPeak.peak.output} peak`
+            : "—"
+      lines.push(`| \`${safeId}\` | ${dealText} | ${rates} |`)
+    }
   }
   lines.push("")
   lines.push("Estimates assume ~800 fresh input + 50K cache-read + 200 output tokens per request.")
@@ -140,9 +175,9 @@ function estimateMonthlyRequests(modelId: string, allowance: number): number {
 export function planSummaryTool() {
   return tool({
     description:
-      "Show the Command Code plan's credits, usage windows, and per-model monthly allowances with estimated monthly request counts and active deals. Set COMMANDCODE_PLAN (go|goat|pro|max|max20|provider) to pin the plan without network access.",
+      "Show the Command Code plan's credits, usage windows, per-model monthly allowances (GOAT/Pro) or active deals (other plans), with estimated monthly request counts. Set COMMANDCODE_PLAN (go|goat|pro|max|max20|teampro|provider) to pin the plan without network access.",
     args: {
-      plan: tool.schema.string().optional().describe("go|goat|pro|max|max20|provider"),
+      plan: tool.schema.string().optional().describe("go|goat|pro|max|max20|teampro|provider"),
     },
     execute: async (args) => renderPlanSummary(await resolvePlan(args.plan)),
   })
