@@ -3,9 +3,7 @@
 // sidebar (sidebar_content slot). Renders deal details from the picked model's
 // enriched options.cmd (produced by the server plugin's config hook). Renders
 // nothing when the model has no deals data — zero sidebar noise.
-import { Show, createMemo, onMount } from "solid-js"
-import { appendFileSync } from "node:fs"
-import { join } from "node:path"
+import { For, Show, createMemo } from "solid-js"
 import type { Provider } from "@opencode-ai/sdk/v2"
 import type { TuiPlugin, TuiPluginApi, TuiPluginModule } from "@opencode-ai/plugin/tui"
 
@@ -60,74 +58,43 @@ const id = "commandcode.deals"
 
 type ModelRef = { id: string; providerID: string; variant?: string }
 
-const DEBUG_LOG = join(process.env.HOME ?? "/tmp", ".commandcode-deals-debug.log")
-
-function debugLog(line: string) {
-  try {
-    appendFileSync(DEBUG_LOG, `${Date.now()} ${line}\n`)
-  } catch {
-    // ignore
-  }
-}
-
-let mountCount = 0
-
 const tui: TuiPlugin = async (api) => {
-  debugLog(`tui init; registerCount will log per call`)
-  let lastRegistered: string | undefined
-  const register = (modelId: string | undefined) => {
-    debugLog(`register called modelId=${modelId} last=${lastRegistered}`)
-    if (modelId === lastRegistered) return
-    lastRegistered = modelId
-    api.slots.register({
-      order: 200,
-      slots: {
-        sidebar_content(_ctx, props) {
-          return <DealsPanel api={api} session_id={props.session_id} onModelChange={register} />
-        },
+  api.slots.register({
+    order: 200,
+    slots: {
+      sidebar_content(_ctx, props) {
+        return <DealsPanel api={api} session_id={props.session_id} />
       },
-    })
-    debugLog(`register done modelId=${modelId}`)
-  }
-  register(undefined)
+    },
+  })
 }
 
-function DealsPanel(props: {
-  api: TuiPluginApi
-  session_id: string
-  onModelChange: (modelId: string | undefined) => void
-}) {
-  const myMount = ++mountCount
+function DealsPanel(props: { api: TuiPluginApi; session_id: string }) {
   const theme = () => props.api.theme.current
+  // Mid-session model switches update the session record (`session.updated`
+  // reconciles it into the sync store), so reading `session.model` reactively
+  // is enough — no event subscription needed.
   const model = createMemo(() => {
     const current = props.api.state.session.get(props.session_id)?.model
     if (!current) return undefined
     return props.api.state.provider.find((provider: Provider) => provider.id === current.providerID)
       ?.models[current.id]
   })
-  const rows = createMemo(() => {
-    const r = dealsRows(model())
-    debugLog(`panel#${myMount} rows=${JSON.stringify(r)}`)
-    return r
-  })
-  onMount(() => {
-    debugLog(`panel#${myMount} mounted session_id=${props.session_id}`)
-    const off = props.api.event.on("session.updated", (event) => {
-      if (event.properties.info.id !== props.session_id) return
-      debugLog(`panel#${myMount} session.updated model=${event.properties.info.model?.id}`)
-      props.onModelChange(event.properties.info.model?.id)
-    })
-    props.api.lifecycle.onDispose(off)
-  })
-  const lines = createMemo(() => {
-    const r = rows()
-    if (r.length === 0) return undefined
-    return ["Command Code", ...r.map(([key, value]) => `${key}: ${value}`)].join("\n")
-  })
-  debugLog(`panel#${myMount} rendered lines=${JSON.stringify(lines())?.slice(0, 100)}`)
+  const rows = createMemo(() => dealsRows(model()))
   return (
-    <Show when={lines()}>
-      <text fg={theme().textMuted}>{lines()}</text>
+    <Show when={rows().length > 0}>
+      <box>
+        <text fg={theme().text}>
+          <b>Command Code</b>
+        </text>
+        <For each={rows()}>
+          {(row) => (
+            <text fg={theme().textMuted}>
+              {row[0]}: {row[1]}
+            </text>
+          )}
+        </For>
+      </box>
     </Show>
   )
 }
