@@ -19,6 +19,7 @@
 ## Task 1: Mock deals catalog module
 
 **Files:**
+
 - Create: `src/catalog/deals.ts`
 
 - [ ] **Step 1: Write `src/catalog/deals.ts`**
@@ -175,6 +176,7 @@ git commit -m "feat(deals): mock deals catalog module"
 ## Task 2: Vendor family derivation
 
 **Files:**
+
 - Create: `src/plugin/vendor.ts`
 - Test: `tests/vendor.test.ts`
 
@@ -273,6 +275,7 @@ git commit -m "feat(deals): vendor family derivation"
 ## Task 3: Config enrichment + degradation contract
 
 **Files:**
+
 - Create: `src/plugin/deals-enrichment.ts`
 - Test: `tests/deals-enrichment.test.ts`
 
@@ -316,16 +319,21 @@ run([
           commandcode: {
             models: {
               "Qwen/Qwen3.8-27B": { name: "Qwen", limit: { context: 262144, output: 65536 } },
-              "google/gemini-3.7-flash": { name: "Gemini", limit: { context: 1000000, output: 65536 } },
+              "google/gemini-3.7-flash": {
+                name: "Gemini",
+                limit: { context: 1000000, output: 65536 },
+              },
               "unknown/foo": { name: "Foo", limit: { context: 16000, output: 4096 } },
             },
           },
         },
       } as const
       enrichCommandCodeModels(config as never, DEALS)
-      const models = (config as never as {
-        provider: { commandcode: { models: Record<string, Record<string, unknown>> } }
-      }).provider.commandcode.models
+      const models = (
+        config as never as {
+          provider: { commandcode: { models: Record<string, Record<string, unknown>> } }
+        }
+      ).provider.commandcode.models
 
       const qwen = models["Qwen/Qwen3.8-27B"]
       assertEqual(qwen.family, "qwen")
@@ -384,9 +392,11 @@ run([
         },
       } as const
       enrichCommandCodeModels(config as never, DEALS)
-      const qwen = (config as never as {
-        provider: { commandcode: { models: Record<string, Record<string, unknown>> } }
-      }).provider.commandcode.models["Qwen/Qwen3.8-27B"]
+      const qwen = (
+        config as never as {
+          provider: { commandcode: { models: Record<string, Record<string, unknown>> } }
+        }
+      ).provider.commandcode.models["Qwen/Qwen3.8-27B"]
       assertEqual(qwen.family, "custom")
       assertEqual(qwen.options, { cmd: { mine: true }, other: 1 })
     },
@@ -424,10 +434,10 @@ run([
     "buildCmdOptions emits only present fields",
     () => {
       assertEqual(buildCmdOptions({ free: false }), { free: false })
-      assertEqual(
-        buildCmdOptions({ free: true, discount: { pct: 100 } }),
-        { free: true, discount: { pct: 100 } },
-      )
+      assertEqual(buildCmdOptions({ free: true, discount: { pct: 100 } }), {
+        free: true,
+        discount: { pct: 100 },
+      })
     },
   ],
 ])
@@ -510,6 +520,7 @@ git commit -m "feat(deals): guarded config enrichment"
 ## Task 4: Plan summary tool
 
 **Files:**
+
 - Create: `src/plugin/plan-summary.ts`
 - Test: `tests/plan-summary.test.ts`
 
@@ -517,11 +528,7 @@ git commit -m "feat(deals): guarded config enrichment"
 
 ```ts
 // tests/plan-summary.test.ts — plan resolution + summary rendering
-import {
-  resolvePlan,
-  renderPlanSummary,
-  normalizePlan,
-} from "../src/plugin/plan-summary.js"
+import { resolvePlan, renderPlanSummary, normalizePlan } from "../src/plugin/plan-summary.js"
 import { MODEL_DEALS, PLAN_CATALOG } from "../src/catalog/deals.js"
 import { assert, assertEqual, run } from "./harness.js"
 
@@ -696,9 +703,7 @@ export function renderPlanSummary(
   const freeRows = Object.entries(deals).filter(([id, d]) => d.free && !d.allowance?.[plan])
   if (rows.length === 0 && freeRows.length === 0) {
     lines.push("No allowance data is bundled for this plan.")
-    lines.push(
-      "See https://commandcode.ai/docs/resources/pricing-limits for the live table.",
-    )
+    lines.push("See https://commandcode.ai/docs/resources/pricing-limits for the live table.")
     return lines.join("\n")
   }
   lines.push("")
@@ -712,7 +717,10 @@ export function renderPlanSummary(
         : "—"
     const dealBits: string[] = []
     if (d.free) dealBits.push("FREE")
-    if (d.discount) dealBits.push(`${d.discount.pct}% off${d.discount.endsAt ? ` until ${d.discount.endsAt}` : ""}`)
+    if (d.discount)
+      dealBits.push(
+        `${d.discount.pct}% off${d.discount.endsAt ? ` until ${d.discount.endsAt}` : ""}`,
+      )
     if (d.peakOffPeak) dealBits.push(`peak/off-peak (${d.peakOffPeak.windows})`)
     lines.push(
       `| \`${id}\` | ${allowance !== undefined ? `$${allowance}` : "free"} | ${estimate} | ${dealBits.join("; ") || "—"} |`,
@@ -763,6 +771,7 @@ git commit -m "feat(deals): plan summary tool"
 ## Task 5: Wire into the plugin + full suite
 
 **Files:**
+
 - Modify: `src/plugin/index.ts`
 - Modify: `package.json` (test:unit chain)
 
@@ -922,6 +931,7 @@ Report the observed `/models` output and tool output to the user. Proceed to Mil
 ## Task 7: Capture page fixtures
 
 **Files:**
+
 - Create: `tests/fixtures/pricing-limits.html` (captured from https://commandcode.ai/docs/resources/pricing-limits)
 - Create: `tests/fixtures/goat.html` (captured from https://commandcode.ai/docs/plans/goat)
 - Create: `tests/fixtures/pro.html` (captured from https://commandcode.ai/docs/plans/pro)
@@ -952,6 +962,7 @@ git commit -m "test(deals): capture docs page fixtures"
 ## Task 8: HTML table extractor
 
 **Files:**
+
 - Create: `scripts/html-tables.mjs`
 - Test: `tests/parse-deals.test.ts`
 
@@ -965,7 +976,10 @@ import { parseGoatAllowances, parseBenchmarks, parseDeals } from "../scripts/par
 import { assert, assertEqual, run } from "./harness.js"
 
 const GOAT_HTML = readFileSync(new URL("./fixtures/goat.html", import.meta.url), "utf-8")
-const PRICING_HTML = readFileSync(new URL("./fixtures/pricing-limits.html", import.meta.url), "utf-8")
+const PRICING_HTML = readFileSync(
+  new URL("./fixtures/pricing-limits.html", import.meta.url),
+  "utf-8",
+)
 
 run([
   [
@@ -1106,7 +1120,10 @@ export function parseBenchmarks(html) {
     for (const row of table.slice(1)) {
       const intelligence = row[2] === "not yet scored" ? undefined : Number(row[2])
       const tokPerSec = row[3] === "—" || row[3] === "" ? undefined : Number(row[3])
-      map[row[0]] = { intelligence: Number.isFinite(intelligence) ? intelligence : undefined, tokPerSec }
+      map[row[0]] = {
+        intelligence: Number.isFinite(intelligence) ? intelligence : undefined,
+        tokPerSec,
+      }
     }
   }
   return map
@@ -1156,6 +1173,7 @@ git commit -m "feat(deals): docs page parsers"
 ## Task 9: Refresh script + emit deals.ts
 
 **Files:**
+
 - Create: `scripts/refresh-deals.mjs`
 - Test: `tests/refresh-deals.test.ts`
 
@@ -1207,7 +1225,10 @@ run([
         lastRefreshed: "2026-08-20",
         packageVersion: "1.28.4",
       })
-      assert(out.includes("export const MODEL_DEALS: Readonly<Record<string, ModelDeals>> = {}"), "empty page must emit an empty map")
+      assert(
+        out.includes("export const MODEL_DEALS: Readonly<Record<string, ModelDeals>> = {}"),
+        "empty page must emit an empty map",
+      )
     },
   ],
 ])
@@ -1263,7 +1284,13 @@ async function fetchOrFail(url, label) {
   return response.text()
 }
 
-export function emitDealsModule({ pricingLimitsHtml, goatHtml, proHtml, lastRefreshed, packageVersion }) {
+export function emitDealsModule({
+  pricingLimitsHtml,
+  goatHtml,
+  proHtml,
+  lastRefreshed,
+  packageVersion,
+}) {
   const deals = parseDeals(pricingLimitsHtml)
   const goatAllowances = parseGoatAllowances(goatHtml)
   const benchmarks = parseBenchmarks(goatHtml)
@@ -1301,7 +1328,7 @@ export function emitDealsModule({ pricingLimitsHtml, goatHtml, proHtml, lastRefr
     "// (pricing-limits, plans/goat, plans/pro, plans/max). Regenerate",
     "// with `npm run refresh:deals`.",
     "",
-    "export type PlanId = \"go\" | \"goat\" | \"pro\" | \"max\" | \"max20\" | \"provider\"",
+    'export type PlanId = "go" | "goat" | "pro" | "max" | "max20" | "provider"',
     "",
     "export interface DealRates {",
     "  input: number",
@@ -1324,7 +1351,7 @@ export function emitDealsModule({ pricingLimitsHtml, goatHtml, proHtml, lastRefr
     "  peakOffPeak?: { peak: DealRates; offPeak: DealRates; windows: string }",
     "  overContext?: DealRates",
     "  benchmark?: { intelligence?: number; tokPerSec?: number }",
-    "  tier?: \"opensource\" | \"premium\"",
+    '  tier?: "opensource" | "premium"',
     "  free: boolean",
     "}",
     "",
@@ -1362,8 +1389,12 @@ async function main() {
   await fetchOrFail(maxUrl, "max plan")
 
   const registry = await (
-    await fetch("https://registry.npmjs.org/command-code", { headers: { accept: "application/json" } })
-  ).json().catch(() => ({}))
+    await fetch("https://registry.npmjs.org/command-code", {
+      headers: { accept: "application/json" },
+    })
+  )
+    .json()
+    .catch(() => ({}))
   const latest = registry?.["dist-tags"]?.latest ?? "unknown"
 
   const out = argValue("--out") ?? DEFAULT_OUT
@@ -1376,7 +1407,9 @@ async function main() {
   })
   await mkdir(dirname(out), { recursive: true })
   await writeFile(out, module, "utf-8")
-  console.log(`refresh-deals: wrote ${Object.keys(parseDeals(pricingHtml)).length + Object.keys(parseGoatAllowances(goatHtml)).length} entries to ${out}`)
+  console.log(
+    `refresh-deals: wrote ${Object.keys(parseDeals(pricingHtml)).length + Object.keys(parseGoatAllowances(goatHtml)).length} entries to ${out}`,
+  )
 }
 
 if (process.argv[1] === new URL(import.meta.url).pathname) {
@@ -1431,6 +1464,7 @@ git commit -m "feat(deals): docs scraper refresh script"
 ## Task 10: Release ritual + README
 
 **Files:**
+
 - Modify: `.opencode/skills/release/SKILL.md` (add the deals refresh step)
 - Modify: `README.md` (document the enrichment + tool)
 
