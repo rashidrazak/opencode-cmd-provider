@@ -4,6 +4,8 @@
 // enriched options.cmd (produced by the server plugin's config hook). Renders
 // nothing when the model has no deals data — zero sidebar noise.
 import { For, Show, createMemo } from "solid-js"
+import { appendFileSync } from "node:fs"
+import { join } from "node:path"
 import type { Provider } from "@opencode-ai/sdk/v2"
 import type { TuiPlugin, TuiPluginApi, TuiPluginModule } from "@opencode-ai/plugin/tui"
 
@@ -58,6 +60,16 @@ const id = "commandcode.deals"
 
 type ModelRef = { id: string; providerID: string; variant?: string }
 
+const DEBUG_LOG = join(process.env.HOME ?? "/tmp", ".commandcode-deals-debug.log")
+
+function debugLog(line: string) {
+  try {
+    appendFileSync(DEBUG_LOG, `${Date.now()} ${line}\n`)
+  } catch {
+    // ignore
+  }
+}
+
 const tui: TuiPlugin = async (api) => {
   api.slots.register({
     order: 200,
@@ -71,16 +83,26 @@ const tui: TuiPlugin = async (api) => {
 
 function DealsPanel(props: { api: TuiPluginApi; session_id: string }) {
   const theme = () => props.api.theme.current
-  // Mid-session model switches update the session record (`session.updated`
-  // reconciles it into the sync store), so reading `session.model` reactively
-  // is enough — no event subscription needed.
-  const model = createMemo(() => {
-    const current = props.api.state.session.get(props.session_id)?.model
-    if (!current) return undefined
-    return props.api.state.provider.find((provider: Provider) => provider.id === current.providerID)
-      ?.models[current.id]
+  const session = createMemo(() => {
+    const s = props.api.state.session.get(props.session_id)
+    debugLog(`panel session session_id=${props.session_id} model=${JSON.stringify(s?.model ?? null)}`)
+    return s
   })
-  const rows = createMemo(() => dealsRows(model()))
+  const model = createMemo(() => {
+    const current = session()?.model
+    debugLog(`panel model current=${JSON.stringify(current ?? null)}`)
+    if (!current) return undefined
+    const found = props.api.state.provider.find(
+      (provider: Provider) => provider.id === current.providerID,
+    )?.models[current.id]
+    debugLog(`panel model found=${JSON.stringify(found?.options?.cmd ?? null)?.slice(0, 200)}`)
+    return found
+  })
+  const rows = createMemo(() => {
+    const r = dealsRows(model())
+    debugLog(`panel rows count=${r.length} rows=${JSON.stringify(r)}`)
+    return r
+  })
   return (
     <Show when={rows().length > 0}>
       <box>
