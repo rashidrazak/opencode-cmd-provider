@@ -13,10 +13,12 @@ A provider and plugin for [OpenCode](https://opencode.ai) that connects to the [
 opencode plugin add opencode-cmd-provider
 ```
 
-One install writes both `opencode.json(c)` (`server` target) and `tui.json`
-(`tui` target, `package.json` `exports["./tui"]` → `dist/tui.js`) from the same
-spec. No hand-written `tui.json` — bare `opencode` shows the Deals intelligence
-sidebar on next launch.
+One command gives both `provider.commandcode` (auto-registered `[CMD]` models)
+and the Deals intelligence sidebar — it writes both `opencode.json(c)`
+(`server` target) and `tui.json` (`tui` target, `package.json`
+`exports["./tui"]` → `dist/tui.js`) from the same spec. No hand-written
+`tui.json` — bare `opencode` shows the Deals intelligence sidebar on next
+launch.
 
 Manual config also works:
 
