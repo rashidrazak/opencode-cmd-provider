@@ -61,6 +61,7 @@ export const MODEL_SNAPSHOT: readonly CatalogModel[] = [
   { id: "nvidia/nemotron-3-ultra-550b-a55b", name: "Nemotron 3 Ultra", contextLength: 1000000 },
   { id: "thinkingmachines/inkling", name: "Inkling", contextLength: 256000 },
   { id: "thinkingmachines/inkling-small", name: "Inkling Small", contextLength: 1000000 },
+  { id: "stealth/ox-alpha", name: "Ox Alpha", contextLength: 1048576 },
   { id: "poolside/laguna-s-2.1-free", name: "Laguna S 2.1", contextLength: 256000 },
   { id: "meta/muse-spark-1.1", name: "Muse Spark 1.1", contextLength: 1048576 },
   { id: "meta/muse-spark-1.2", name: "Muse Spark 1.2", contextLength: 1048576 },
