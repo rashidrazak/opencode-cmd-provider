@@ -1,5 +1,7 @@
 // tests/contract.test.ts
 import { createRequire } from "node:module"
+import { readFileSync, readdirSync, statSync } from "node:fs"
+import { join } from "node:path"
 import { run, assert, assertEqual } from "./harness.js"
 
 const require = createRequire(import.meta.url)
@@ -17,6 +19,19 @@ async function load(): Promise<Record<string, unknown>> {
 async function loadTui(): Promise<Record<string, unknown>> {
   const mod = await import("../dist/tui.js")
   return mod as Record<string, unknown>
+}
+
+function listJsFiles(dir: string): string[] {
+  const out: string[] = []
+  for (const entry of readdirSync(dir)) {
+    const file = join(dir, entry)
+    if (statSync(file).isDirectory()) {
+      out.push(...listJsFiles(file))
+    } else if (entry.endsWith(".js")) {
+      out.push(file)
+    }
+  }
+  return out
 }
 
 run([
@@ -78,6 +93,28 @@ run([
       assert(typeof def === "object" && def !== null)
       assertEqual(def.id, "commandcode")
       assert(typeof def.server === "function")
+    },
+  ],
+  [
+    "built bundle has no runtime imports of optional peer deps (@opencode-ai/*)",
+    () => {
+      // A runtime `import ... from "@opencode-ai/*"` in the published bundle is a
+      // load-time landmine: `@opencode-ai/plugin` is an optional peer dependency,
+      // so `opencode plugin <pkg>` does not install it next to the plugin and the
+      // whole server plugin fails to import (ERR_MODULE_NOT_FOUND) — which silently
+      // drops auto-registration and /connect. Only `import type` (erased by tsc/bun)
+      // may reference these packages.
+      const offenders: string[] = []
+      for (const file of listJsFiles(new URL("../dist", import.meta.url).pathname)) {
+        const text = readFileSync(file, "utf-8")
+        if (/^\s*import\s.*from\s+["']@opencode-ai\//m.test(text)) {
+          offenders.push(file)
+        }
+      }
+      assert(
+        offenders.length === 0,
+        `runtime @opencode-ai/* imports found in built bundle: ${offenders.join(", ")}`,
+      )
     },
   ],
 ])
