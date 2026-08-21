@@ -1,5 +1,5 @@
 // tests/plugin-install.test.ts — verifies zero-step delivery:
-// `opencode plugin add <pkg>` detects server + tui targets from
+// `opencode plugin <pkg>` detects server + tui targets from
 // package.json exports["./tui"] and writes both opencode.json(c) and tui.json
 // with the same spec. Uses a local file:// spec so it runs without network
 // and without publishing.
@@ -13,7 +13,7 @@ const hasOpenCode = spawnSync("which", ["opencode"]).status === 0
 
 run([
   [
-    "opencode plugin add file://<pkg> creates both opencode.json and tui.json with same spec",
+    "opencode plugin file://<pkg> creates both opencode.json and tui.json with same spec",
     () => {
       if (!hasOpenCode) {
         console.log("skip - opencode not on PATH")
@@ -38,7 +38,7 @@ run([
         encoding: "utf-8",
         timeout: 30_000,
       })
-      assertEqual(result.status, 0, `opencode plugin add failed: ${result.stderr || result.stdout}`)
+      assertEqual(result.status, 0, `opencode plugin failed: ${result.stderr || result.stdout}`)
 
       // Installer writes to <proj>/.opencode/* when inside a project dir
       const serverPath = join(proj, ".opencode", "opencode.json")

@@ -10,15 +10,20 @@ A provider and plugin for [OpenCode](https://opencode.ai) that connects to the [
 ## Install
 
 ```sh
-opencode plugin add opencode-cmd-provider
+opencode plugin opencode-cmd-provider
 ```
 
-One command gives both `provider.commandcode` (auto-registered `[CMD]` models)
-and the Deals intelligence sidebar — it writes both `opencode.json(c)`
-(`server` target) and `tui.json` (`tui` target, `package.json`
-`exports["./tui"]` → `dist/tui.js`) from the same spec. No hand-written
-`tui.json` — bare `opencode` shows the Deals intelligence sidebar on next
-launch.
+Update an existing install:
+
+```sh
+opencode plugin opencode-cmd-provider --force
+```
+
+Install globally (available in every project):
+
+```sh
+opencode plugin opencode-cmd-provider --global
+```
 
 Manual config also works:
 
@@ -30,30 +35,7 @@ Manual config also works:
 }
 ```
 
-That's it. The plugin bundles a snapshot of the Command Code model catalog and
-auto-registers the `commandcode` provider — npm package, name, API key env var,
-and every model — when OpenCode loads. No `provider.commandcode` block, no
-`models` map, no network access needed. All Command Code models appear in
-`/models` with the `[CMD]` display-name prefix (e.g. `[CMD] Claude Sonnet 5`) so
-they aren't confused with same-named models from other providers.
-
-You can still declare your own `provider.commandcode` entry to customize
-behavior; your declarations always win and the snapshot fills in only what's
-missing:
-
-- Declared provider-level settings (`name`, `options`, `baseURL`, `env`) are
-  kept as you wrote them.
-- Declared models stay exactly as you wrote them — the snapshot never modifies
-  or removes them, and models that left the catalog remain usable.
-- `whitelist`/`blacklist` on a declared entry filter the auto-registered models
-  too, keeping the picker uncluttered.
-
-The catalog snapshot is refreshed at every release; newly published Command
-Code models appear after a plugin update. A second bundled catalog
-(`src/deals/catalog.ts`) carries deal/allowance/benchmark intelligence scraped
-from the Command Code docs — see below.
-
-Start or reload OpenCode, then authenticate:
+Then authenticate:
 
 ```txt
 /connect
@@ -114,11 +96,40 @@ Pick a model with `/models`, or run non-interactively:
 opencode run --model commandcode/claude-sonnet-5 "hello"
 ```
 
+## Deals intelligence
+
+Every Command Code model ships with deal/allowance/benchmark intelligence
+(bundled in `src/deals/catalog.ts`), scraped from the Command Code docs. It
+surfaces in two places:
+
+- **Sidebar** — in a session, the OpenCode sidebar (`ctrl+x b`) shows a
+  `Command Code` section for the selected model: tier, GOAT/Pro allowance,
+  benchmark (intelligence, tok/s), deal discounts (`was`/`now` rates), and
+  peak/off-peak windows.
+- **`cmd_plan_summary` tool** — plan-aware allowances and deal rates, to
+  estimate monthly requests.
+
+Delivery is zero-step: the package exports both a `server` and a `tui` target
+(`exports["./tui"]` → `dist/tui.js`), and `opencode plugin
+opencode-cmd-provider` writes both `opencode.json(c)` and `tui.json` from one
+spec. The sidebar is a TUI plugin loaded from `tui.json` — which is why
+installs made before the `./tui` export only wrote the server target and never
+showed a sidebar. Re-run with `--force` to add `tui.json`.
+
+When the Deals catalog is empty (scraping mitigated), the feature degrades
+visibly rather than silently: the sidebar shows a `Deals unavailable` banner
+with placeholder rows, and `cmd_plan_summary` reports that no deal data is
+bundled. Core (models, auth, streaming) is unaffected.
+
 ## Model discovery and offline behavior
 
 The plugin ships two bundled catalogs and auto-registers every model into
-OpenCode's config at startup. Model availability changes when the package is
-updated.
+OpenCode's config at startup, with the `[CMD]` display-name prefix (e.g.
+`[CMD] Claude Sonnet 5`) so they aren't confused with same-named models from
+other providers. Model availability changes when the package is updated. You
+can still declare your own `provider.commandcode` entry; your declarations
+always win and the snapshot fills in only what's missing (`whitelist`/
+`blacklist` on a declared entry filter the auto-registered models too).
 
 - Snapshot — `src/catalog/snapshot.ts` (model ids, names, context lengths) plus
   `src/catalog/facts.ts` (reasoning efforts, per-1M-token rates, input
