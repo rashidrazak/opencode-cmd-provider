@@ -17,7 +17,7 @@ import { MODEL_EFFORTS, REASONING_MODELS, isReasoningModel } from "../src/provid
 import { MODEL_COSTS } from "../src/provider/pricing.js"
 import { assert, assertEqual, run } from "./harness.js"
 
-const FREE_MODELS = new Set(["poolside/laguna-s-2.1-free"])
+const FREE_MODELS = new Set(["poolside/laguna-s-2.1-free", "stealth/ox-alpha"])
 
 // Models Command Code advertises as reasoning-capable but with no explicit
 // effort levels (Command Code picks the depth). These must advertise

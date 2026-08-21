@@ -5,9 +5,9 @@
 // modalities parsed from its CLI bundle (dist/cli.mjs). Regenerate
 // with `npm run refresh:snapshot`.
 
-export const FACTS_SOURCE_URL = "https://unpkg.com/command-code@1.30.1/dist/bundled/command-code-knowledge/reference/models.md"
-export const MODALITIES_SOURCE_URL = "https://unpkg.com/command-code@1.30.1/dist/cli.mjs"
-export const FACTS_PACKAGE_VERSION = "1.30.1"
+export const FACTS_SOURCE_URL = "https://unpkg.com/command-code@1.31.0/dist/bundled/command-code-knowledge/reference/models.md"
+export const MODALITIES_SOURCE_URL = "https://unpkg.com/command-code@1.31.0/dist/cli.mjs"
+export const FACTS_PACKAGE_VERSION = "1.31.0"
 export const FACTS_LAST_REFRESHED = "2026-08-21"
 
 export const MODEL_EFFORTS: Readonly<Record<string, readonly string[]>> = {
@@ -74,6 +74,7 @@ export const MODEL_COSTS: Readonly<
   "thinkingmachines/inkling": { input: 1, output: 4.05, cacheRead: 0.17, cacheWrite: 0 },
   "thinkingmachines/inkling-small": { input: 0.5, output: 1.2, cacheRead: 0.1, cacheWrite: 0 },
   "poolside/laguna-s-2.1-free": { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+  "stealth/ox-alpha": { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
   "claude-sonnet-5": { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 },
   "claude-sonnet-4-6": { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
   "claude-fable-5": { input: 10, output: 50, cacheRead: 1, cacheWrite: 12.5 },
@@ -138,6 +139,7 @@ export const MODEL_INPUT_MODALITIES: Readonly<
   "moonshotai/Kimi-K2.7-Code-Highspeed": ["text","image"],
   "moonshotai/Kimi-K3": ["text","image"],
   "sakana/fugu-ultra": ["text","image"],
+  "stealth/ox-alpha": ["text","image"],
   "stepfun/Step-3.7-Flash": ["text","image"],
   "thinkingmachines/inkling": ["text","image"],
   "thinkingmachines/inkling-small": ["text","image"],
