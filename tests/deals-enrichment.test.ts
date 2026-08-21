@@ -119,13 +119,18 @@ run([
   ],
 
   [
-    "empty deals still enriches family but leaves options untouched (degradation contract)",
+    "empty deals injects unavailable while keeping family and cost (visible degradation)",
     () => {
       const config = {
         provider: {
           commandcode: {
             models: {
               "Qwen/Qwen3.8-27B": { name: "Qwen", limit: { context: 262144, output: 65536 } },
+              "claude-sonnet-5": {
+                name: "Sonnet",
+                limit: { context: 200000, output: 10000 },
+                cost: { input: 1, output: 2, cache_read: 0.1, cache_write: 0.2 },
+              },
               "unknown/foo": { name: "Foo", limit: { context: 16000, output: 4096 } },
             },
           },
@@ -142,17 +147,74 @@ run([
         "qwen",
         "family is vendor-derived, never from deals",
       )
+      assertEqual(models["Qwen/Qwen3.8-27B"].options, { cmd: { unavailable: true } })
+      assertEqual(models["claude-sonnet-5"].family, "claude")
       assertEqual(
-        models["Qwen/Qwen3.8-27B"].options,
-        undefined,
-        "no options.cmd without deals entry",
+        models["claude-sonnet-5"].cost,
+        { input: 1, output: 2, cache_read: 0.1, cache_write: 0.2 },
+        "cost preserved when catalog empty",
       )
+      assertEqual(models["claude-sonnet-5"].options, { cmd: { unavailable: true } })
       assertEqual(
         models["unknown/foo"].family,
         undefined,
         "unknown ids get no family even with empty deals",
       )
-      assertEqual(models["unknown/foo"].options, undefined)
+      assertEqual(models["unknown/foo"].options, { cmd: { unavailable: true } })
+    },
+  ],
+  [
+    "empty deals never overwrites a Declared cmd",
+    () => {
+      const config = {
+        provider: {
+          commandcode: {
+            models: {
+              "Qwen/Qwen3.8-27B": {
+                name: "Qwen",
+                limit: { context: 262144, output: 65536 },
+                family: "custom",
+                options: { cmd: { mine: true }, other: 1 },
+              },
+            },
+          },
+        },
+      } as const
+      enrichCommandCodeModels(config as never, {})
+      const qwen = (
+        config as never as {
+          provider: { commandcode: { models: Record<string, Record<string, unknown>> } }
+        }
+      ).provider.commandcode.models["Qwen/Qwen3.8-27B"]
+      assertEqual(qwen.family, "custom")
+      assertEqual(qwen.options, { cmd: { mine: true }, other: 1 })
+    },
+  ],
+  [
+    "non-empty catalog does not inject unavailable for missing entry",
+    () => {
+      const config = {
+        provider: {
+          commandcode: {
+            models: {
+              "Qwen/Qwen3.8-27B": { name: "Qwen", limit: { context: 262144, output: 65536 } },
+              "some-other": { name: "Other", limit: { context: 1000, output: 1000 } },
+            },
+          },
+        },
+      } as const
+      enrichCommandCodeModels(config as never, {
+        "Qwen/Qwen3.8-27B": { allowance: { goat: 70 }, free: false, tier: "opensource" },
+      })
+      const models = (
+        config as never as {
+          provider: { commandcode: { models: Record<string, Record<string, unknown>> } }
+        }
+      ).provider.commandcode.models
+      assertEqual(models["Qwen/Qwen3.8-27B"].options, {
+        cmd: { allowance: { goat: 70 }, tier: "opensource", free: false },
+      })
+      assertEqual(models["some-other"].options, undefined)
     },
   ],
 

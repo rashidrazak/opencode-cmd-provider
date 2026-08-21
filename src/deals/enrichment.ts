@@ -1,7 +1,9 @@
 // src/deals/enrichment.ts — docs-derived model enrichment for the
 // config hook. Purely additive: every field is gap-filled only when the user
-// left it unset, and every lookup is guarded so missing/empty deal data
-// leaves the config byte-identical to today's output (degradation contract).
+// left it unset. When the Deals catalog is empty the mitigated state is
+// visible: `model.options.cmd.unavailable` is injected instead of leaving
+// `cmd` absent, while `family`/`cost` are preserved and Declared `cmd` is
+// never overwritten.
 import type { Config } from "@opencode-ai/sdk/v2"
 import { MODEL_DEALS, type ModelDeals } from "./catalog.js"
 import { vendorFamilyForModel } from "./vendor.js"
@@ -12,6 +14,7 @@ export function enrichCommandCodeModels(
 ): void {
   const provider = config.provider?.["commandcode"]
   if (!provider?.models) return
+  const isEmpty = Object.keys(deals).length === 0
   for (const [modelId, model] of Object.entries(provider.models)) {
     if (!model) continue
     if (model.family === undefined) {
@@ -19,7 +22,13 @@ export function enrichCommandCodeModels(
       if (family !== undefined) model.family = family
     }
     const entry = deals[modelId]
-    if (!entry) continue
+    if (!entry) {
+      if (isEmpty && model.options?.["cmd"] === undefined) {
+        model.options ??= {}
+        model.options["cmd"] = { unavailable: true }
+      }
+      continue
+    }
     if (model.options?.["cmd"] === undefined) {
       model.options ??= {}
       model.options["cmd"] = buildCmdOptions(entry)

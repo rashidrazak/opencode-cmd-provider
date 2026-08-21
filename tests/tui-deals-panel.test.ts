@@ -120,4 +120,38 @@ run([
       assertEqual(rows, [["Team Pro allowance", "$40/mo"]])
     },
   ],
+  [
+    "shows unavailable banner with placeholders when catalog is empty",
+    () => {
+      const rows = dealsRows({ options: { cmd: { unavailable: true } } })
+      assertEqual(rows, [
+        ["Deals unavailable — https://commandcode.ai/docs/resources/pricing-limits", ""],
+        ["Tier", "—"],
+        ["Intelligence", "—"],
+        ["Tok/s", "—"],
+      ])
+    },
+  ],
+  [
+    "unavailable takes precedence over normal deal data",
+    () => {
+      const rows = dealsRows({
+        options: {
+          cmd: {
+            unavailable: true,
+            tier: "premium",
+            allowance: { goat: 40 },
+            benchmark: { intelligence: 56 },
+            free: false,
+          },
+        },
+      })
+      assertEqual(rows, [
+        ["Deals unavailable — https://commandcode.ai/docs/resources/pricing-limits", ""],
+        ["Tier", "—"],
+        ["Intelligence", "—"],
+        ["Tok/s", "—"],
+      ])
+    },
+  ],
 ])
