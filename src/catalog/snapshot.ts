@@ -21,7 +21,7 @@ export const MODEL_SNAPSHOT: readonly CatalogModel[] = [
   { id: "gpt-5.6-sol", name: "GPT-5.6 Sol", contextLength: 1050000 },
   { id: "gpt-5.6-terra", name: "GPT-5.6 Terra", contextLength: 1050000 },
   { id: "gpt-5.6-luna", name: "GPT-5.6 Luna", contextLength: 1050000 },
-  { id: "gpt-5.5", name: "GPT-5.5", contextLength: 200000 },
+  { id: "gpt-5.5", name: "GPT-5.5", contextLength: 400000 },
   { id: "gpt-5.4", name: "GPT-5.4", contextLength: 400000 },
   { id: "gpt-5.3-codex", name: "GPT-5.3 Codex", contextLength: 400000 },
   { id: "gpt-5.4-mini", name: "GPT-5.4 Mini", contextLength: 400000 },
