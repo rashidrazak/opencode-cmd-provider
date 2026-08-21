@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.2.0 - 2026-08-21
+
+Feature: Deals intelligence — per-model pricing/allowance data in a sidebar panel and a plan-summary tool, delivered zero-step.
+
+### Features
+
+- New Deals catalog (`src/deals/catalog.ts`): tier, benchmarks, deal discounts (`was`/`now` rates), peak/off-peak windows, and GOAT/Pro monthly allowances for every model, scraped from the Command Code docs.
+- New `cmd_plan_summary` tool (plan-aware allowances and deal rates) and a TUI sidebar "Command Code" section for the selected model.
+- Zero-step delivery: the package exports a `./tui` target (`dist/tui.js`), and `opencode plugin opencode-cmd-provider` writes both `opencode.json(c)` and `tui.json` from one command — no hand-written `tui.json` (fixes #39).
+- Deals intelligence is an excisable slice (`src/deals/`); deleting it plus two lines in the plugin entry leaves Core (models, auth, streaming) unchanged.
+- Visible degradation: when the Deals catalog is empty (scraping mitigated), the sidebar shows a "Deals unavailable" banner with placeholder rows and the tool reports no bundled data — Core is unaffected.
+- `refresh:deals` no longer blocks a release: it falls back to fixtures or an empty catalog with a warning, and the Deals gate in the release workflow is non-blocking.
+
+### Fixes
+
+- Streaming usage now reports cache-inclusive input token totals (the AI SDK convention). OpenChamber showed context usage as low as ~0.1% instead of ~5% because the converter reported only non-cached input; `inputTokens.total` now includes cache read/write tokens (issue #36).
+
+### Chores
+
+- Catalog refresh to `command-code@1.31.0`, adding the free reasoning model `stealth/ox-alpha` (Ox Alpha).
+- Docs: corrected the install command (`opencode plugin`, no `add`), simplified the README Install section, and added build/test/architecture guidance to `AGENTS.md`.
+
 ## 1.1.1 - 2026-08-20
 
 Fix: generate image-input modalities from the Command Code CLI catalog.
