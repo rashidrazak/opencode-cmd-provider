@@ -38,7 +38,9 @@ missing:
   too, keeping the picker uncluttered.
 
 The catalog snapshot is refreshed at every release; newly published Command
-Code models appear after a plugin update.
+Code models appear after a plugin update. A second bundled catalog
+(`src/catalog/deals.ts`) carries deal/allowance/benchmark intelligence scraped
+from the Command Code docs — see below.
 
 Start or reload OpenCode, then authenticate:
 
@@ -103,10 +105,21 @@ opencode run --model commandcode/claude-sonnet-5 "hello"
 
 ## Model discovery and offline behavior
 
-The plugin ships a snapshot of the Command Code model catalog (`src/catalog/snapshot.ts`)
-and auto-registers every model into OpenCode's config at startup. Model
-availability changes when the package is updated: the snapshot is regenerated
-from the live catalog at every release via `npm run refresh:snapshot`.
+The plugin ships two bundled catalogs and auto-registers every model into
+OpenCode's config at startup. Model availability changes when the package is
+updated.
+
+- Snapshot — `src/catalog/snapshot.ts` (model ids, names, context lengths) plus
+  `src/catalog/facts.ts` (reasoning efforts, per-1M-token rates, input
+  modalities). Regenerated from the live catalog via `npm run refresh:snapshot`.
+- Deals — `src/catalog/deals.ts` (per-model tier, benchmarks, deal
+  discounts, `was`/`now` rates, peak/off-peak windows, and GOAT/Pro monthly
+  allowances for every model). Scraped from the Command Code docs
+  (`pricing-limits`, `plans/goat`, `plans/pro`; fixtures in
+  `tests/fixtures/*.html`) via `npm run refresh:deals` (add `-- --fixtures` to
+  regenerate offline from fixtures; without it, fetches live pages).
+
+Run `npm run refresh` to regenerate both catalogs at once (offline from fixtures).
 
 Auto-registration adds no network latency to OpenCode startup — the snapshot is
 bundled, and the plugin never contacts the Command Code API to list models. The
@@ -116,11 +129,14 @@ endpoint being reachable.
 The following environment variables are intended for tests, local mocks, and
 compatible API endpoints:
 
-| Variable                     | Purpose                                |
-| ---------------------------- | -------------------------------------- |
-| `COMMANDCODE_API_BASE`       | Override the Command Code API base URL |
-| `COMMANDCODE_FACTS_URL`      | Override the bundled `models.md` URL   |
-| `COMMANDCODE_MODALITIES_URL` | Override the CLI bundle URL            |
+| Variable                        | Purpose                                |
+| ------------------------------- | -------------------------------------- |
+| `COMMANDCODE_API_BASE`          | Override the Command Code API base URL |
+| `COMMANDCODE_FACTS_URL`         | Override the bundled `models.md` URL   |
+| `COMMANDCODE_MODALITIES_URL`    | Override the CLI bundle URL            |
+| `COMMANDCODE_DEALS_PRICING_URL` | Override the `pricing-limits` docs URL |
+| `COMMANDCODE_DEALS_GOAT_URL`    | Override the `plans/goat` docs URL     |
+| `COMMANDCODE_DEALS_PRO_URL`     | Override the `plans/pro` docs URL      |
 
 ### Reasoning support
 
@@ -154,6 +170,8 @@ npm run build
 npm test
 npm run format:check
 ```
+
+`npm run build` needs [bun](https://bun.sh) on PATH — it compiles `src/tui/index.tsx` with the solid transform (`scripts/build-tui.ts`), so the TUI panel's JSX props are reactive and the sidebar repaints on mid-session model switches.
 
 The headless end-to-end test runs the real OpenCode CLI against a mock Command Code server through the built package:
 

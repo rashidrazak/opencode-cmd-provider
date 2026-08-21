@@ -6,7 +6,8 @@
   "main": "./dist/index.js",
   "exports": {
     ".": "./dist/index.js",
-    "./server": "./dist/index.js"
+    "./server": "./dist/index.js",
+    "./tui": "./dist/tui.js"
   },
   "files": [
     "dist",
@@ -15,14 +16,17 @@
     "CHANGELOG.md"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && npm run build:tui",
     "typecheck": "tsc --noEmit",
     "refresh:snapshot": "node scripts/refresh-snapshot.mjs",
+    "refresh:deals": "node scripts/refresh-deals.mjs",
+    "refresh": "npm run refresh:snapshot && npm run refresh:deals -- --fixtures",
     "test": "npm run typecheck && npm run test:unit && npm run test:integration && npm run test:contract && npm run format:check",
-    "test:unit": "tsx tests/env.test.ts && tsx tests/auth-key.test.ts && tsx tests/converters.test.ts && tsx tests/stream.test.ts && tsx tests/redact.test.ts && tsx tests/cost.test.ts && tsx tests/retry.test.ts && tsx tests/reasoning.test.ts && tsx tests/modalities.test.ts && tsx tests/snapshot.test.ts && tsx tests/refresh-snapshot.test.ts && tsx tests/oauth.test.ts && tsx tests/parse-facts.test.ts && tsx tests/parse-modalities.test.ts && tsx tests/catalog-metadata.test.ts && tsx tests/plugin-models.test.ts",
+    "test:unit": "tsx tests/env.test.ts && tsx tests/auth-key.test.ts && tsx tests/converters.test.ts && tsx tests/stream.test.ts && tsx tests/redact.test.ts && tsx tests/cost.test.ts && tsx tests/retry.test.ts && tsx tests/reasoning.test.ts && tsx tests/modalities.test.ts && tsx tests/snapshot.test.ts && tsx tests/refresh-snapshot.test.ts && tsx tests/oauth.test.ts && tsx tests/parse-facts.test.ts && tsx tests/parse-modalities.test.ts && tsx tests/catalog-metadata.test.ts && tsx tests/plugin-models.test.ts && tsx tests/vendor.test.ts && tsx tests/deals-enrichment.test.ts && tsx tests/plan-summary.test.ts && tsx tests/html-tables.test.ts && tsx tests/parse-docs.test.ts && tsx tests/refresh-deals.test.ts && tsx tests/tui-deals-panel.test.ts",
     "test:integration": "tsx tests/integration-do-stream.test.ts && tsx tests/integration-do-generate.test.ts",
     "test:contract": "tsx tests/contract.test.ts",
     "test:e2e": "node tests/e2e-opencode.mjs",
+    "build:tui": "bun scripts/build-tui.ts",
     "format": "prettier --write '**/*.{ts,mjs,json,md}'",
     "format:check": "prettier --check '**/*.{ts,mjs,json,md}'"
   },
@@ -39,7 +43,10 @@
     "url": "git+https://github.com/rashidrazak/opencode-cmd-provider.git"
   },
   "dependencies": {
-    "@ai-sdk/provider": "^4.0.7"
+    "@ai-sdk/provider": "^4.0.7",
+    "@opentui/core": "^0.5.4",
+    "@opentui/solid": "^0.5.4",
+    "solid-js": "1.9.12"
   },
   "devDependencies": {
     "@opencode-ai/plugin": "*",

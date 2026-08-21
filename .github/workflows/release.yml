@@ -20,6 +20,9 @@ jobs:
           node-version: 22
           cache: npm
           registry-url: https://registry.npmjs.org
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
 
       - name: Verify tag commit is on main
         run: |
@@ -46,12 +49,15 @@ jobs:
       - name: Refresh catalog snapshot
         run: npm run refresh:snapshot
 
-      - name: Fail on stale catalog snapshot or facts
+      - name: Refresh deals catalog
+        run: npm run refresh:deals
+
+      - name: Fail on stale catalog snapshot, facts, or deals
         run: |
-          if git diff --exit-code -- src/catalog/snapshot.ts && git diff -I 'FACTS_LAST_REFRESHED' --exit-code -- src/catalog/facts.ts; then
-            echo "catalog snapshot and facts are fresh"
+          if git diff --exit-code -- src/catalog/snapshot.ts && git diff -I 'FACTS_LAST_REFRESHED' --exit-code -- src/catalog/facts.ts && git diff -I 'DEAL_LAST_REFRESHED' -I 'DEAL_PACKAGE_VERSION' --exit-code -- src/catalog/deals.ts; then
+            echo "catalog snapshot, facts, and deals are fresh"
           else
-            echo "::error::catalog snapshot or capability facts are stale. Run 'npm run refresh:snapshot' locally, commit src/catalog/snapshot.ts and src/catalog/facts.ts, land them on main, then re-tag ${GITHUB_REF_NAME}."
+            echo "::error::catalog snapshot, capability facts, or deals catalog are stale. Run 'npm run refresh:snapshot' and 'npm run refresh:deals' locally, commit src/catalog/snapshot.ts, src/catalog/facts.ts and src/catalog/deals.ts, land them on main, then re-tag ${GITHUB_REF_NAME}."
             exit 1
           fi
 

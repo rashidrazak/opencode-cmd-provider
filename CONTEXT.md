@@ -24,6 +24,14 @@ _Avoid_: user models, custom models, overrides
 Updating the snapshot to match the live model catalog; happens on plugin release, never at runtime.
 _Avoid_: model sync, catalog update, live refresh
 
+**Deals catalog**:
+Per-model pricing intelligence scraped from the Command Code docs
+(`pricing-limits`, `plans/goat`, `plans/pro`): tier (`Open Source`/`Premium`),
+benchmarks (intelligence, tok/s), deal discounts (`was`/`now` rates), peak/off-peak
+windows, and GOAT/Pro monthly allowances. Bundled in `src/catalog/deals.ts`
+and regenerated via `npm run refresh:deals` (or offline from `tests/fixtures/*.html`).
+_Avoid_: pricing table, deal feed
+
 **Release**:
 A versioned publication of the package: a git tag `vX.Y.Z` matching the `package.json` version, a GitHub Release, and an npm publish. The catalog snapshot is regenerated before every release — a release never ships a stale snapshot.
 _Avoid_: publish, deploy, ship (when meaning the whole publication)
