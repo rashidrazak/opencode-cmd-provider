@@ -7,9 +7,10 @@
 //     (with id + argsTextDelta as delta), then a final tool-call part
 //   - finishReason is { unified, raw }
 //   - usage is nested { inputTokens: { total, noCache, cacheRead, cacheWrite },
-//     outputTokens: { total } } — cache tokens are folded into the input
-//     totals the way pi folds them into its usage shape (AI SDK v3 has no
-//     separate cache fields on the model-facing shape we emit here).
+//     outputTokens: { total } } — `total` is cache-inclusive per AI SDK v3
+//     convention (how the bundled Anthropic provider maps usage); `noCache`
+//     carries the fresh-only remainder so downstream context usage and local
+//     cost stay correct (issue #36).
 import type {
   LanguageModelV3StreamPart,
   LanguageModelV3Usage,
@@ -54,13 +55,13 @@ export function ccUsageToAiSdkUsage(
   if (!isRecord(usage)) return undefined
   const details = isRecord(usage.inputTokenDetails) ? usage.inputTokenDetails : undefined
   const totalInput = numberValue(usage.inputTokens) ?? 0
-  const noCache = numberValue(details?.noCacheTokens)
   const cacheRead = numberValue(details?.cacheReadTokens) ?? 0
   const cacheWrite = numberValue(details?.cacheWriteTokens) ?? 0
-  const inputTotal = noCache ?? Math.max(0, totalInput - cacheRead - cacheWrite)
+  const explicitNoCache = numberValue(details?.noCacheTokens)
+  const noCache = explicitNoCache ?? Math.max(0, totalInput - cacheRead - cacheWrite)
   const outputTokens = numberValue(usage.outputTokens) ?? 0
   return {
-    inputTokens: { total: inputTotal, noCache: inputTotal, cacheRead, cacheWrite },
+    inputTokens: { total: totalInput, noCache, cacheRead, cacheWrite },
     outputTokens: { total: outputTokens, text: outputTokens, reasoning: 0 },
   }
 }

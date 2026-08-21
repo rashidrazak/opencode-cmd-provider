@@ -28,7 +28,7 @@ import {
 } from "./converters.js"
 import { parseStreamEventLine, ccEventToStreamPart } from "./stream.js"
 import { redactCommandCodeErrorText, commandCodeErrorMessage } from "./redact.js"
-import { calculateCommandCodeCost } from "./cost.js"
+import { calculateCommandCodeCost, costUsageFromAiSdkUsage } from "./cost.js"
 import { ZERO_MODEL_COST, MODEL_COSTS } from "./pricing.js"
 import {
   mappedReasoningEffort,
@@ -323,14 +323,7 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
             for (const part of parts) {
               if (part.type === "finish") {
                 finished = true
-                const usage = part.usage
-                calculateCommandCodeCost(this.costForModel(), {
-                  input: usage.inputTokens.total ?? 0,
-                  output: usage.outputTokens.total ?? 0,
-                  cacheRead: 0,
-                  cacheWrite: 0,
-                  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-                })
+                calculateCommandCodeCost(this.costForModel(), costUsageFromAiSdkUsage(part.usage))
               }
               emit(part)
             }

@@ -1,6 +1,6 @@
 // tests/cost.test.ts — pricing table + cost calculation (PLAN #6, port of pi's
 // test-cost.ts; locks arithmetic to pi-ai's calculateCost)
-import { calculateCommandCodeCost } from "../src/provider/cost.js"
+import { calculateCommandCodeCost, costUsageFromAiSdkUsage } from "../src/provider/cost.js"
 import { MODEL_COSTS } from "../src/provider/pricing.js"
 import { assertEqual, run } from "./harness.js"
 
@@ -43,6 +43,26 @@ run([
       const u = usage(100_000, 0, 100_000, 0)
       calculateCommandCodeCost({ cost: rates }, u)
       assertEqual(u.cost.cacheRead, 0.01)
+    },
+  ],
+
+  [
+    "stream usage bills fresh input, cache read and cache write separately (issue #36)",
+    () => {
+      const u = costUsageFromAiSdkUsage({
+        inputTokens: { total: 100_000, noCache: 40_000, cacheRead: 30_000, cacheWrite: 30_000 },
+        outputTokens: { total: 50_000, text: 50_000, reasoning: 0 },
+      })
+      assertEqual(u.input, 40_000)
+      assertEqual(u.output, 50_000)
+      assertEqual(u.cacheRead, 30_000)
+      assertEqual(u.cacheWrite, 30_000)
+      calculateCommandCodeCost({ cost: { input: 1, output: 5, cacheRead: 0.5, cacheWrite: 3 } }, u)
+      assertEqual(u.cost.input, 0.04)
+      assertEqual(u.cost.output, 0.25)
+      assertEqual(u.cost.cacheRead, 0.015)
+      assertEqual(u.cost.cacheWrite, 0.09)
+      assertEqual(u.cost.total, 0.395)
     },
   ],
 
