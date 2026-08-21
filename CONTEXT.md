@@ -24,13 +24,21 @@ _Avoid_: user models, custom models, overrides
 Updating the snapshot to match the live model catalog; happens on plugin release, never at runtime.
 _Avoid_: model sync, catalog update, live refresh
 
+**Core**:
+`provider.commandcode` auto-registration (snapshot → `provider.commandcode.models`), `[CMD]` display names, `COMMANDCODE_API_KEY` auth, and `provider/*` streaming. Deals intelligence is not part of core.
+_Avoid_: base provider, essential plugin
+
 **Deals catalog**:
 Per-model pricing intelligence scraped from the Command Code docs
 (`pricing-limits`, `plans/goat`, `plans/pro`): tier (`Open Source`/`Premium`),
 benchmarks (intelligence, tok/s), deal discounts (`was`/`now` rates), peak/off-peak
-windows, and GOAT/Pro monthly allowances. Bundled in `src/catalog/deals.ts`
+windows, and GOAT/Pro monthly allowances. Bundled in `src/deals/catalog.ts`
 and regenerated via `npm run refresh:deals` (or offline from `tests/fixtures/*.html`).
 _Avoid_: pricing table, deal feed
+
+**Deals intelligence**:
+The deals catalog plus its enrichment (`model.options.cmd`, `context_over_200k` cost) and its surfaces: the TUI sidebar panel and the `cmd_plan_summary` tool. A single excisable slice — removing it leaves core byte-identical.
+_Avoid_: deals feature, pricing UI
 
 **Release**:
 A versioned publication of the package: a git tag `vX.Y.Z` matching the `package.json` version, a GitHub Release, and an npm publish. The catalog snapshot is regenerated before every release — a release never ships a stale snapshot.

@@ -52,13 +52,18 @@ jobs:
       - name: Refresh deals catalog
         run: npm run refresh:deals
 
-      - name: Fail on stale catalog snapshot, facts, or deals
+      - name: Fail on stale catalog snapshot or facts (deals is non-blocking)
         run: |
-          if git diff --exit-code -- src/catalog/snapshot.ts && git diff -I 'FACTS_LAST_REFRESHED' --exit-code -- src/catalog/facts.ts && git diff -I 'DEAL_LAST_REFRESHED' -I 'DEAL_PACKAGE_VERSION' --exit-code -- src/catalog/deals.ts; then
-            echo "catalog snapshot, facts, and deals are fresh"
+          if git diff --exit-code -- src/catalog/snapshot.ts && git diff -I 'FACTS_LAST_REFRESHED' --exit-code -- src/catalog/facts.ts; then
+            echo "catalog snapshot and facts are fresh"
           else
-            echo "::error::catalog snapshot, capability facts, or deals catalog are stale. Run 'npm run refresh:snapshot' and 'npm run refresh:deals' locally, commit src/catalog/snapshot.ts, src/catalog/facts.ts and src/catalog/deals.ts, land them on main, then re-tag ${GITHUB_REF_NAME}."
+            echo "::error::catalog snapshot or capability facts are stale. Run 'npm run refresh:snapshot' locally, commit src/catalog/snapshot.ts and src/catalog/facts.ts, land them on main, then re-tag ${GITHUB_REF_NAME}."
             exit 1
+          fi
+          if ! git diff -I 'DEAL_LAST_REFRESHED' -I 'DEAL_PACKAGE_VERSION' --exit-code -- src/deals/catalog.ts; then
+            echo "::warning::deals catalog is stale — scraping may be mitigated and refresh fell back to fixtures/empty. Not blocking release. To update, run 'npm run refresh:deals -- --fixtures' locally, commit src/deals/catalog.ts, and re-tag if desired."
+          else
+            echo "deals catalog is fresh"
           fi
 
       - name: Extract changelog entry

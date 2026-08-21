@@ -1,4 +1,4 @@
-// src/plugin/plan-summary.ts — cmd_plan_summary tool: plan-aware allowance
+// src/deals/plan-summary.ts — cmd_plan_summary tool: plan-aware allowance
 // breakdown. Plan resolution: tool arg → COMMANDCODE_PLAN → live /alpha/whoami
 // (when a key is present and the network works) → default "go". Rendering is a
 // pure function so tests never touch the network.
@@ -10,7 +10,7 @@ import {
   type ModelDeals,
   type PlanId,
   type PlanInfo,
-} from "../catalog/deals.js"
+} from "./catalog.js"
 import { getApiBase } from "../env.js"
 
 const PLAN_DISPLAY: Record<PlanId, string> = {

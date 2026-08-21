@@ -1,6 +1,6 @@
 // tests/plan-summary.test.ts — plan resolution + summary rendering
-import { resolvePlan, renderPlanSummary, normalizePlan } from "../src/plugin/plan-summary.js"
-import { MODEL_DEALS, PLAN_CATALOG } from "../src/catalog/deals.js"
+import { resolvePlan, renderPlanSummary, normalizePlan } from "../src/deals/plan-summary.js"
+import { MODEL_DEALS, PLAN_CATALOG } from "../src/deals/catalog.js"
 import { assert, assertEqual, run } from "./harness.js"
 
 const OFFLINE_ENV: NodeJS.ProcessEnv = {} // no key → no network attempt

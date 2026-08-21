@@ -1,14 +1,15 @@
 /** @jsxImportSource @opentui/solid */
-// src/tui/index.tsx — TUI plugin: "Command Code" deals section in the session
+// src/deals/tui.tsx — TUI plugin: "Command Code" deals section in the session
 // sidebar (sidebar_content slot). Renders deal details from the picked model's
 // enriched options.cmd (produced by the server plugin's config hook). Renders
 // nothing when the model has no deals data — zero sidebar noise.
 import { For, Show, createMemo } from "solid-js"
 import type { Provider } from "@opencode-ai/sdk/v2"
 import type { TuiPlugin, TuiPluginApi, TuiPluginModule } from "@opencode-ai/plugin/tui"
-import { PLAN_CATALOG, type PlanId } from "../catalog/deals.js"
+import { DEAL_SOURCE_URL, PLAN_CATALOG, type PlanId } from "./catalog.js"
 
 type Cmd = {
+  unavailable?: unknown
   free?: unknown
   tier?: unknown
   allowance?: Record<string, unknown> | undefined
@@ -42,6 +43,14 @@ export function dealsRows(
 ): Array<[string, string]> {
   const cmd = model?.options?.cmd as Cmd | undefined
   if (!cmd) return []
+  if (cmd.unavailable === true) {
+    return [
+      [`Deals unavailable — ${DEAL_SOURCE_URL}`, ""],
+      ["Tier", "—"],
+      ["Intelligence", "—"],
+      ["Tok/s", "—"],
+    ]
+  }
   const rows: Array<[string, string]> = []
   if (typeof cmd.tier === "string") rows.push(["Tier", tierDisplay(cmd.tier)])
   if (cmd.free === true) rows.push(["Status", "FREE"])
@@ -115,7 +124,7 @@ function DealsPanel(props: { api: TuiPluginApi; session_id: string }) {
         <For each={rows()}>
           {(row) => (
             <text fg={theme().textMuted}>
-              {row[0]}: {row[1]}
+              {row[1] ? `${row[0]}: ${row[1]}` : row[0]}
             </text>
           )}
         </For>

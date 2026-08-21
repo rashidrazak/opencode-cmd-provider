@@ -1,2 +1,3 @@
 src/catalog/snapshot.ts
 src/catalog/
+src/deals/catalog.ts
