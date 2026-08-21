@@ -1,4 +1,4 @@
-// src/plugin/vendor.ts — model id → vendor family mapping for the config hook.
+// src/deals/vendor.ts — model id → vendor family mapping for the config hook.
 // Derived from the model id namespace, never from scraped data, so it cannot
 // go stale. Unknown ids map to undefined and the family field is left unset.
 const VENDOR_FAMILIES: Readonly<Record<string, string>> = {

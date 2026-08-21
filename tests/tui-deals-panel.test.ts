@@ -1,5 +1,5 @@
 // tests/tui-deals-panel.test.ts — deals sidebar panel data extraction
-import { dealsRows } from "../src/tui/index.js"
+import { dealsRows } from "../src/deals/tui.js"
 import { assertEqual, run } from "./harness.js"
 
 run([

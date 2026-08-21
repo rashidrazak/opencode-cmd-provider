@@ -1,12 +1,12 @@
 /** @jsxImportSource @opentui/solid */
-// src/tui/index.tsx — TUI plugin: "Command Code" deals section in the session
+// src/deals/tui.tsx — TUI plugin: "Command Code" deals section in the session
 // sidebar (sidebar_content slot). Renders deal details from the picked model's
 // enriched options.cmd (produced by the server plugin's config hook). Renders
 // nothing when the model has no deals data — zero sidebar noise.
 import { For, Show, createMemo } from "solid-js"
 import type { Provider } from "@opencode-ai/sdk/v2"
 import type { TuiPlugin, TuiPluginApi, TuiPluginModule } from "@opencode-ai/plugin/tui"
-import { PLAN_CATALOG, type PlanId } from "../catalog/deals.js"
+import { PLAN_CATALOG, type PlanId } from "./catalog.js"
 
 type Cmd = {
   free?: unknown

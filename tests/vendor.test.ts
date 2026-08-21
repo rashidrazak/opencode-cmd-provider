@@ -1,5 +1,5 @@
 // tests/vendor.test.ts — model id → vendor family mapping (deals enrichment)
-import { vendorFamilyForModel } from "../src/plugin/vendor.js"
+import { vendorFamilyForModel } from "../src/deals/vendor.js"
 import { assertEqual, run } from "./harness.js"
 
 run([

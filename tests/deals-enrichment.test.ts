@@ -1,6 +1,6 @@
 // tests/deals-enrichment.test.ts — enrichment + degradation contract
-import { enrichCommandCodeModels, buildCmdOptions } from "../src/plugin/deals-enrichment.js"
-import type { ModelDeals } from "../src/catalog/deals.js"
+import { enrichCommandCodeModels, buildCmdOptions } from "../src/deals/enrichment.js"
+import type { ModelDeals } from "../src/deals/catalog.js"
 import { assertEqual, run } from "./harness.js"
 
 const DEALS: Readonly<Record<string, ModelDeals>> = {

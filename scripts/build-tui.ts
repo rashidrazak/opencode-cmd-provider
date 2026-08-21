@@ -1,4 +1,4 @@
-// Builds dist/tui.js (the "./tui" export) from src/tui/index.tsx.
+// Builds dist/tui.js (the "./tui" export) from src/deals/tui.tsx (Deals slice).
 //
 // tsc's `react-jsx` emit is not reactive: every JSX prop is evaluated eagerly
 // when the element is created, so props like `when={rows().length > 0}` or
@@ -13,7 +13,7 @@
 import { createSolidTransformPlugin } from "@opentui/solid/bun-plugin"
 
 const out = await Bun.build({
-  entrypoints: [new URL("../src/tui/index.tsx", import.meta.url).pathname],
+  entrypoints: [new URL("../src/deals/tui.tsx", import.meta.url).pathname],
   target: "bun",
   outdir: new URL("../dist", import.meta.url).pathname,
   naming: "tui.js",

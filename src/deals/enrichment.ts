@@ -1,9 +1,9 @@
-// src/plugin/deals-enrichment.ts — docs-derived model enrichment for the
+// src/deals/enrichment.ts — docs-derived model enrichment for the
 // config hook. Purely additive: every field is gap-filled only when the user
 // left it unset, and every lookup is guarded so missing/empty deal data
 // leaves the config byte-identical to today's output (degradation contract).
 import type { Config } from "@opencode-ai/sdk/v2"
-import { MODEL_DEALS, type ModelDeals } from "../catalog/deals.js"
+import { MODEL_DEALS, type ModelDeals } from "./catalog.js"
 import { vendorFamilyForModel } from "./vendor.js"
 
 export function enrichCommandCodeModels(
