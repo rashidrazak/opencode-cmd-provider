@@ -215,7 +215,7 @@ run([
       assertEqual(finish.type, "finish")
       assertEqual(finish.finishReason, { unified: "stop", raw: "stop" })
       assertEqual(finish.usage, {
-        inputTokens: { total: 7, noCache: 7, cacheRead: 2, cacheWrite: 1 },
+        inputTokens: { total: 10, noCache: 7, cacheRead: 2, cacheWrite: 1 },
         outputTokens: { total: 5, text: 5, reasoning: 0 },
       })
     },
@@ -252,9 +252,11 @@ run([
   ],
 
   [
-    "ccUsageToAiSdkUsage handles cache details",
+    "ccUsageToAiSdkUsage emits cache-inclusive input totals (issue #36)",
     () => {
       // Plan contract: the function reads `totalUsage` from the finish event.
+      // AI SDK convention: `total` includes cached tokens; `noCache` is the
+      // fresh-only remainder — otherwise downstream context usage renders low.
       const usage = ccUsageToAiSdkUsage({
         totalUsage: {
           inputTokens: 100,
@@ -263,7 +265,24 @@ run([
         },
       })
       assertEqual(usage, {
-        inputTokens: { total: 40, noCache: 40, cacheRead: 30, cacheWrite: 30 },
+        inputTokens: { total: 100, noCache: 40, cacheRead: 30, cacheWrite: 30 },
+        outputTokens: { total: 50, text: 50, reasoning: 0 },
+      })
+    },
+  ],
+
+  [
+    "ccUsageToAiSdkUsage derives noCache when details omit it",
+    () => {
+      const usage = ccUsageToAiSdkUsage({
+        totalUsage: {
+          inputTokens: 100,
+          outputTokens: 50,
+          inputTokenDetails: { cacheReadTokens: 30, cacheWriteTokens: 20 },
+        },
+      })
+      assertEqual(usage, {
+        inputTokens: { total: 100, noCache: 50, cacheRead: 30, cacheWrite: 20 },
         outputTokens: { total: 50, text: 50, reasoning: 0 },
       })
     },

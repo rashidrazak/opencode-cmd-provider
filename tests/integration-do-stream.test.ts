@@ -55,6 +55,37 @@ run([
   ],
 
   [
+    "finish usage includes cached input tokens (issue #36)",
+    async () => {
+      const mock = await startMockCc({
+        stream: [
+          textDelta("hi"),
+          finishEvent({
+            totalUsage: {
+              inputTokens: 100,
+              outputTokens: 50,
+              inputTokenDetails: { noCacheTokens: 40, cacheReadTokens: 30, cacheWriteTokens: 30 },
+            },
+          }),
+        ],
+      })
+      try {
+        const provider = createCommandCode({ apiKey: "user_test", baseURL: mock.url })
+        const parts = await collect(provider.languageModel("claude-sonnet-5"), [
+          { role: "user", content: "hi" },
+        ])
+        const finish = parts.find((p) => p.type === "finish") as { usage?: unknown }
+        assertEqual(finish.usage, {
+          inputTokens: { total: 100, noCache: 40, cacheRead: 30, cacheWrite: 30 },
+          outputTokens: { total: 50, text: 50, reasoning: 0 },
+        })
+      } finally {
+        await mock.close()
+      }
+    },
+  ],
+
+  [
     "streams reasoning deltas before text",
     async () => {
       const mock = await startMockCc({
