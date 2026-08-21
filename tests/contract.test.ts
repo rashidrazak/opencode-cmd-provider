@@ -6,10 +6,16 @@ const require = createRequire(import.meta.url)
 const pkg = require("../package.json") as {
   engines?: Record<string, string>
   exports?: Record<string, string>
+  files?: string[]
 }
 
 async function load(): Promise<Record<string, unknown>> {
   const mod = await import("../dist/index.js")
+  return mod as Record<string, unknown>
+}
+
+async function loadTui(): Promise<Record<string, unknown>> {
+  const mod = await import("../dist/tui.js")
   return mod as Record<string, unknown>
 }
 
@@ -25,6 +31,34 @@ run([
     () => {
       assert(typeof pkg.exports?.["."] === "string")
       assert(typeof pkg.exports?.["./server"] === "string")
+    },
+  ],
+  [
+    "exports exposes ./tui entry pointing to dist/tui.js",
+    () => {
+      assertEqual(pkg.exports?.["./tui"], "./dist/tui.js")
+    },
+  ],
+  [
+    "files includes dist so published artifact contains server and tui",
+    () => {
+      assert(Array.isArray(pkg.files), "package.json files must be an array")
+      const includesDist = pkg.files?.some(
+        (f) => f === "dist" || f === "dist/tui.js" || f === "./dist/tui.js",
+      )
+      assert(includesDist, "files must include dist or dist/tui.js")
+      // tsc emits dist/tui.js via bun build; contract fails fast if missing before npm pack check
+      assert(typeof pkg.exports?.["./tui"] === "string")
+    },
+  ],
+  [
+    "dist/tui.js exists and re-exports Deals TUI plugin",
+    async () => {
+      const mod = await loadTui()
+      const def = mod.default as { id?: unknown; tui?: unknown }
+      assert(typeof def === "object" && def !== null)
+      assertEqual(def.id, "commandcode.deals")
+      assert(typeof def.tui === "function")
     },
   ],
   [

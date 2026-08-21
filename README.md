@@ -9,7 +9,16 @@ A provider and plugin for [OpenCode](https://opencode.ai) that connects to the [
 
 ## Install
 
-Add the package to your OpenCode configuration:
+```sh
+opencode plugin add opencode-cmd-provider
+```
+
+One install writes both `opencode.json(c)` (`server` target) and `tui.json`
+(`tui` target, `package.json` `exports["./tui"]` → `dist/tui.js`) from the same
+spec. No hand-written `tui.json` — bare `opencode` shows the Deals intelligence
+sidebar on next launch.
+
+Manual config also works:
 
 ```jsonc
 // opencode.json
