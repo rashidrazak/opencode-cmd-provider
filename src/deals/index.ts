@@ -1,7 +1,9 @@
-// src/deals/index.ts — sole public entry for Deals intelligence
-// (catalog + enrichment + TUI panel + cmd_plan_summary tool). Deleting this
-// folder plus the two registration lines in src/plugin/index.ts leaves Core
-// (Snapshot, Auto-registration, provider/* streaming) byte-identical.
+// src/deals/index.ts — server-side public entry for Deals intelligence
+// (catalog + enrichment + cmd_plan_summary tool). The TUI panel is a separate
+// host and is reached via tui.ts → src/deals/tui.tsx, never from the server
+// barrel, so the provider process does not load solid-js/@opentui. Deleting
+// this folder plus the two registration lines in src/plugin/index.ts leaves
+// Core (Snapshot, Auto-registration, provider/* streaming) byte-identical.
 
 // Catalog
 export {
@@ -23,7 +25,3 @@ export { enrichCommandCodeModels, buildCmdOptions } from "./enrichment.js"
 
 // Tool
 export { planSummaryTool, renderPlanSummary, resolvePlan, normalizePlan } from "./plan-summary.js"
-
-// TUI
-export { dealsRows } from "./tui.js"
-export { default as dealsTui } from "./tui.js"

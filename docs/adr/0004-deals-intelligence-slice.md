@@ -2,7 +2,7 @@
 
 Status: accepted
 
-Deals intelligence (catalog `src/catalog/deals.ts` + enrichment `src/plugin/deals-enrichment.ts` + TUI `src/tui/` + tool `src/plugin/plan-summary.ts`) is a single slice that can be deleted without breaking core (`provider.commandcode` auto-registration, `[CMD]` models, `COMMANDCODE_API_KEY` auth, `provider/*` streaming). Core is `snapshot → models → provider`; deals is additive only. Enrichment guards (`if (!entry) continue`, `if (options.cmd) keep`) keep core byte-identical when deals is empty. Build `npm run refresh` and `Release` never fail if `refresh:deals` scraping is mitigated — it falls back to fixtures/empty `deals.ts` with a warning.
+Deals intelligence (catalog `src/deals/catalog.ts` + enrichment `src/deals/enrichment.ts` + TUI `src/deals/tui.tsx` + tool `src/deals/plan-summary.ts`) is a single slice that can be deleted without breaking core (`provider.commandcode` auto-registration, `[CMD]` models, `COMMANDCODE_API_KEY` auth, `provider/*` streaming). Core is `snapshot → models → provider`; deals is additive only. Enrichment guards (`if (!entry) …`, `if (options.cmd) keep`) keep core byte-identical when deals is empty. Build `npm run refresh` and `Release` never fail if `refresh:deals` scraping is mitigated — it falls back to fixtures/empty `catalog.ts` with a warning.
 
 Failure is visible: enrichment injects `model.options.cmd.unavailable=true` when `MODEL_DEALS` is empty, TUI renders banner `Deals unavailable — https://commandcode.ai/docs/resources/pricing-limits` plus placeholder rows (`Tier: —`), and `cmd_plan_summary` renders `No deal data is bundled…`. Sidebar previously hid silently (`<Show when={rows.length>0}>`).
 

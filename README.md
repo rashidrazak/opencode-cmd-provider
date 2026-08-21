@@ -50,7 +50,7 @@ missing:
 
 The catalog snapshot is refreshed at every release; newly published Command
 Code models appear after a plugin update. A second bundled catalog
-(`src/catalog/deals.ts`) carries deal/allowance/benchmark intelligence scraped
+(`src/deals/catalog.ts`) carries deal/allowance/benchmark intelligence scraped
 from the Command Code docs — see below.
 
 Start or reload OpenCode, then authenticate:
@@ -123,7 +123,7 @@ updated.
 - Snapshot — `src/catalog/snapshot.ts` (model ids, names, context lengths) plus
   `src/catalog/facts.ts` (reasoning efforts, per-1M-token rates, input
   modalities). Regenerated from the live catalog via `npm run refresh:snapshot`.
-- Deals — `src/catalog/deals.ts` (per-model tier, benchmarks, deal
+- Deals — `src/deals/catalog.ts` (per-model tier, benchmarks, deal
   discounts, `was`/`now` rates, peak/off-peak windows, and GOAT/Pro monthly
   allowances for every model). Scraped from the Command Code docs
   (`pricing-limits`, `plans/goat`, `plans/pro`; fixtures in
@@ -182,7 +182,7 @@ npm test
 npm run format:check
 ```
 
-`npm run build` needs [bun](https://bun.sh) on PATH — it compiles `src/tui/index.tsx` with the solid transform (`scripts/build-tui.ts`), so the TUI panel's JSX props are reactive and the sidebar repaints on mid-session model switches.
+`npm run build` needs [bun](https://bun.sh) on PATH — it compiles `src/deals/tui.tsx` with the solid transform (`scripts/build-tui.ts`), so the TUI panel's JSX props are reactive and the sidebar repaints on mid-session model switches.
 
 The headless end-to-end test runs the real OpenCode CLI against a mock Command Code server through the built package:
 

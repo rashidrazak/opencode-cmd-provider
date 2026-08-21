@@ -32,7 +32,7 @@ _Avoid_: base provider, essential plugin
 Per-model pricing intelligence scraped from the Command Code docs
 (`pricing-limits`, `plans/goat`, `plans/pro`): tier (`Open Source`/`Premium`),
 benchmarks (intelligence, tok/s), deal discounts (`was`/`now` rates), peak/off-peak
-windows, and GOAT/Pro monthly allowances. Bundled in `src/catalog/deals.ts`
+windows, and GOAT/Pro monthly allowances. Bundled in `src/deals/catalog.ts`
 and regenerated via `npm run refresh:deals` (or offline from `tests/fixtures/*.html`).
 _Avoid_: pricing table, deal feed
 
