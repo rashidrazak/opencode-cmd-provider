@@ -2,7 +2,7 @@
 // breakdown. Plan resolution: tool arg → COMMANDCODE_PLAN → live /alpha/whoami
 // (when a key is present and the network works) → default "go". Rendering is a
 // pure function so tests never touch the network.
-import { tool } from "@opencode-ai/plugin"
+import { z } from "zod"
 import { MODEL_COSTS } from "../catalog/facts.js"
 import {
   MODEL_DEALS,
@@ -173,12 +173,12 @@ function estimateMonthlyRequests(modelId: string, allowance: number): number {
 }
 
 export function planSummaryTool() {
-  return tool({
+  return {
     description:
       "Show the Command Code plan's credits, usage windows, per-model monthly allowances (GOAT/Pro) or active deals (other plans), with estimated monthly request counts. Set COMMANDCODE_PLAN (go|goat|pro|max|max20|teampro|provider) to pin the plan without network access.",
     args: {
-      plan: tool.schema.string().optional().describe("go|goat|pro|max|max20|teampro|provider"),
+      plan: z.string().optional().describe("go|goat|pro|max|max20|teampro|provider"),
     },
-    execute: async (args) => renderPlanSummary(await resolvePlan(args.plan)),
-  })
+    execute: async (args: { plan?: string }) => renderPlanSummary(await resolvePlan(args.plan)),
+  }
 }

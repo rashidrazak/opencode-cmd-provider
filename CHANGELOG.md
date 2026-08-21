@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.2.1 - 2026-08-21
+
+Fix: `/connect` no longer lists Command Code — the plugin failed to load.
+
+- The `cmd_plan_summary` tool runtime-imported `@opencode-ai/plugin`, an
+  optional peer dependency that `opencode plugin <pkg>` installs in
+  `.opencode/`, not next to the plugin. That import threw `ERR_MODULE_NOT_FOUND`
+  at load, silently killing the whole server plugin — no auto-registration and
+  no `/connect` entry (Command Code vanished from the provider list).
+- The tool now builds its Zod args from a direct `zod` dependency instead of
+  `@opencode-ai/plugin`'s `tool()` helper, so the server bundle has zero
+  runtime imports of optional peers.
+- Added a contract test that scans the built `dist/` and fails on any runtime
+  `@opencode-ai/*` import, so this class of regression can't ship again.
+
 ## 1.2.0 - 2026-08-21
 
 Feature: Deals intelligence — per-model pricing/allowance data in a sidebar panel and a plan-summary tool, delivered zero-step.

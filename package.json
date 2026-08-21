@@ -1,6 +1,6 @@
 {
   "name": "opencode-cmd-provider",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Command Code provider + plugin for opencode",
   "type": "module",
   "main": "./dist/index.js",
@@ -46,7 +46,8 @@
     "@ai-sdk/provider": "^4.0.7",
     "@opentui/core": "^0.5.4",
     "@opentui/solid": "^0.5.4",
-    "solid-js": "1.9.12"
+    "solid-js": "1.9.12",
+    "zod": "^4.1.8"
   },
   "devDependencies": {
     "@opencode-ai/plugin": "*",

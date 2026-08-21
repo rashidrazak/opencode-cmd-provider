@@ -39,6 +39,11 @@ fixtures/empty catalog with a warning, so it can't block release.
   registration lines in `src/plugin/index.ts` leaves Core green. Keep the server
   barrel `src/deals/index.ts` free of the TUI re-exports — exporting `tui.tsx`
   from it pulls `solid-js`/`@opentui` into the server bundle.
+- **Never runtime-import `@opencode-ai/*`.** `@opencode-ai/plugin`/`@opencode-ai/sdk`
+  are optional peer deps: `opencode plugin <pkg>` installs them in `.opencode/`,
+  not next to the plugin, so a runtime import fails to resolve at load and kills
+  the whole plugin (no auto-registration, no `/connect`). Reference them only via
+  `import type`. Enforced by `tests/contract.test.ts`.
 - The install command is `opencode plugin <pkg>` — **there is no `add`
   subcommand** on opencode 1.18+.
 
