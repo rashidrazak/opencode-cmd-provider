@@ -11,7 +11,7 @@
 //      flip — they flow through the existing error/redaction pipeline.
 //   4. Usage/cost surfaced is the retried legacy response's — no double-counting.
 import { createCommandCode } from "../src/provider/index.js"
-import { finishEvent, textDelta } from "./helpers/mock-cc.js"
+import { finishEvent, textDelta, upgradeRequiredBody, headersToRecord } from "./helpers/mock-cc.js"
 import type { LanguageModelV3Prompt } from "../src/provider/aisdk-types.js"
 import { assert, assertEqual, run } from "./harness.js"
 import { calculateCommandCodeCost, costUsageFromAiSdkUsage } from "../src/provider/cost.js"
@@ -46,32 +46,8 @@ function errorResponse(status: number, body: unknown): Response {
   })
 }
 
-/** Normalizes fetch init.headers (Headers instance or plain object) to a
- * lowercase-keyed record so spies can assert on header values. */
-function headersToRecord(headers: HeadersInit | undefined): Record<string, string> {
-  const out: Record<string, string> = {}
-  if (!headers) return out
-  if (headers instanceof Headers) {
-    headers.forEach((value, key) => {
-      out[key.toLowerCase()] = value
-    })
-    return out
-  }
-  if (Array.isArray(headers)) {
-    for (const [key, value] of headers) out[key.toLowerCase()] = value
-    return out
-  }
-  for (const [key, value] of Object.entries(headers)) out[key.toLowerCase()] = value
-  return out
-}
-
 /** Documented Provider API 403 upgrade_required body (https://commandcode.ai/docs/provider). */
-const UPGRADE_BODY = {
-  error: {
-    code: "upgrade_required",
-    message: "You're on the Go plan, the only plan without API access. Upgrade to GOAT or higher.",
-  },
-}
+const UPGRADE_BODY = upgradeRequiredBody()
 
 const LEGACY_EVENTS: Array<Record<string, unknown> | "end"> = [
   textDelta("legacy answer"),

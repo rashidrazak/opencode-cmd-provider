@@ -34,7 +34,7 @@ import {
   createOpenAIStreamParser,
   createAnthropicStreamParser,
 } from "./stream.js"
-import { getApiBase } from "../env.js"
+import { getApiBase, getCmdZdr } from "../env.js"
 import { resolvePlan, type PlanResolutionCache } from "../deals/plan-summary.js"
 import {
   redactCommandCodeErrorText,
@@ -434,12 +434,19 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
       apiKey: this.options.apiKey,
       authPaths: this.options.authPaths,
     })
-    return {
+    const headers: Record<string, string> = {
       "Content-Type": "application/json",
       Authorization: `Bearer ${apiKey ?? ""}`,
       ...this.options.headers,
       ...(options.headers ?? {}),
     }
+    // ZDR passthrough (issue #57): the Provider API honours the CLI's own
+    // opt-in — CMD_ZDR=1 → every Provider API request carries x-cmd-zdr: 1
+    // (https://commandcode.ai/docs/provider "Zero data retention (ZDR)").
+    // Only the exact value "1" opts in; the legacy /alpha/generate transport
+    // never sends the header (headersFor is untouched).
+    if (getCmdZdr()) headers["x-cmd-zdr"] = "1"
+    return headers
   }
 
   private providerRunStream(

@@ -12,17 +12,29 @@ export interface MockCcOptions {
   stream?: Array<Record<string, unknown> | "end">
   status?: number
   errorBody?: string
+  /** Retry-After seconds sent with a non-OK /alpha/generate response (mirrored on provider endpoints) */
+  retryAfter?: number
+  /** how many consecutive error responses /alpha/generate serves before falling through to stream (default: always error) */
+  generateErrorCount?: number
   /** called with the parsed /alpha/generate request body and headers */
   onGenerate?: (body: Record<string, unknown>, headers: Record<string, string>) => void
   /** OpenAI chat completions SSE events for POST /provider/v1/chat/completions */
   chatCompletionsStream?: Array<Record<string, unknown> | "end">
   chatCompletionsStatus?: number
   chatCompletionsErrorBody?: string
+  /** Retry-After seconds sent with a non-OK /provider/v1/chat/completions response */
+  chatCompletionsRetryAfter?: number
+  /** how many consecutive error responses chat/completions serves before falling through to stream */
+  chatCompletionsErrorCount?: number
   onChatCompletions?: (body: Record<string, unknown>, headers: Record<string, string>) => void
   /** Anthropic messages SSE events for POST /provider/v1/messages */
   messagesStream?: Array<Record<string, unknown> | "end">
   messagesStatus?: number
   messagesErrorBody?: string
+  /** Retry-After seconds sent with a non-OK /provider/v1/messages response */
+  messagesRetryAfter?: number
+  /** how many consecutive error responses messages serves before falling through to stream */
+  messagesErrorCount?: number
   onMessages?: (body: Record<string, unknown>, headers: Record<string, string>) => void
   /** served at GET /registry (npm registry JSON: { "dist-tags": { latest } }) */
   registry?: unknown
@@ -85,8 +97,19 @@ export function startMockCc(
           body ? (JSON.parse(body) as Record<string, unknown>) : {},
           (req.headers ?? {}) as Record<string, string>,
         )
-        if (options.status && options.status >= 400) {
-          res.writeHead(options.status, { "content-type": "application/json" })
+        const errorsLeft =
+          options.generateErrorCount !== undefined
+            ? options.generateErrorCount - (hits.generate - 1)
+            : options.status && options.status >= 400
+              ? Number.POSITIVE_INFINITY
+              : 0
+        if (errorsLeft > 0) {
+          res.writeHead(options.status ?? 500, {
+            "content-type": "application/json",
+            ...(options.retryAfter !== undefined
+              ? { "retry-after": String(options.retryAfter) }
+              : {}),
+          })
           res.end(options.errorBody ?? JSON.stringify({ error: { message: "mock error" } }))
           return
         }
@@ -111,8 +134,19 @@ export function startMockCc(
           body ? (JSON.parse(body) as Record<string, unknown>) : {},
           (req.headers ?? {}) as Record<string, string>,
         )
-        if (options.chatCompletionsStatus && options.chatCompletionsStatus >= 400) {
-          res.writeHead(options.chatCompletionsStatus, { "content-type": "application/json" })
+        const chatErrorsLeft =
+          options.chatCompletionsErrorCount !== undefined
+            ? options.chatCompletionsErrorCount - (hits.chatCompletions - 1)
+            : options.chatCompletionsStatus && options.chatCompletionsStatus >= 400
+              ? Number.POSITIVE_INFINITY
+              : 0
+        if (chatErrorsLeft > 0) {
+          res.writeHead(options.chatCompletionsStatus ?? 500, {
+            "content-type": "application/json",
+            ...(options.chatCompletionsRetryAfter !== undefined
+              ? { "retry-after": String(options.chatCompletionsRetryAfter) }
+              : {}),
+          })
           res.end(
             options.chatCompletionsErrorBody ??
               JSON.stringify({
@@ -142,8 +176,19 @@ export function startMockCc(
           body ? (JSON.parse(body) as Record<string, unknown>) : {},
           (req.headers ?? {}) as Record<string, string>,
         )
-        if (options.messagesStatus && options.messagesStatus >= 400) {
-          res.writeHead(options.messagesStatus, { "content-type": "application/json" })
+        const messagesErrorsLeft =
+          options.messagesErrorCount !== undefined
+            ? options.messagesErrorCount - (hits.messages - 1)
+            : options.messagesStatus && options.messagesStatus >= 400
+              ? Number.POSITIVE_INFINITY
+              : 0
+        if (messagesErrorsLeft > 0) {
+          res.writeHead(options.messagesStatus ?? 500, {
+            "content-type": "application/json",
+            ...(options.messagesRetryAfter !== undefined
+              ? { "retry-after": String(options.messagesRetryAfter) }
+              : {}),
+          })
           res.end(
             options.messagesErrorBody ??
               JSON.stringify({
@@ -259,4 +304,60 @@ export function anthropicMessageDelta(
   usage: Record<string, unknown> = { input_tokens: 10, output_tokens: 5 },
 ): Record<string, unknown> {
   return { type: "message_delta", delta: { stop_reason: "end_turn" }, usage }
+}
+
+/**
+ * Documented Provider API `403 upgrade_required` body (https://commandcode.ai/docs/provider):
+ * "You're on the Go plan, the only plan without API access." Served by the
+ * mock under `chatCompletionsStatus: 403`/`messagesStatus: 403` for
+ * tests that emulate the issue #56 transport flip.
+ */
+export function upgradeRequiredBody(): string {
+  return JSON.stringify({
+    error: {
+      code: "upgrade_required",
+      message:
+        "You're on the Go plan, the only plan without API access. Upgrade to GOAT or higher.",
+    },
+  })
+}
+
+/**
+ * Documented Provider API `422 cmd_zdr_no_providers` body — the model has no
+ * ZDR-capable upstream, so a request carrying `x-cmd-zdr: 1` fails (rather
+ * than silently falling back to a non-ZDR provider). Served under
+ * `chatCompletionsStatus: 422`/`messagesStatus: 422`. It is not handled
+ * specially by the transport: it flows through the existing error/redaction
+ * pipeline like any other API error (issue #57).
+ */
+export function zdrNoProvidersBody(): string {
+  return JSON.stringify({
+    error: {
+      code: "cmd_zdr_no_providers",
+      message:
+        "x-cmd-zdr: 1 was set but the model has no zero-data-retention upstream. Remove the header or pick a different model.",
+    },
+  })
+}
+
+/**
+ * Normalizes fetch init.headers (Headers instance, array, or plain object) to
+ * a lowercase-keyed record so tests can assert on header values regardless of
+ * how the fetch implementation carried them.
+ */
+export function headersToRecord(headers: HeadersInit | undefined): Record<string, string> {
+  const out: Record<string, string> = {}
+  if (!headers) return out
+  if (headers instanceof Headers) {
+    headers.forEach((value, key) => {
+      out[key.toLowerCase()] = value
+    })
+    return out
+  }
+  if (Array.isArray(headers)) {
+    for (const [key, value] of headers) out[key.toLowerCase()] = value
+    return out
+  }
+  for (const [key, value] of Object.entries(headers)) out[key.toLowerCase()] = value
+  return out
 }
