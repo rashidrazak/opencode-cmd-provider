@@ -237,6 +237,37 @@ export function anthropicUsageToAiSdkUsage(
   return usageToAiSdk(usage)
 }
 
+// --- Shared stream-part constructors ---
+// Single construction surface for the parts both the stateless mappers and
+// the per-stream stateful parsers emit (issue #55 kept tool-call completion
+// stateful; everything else stays shared).
+
+function zeroedUsage(): LanguageModelV3Usage {
+  return {
+    inputTokens: { total: 0, noCache: 0, cacheRead: 0, cacheWrite: 0 },
+    outputTokens: { total: 0, text: 0, reasoning: 0 },
+  }
+}
+
+function finishPart(
+  finishReason: LanguageModelV3FinishReason | undefined,
+  usage: LanguageModelV3Usage | undefined,
+): LanguageModelV3StreamPart {
+  return {
+    type: "finish",
+    finishReason: finishReason ?? { unified: "stop", raw: "stop" },
+    usage: usage ?? zeroedUsage(),
+  }
+}
+
+function textDeltaPart(id: unknown, delta: string): LanguageModelV3StreamPart {
+  return { type: "text-delta", id: stringValue(id) ?? "text", delta }
+}
+
+function reasoningDeltaPart(id: unknown, delta: string): LanguageModelV3StreamPart {
+  return { type: "reasoning-delta", id: stringValue(id) ?? "reasoning", delta }
+}
+
 // --- OpenAI Chat Completions streaming ---
 export function openAIEventToStreamPart(event: unknown): LanguageModelV3StreamPart[] {
   if (!isRecord(event)) return []
@@ -277,8 +308,7 @@ export function openAIEventToStreamPart(event: unknown): LanguageModelV3StreamPa
   if (delta) {
     const content = stringValue(delta.content)
     if (typeof content === "string" && content.length > 0) {
-      const id = stringValue((event as Record<string, unknown>).id) ?? "text"
-      parts.push({ type: "text-delta", id, delta: content })
+      parts.push(textDeltaPart((event as Record<string, unknown>).id, content))
     }
     // Tool calls streaming — map to tool-input deltas
     const toolCalls = delta.tool_calls ?? delta.toolCalls
@@ -309,31 +339,16 @@ export function openAIEventToStreamPart(event: unknown): LanguageModelV3StreamPa
     // Reasoning delta (OpenAI reasoning)
     const reasoning = stringValue(delta.reasoning) ?? stringValue(delta.reasoning_content)
     if (typeof reasoning === "string" && reasoning.length > 0) {
-      const id = stringValue((event as Record<string, unknown>).id) ?? "reasoning"
-      parts.push({ type: "reasoning-delta", id, delta: reasoning })
+      parts.push(reasoningDeltaPart((event as Record<string, unknown>).id, reasoning))
     }
   }
 
   // If this chunk carries finish reason or usage, emit finish
   if (finishReason || hasUsage) {
-    const finalUsage =
-      usage ??
-      (hasUsage
-        ? {
-            inputTokens: { total: 0, noCache: 0, cacheRead: 0, cacheWrite: 0 },
-            outputTokens: { total: 0, text: 0, reasoning: 0 },
-          }
-        : undefined)
+    const finalUsage = usage ?? (hasUsage ? zeroedUsage() : undefined)
     // Only emit finish if we have usage or explicit finish reason indicating completion
     if (finalUsage || finishReason) {
-      parts.push({
-        type: "finish",
-        finishReason: finishReason ?? { unified: "stop", raw: "stop" },
-        usage: finalUsage ?? {
-          inputTokens: { total: 0, noCache: 0, cacheRead: 0, cacheWrite: 0 },
-          outputTokens: { total: 0, text: 0, reasoning: 0 },
-        },
-      })
+      parts.push(finishPart(finishReason, finalUsage))
     }
   }
 
@@ -412,31 +427,12 @@ export function anthropicEventToStreamPart(event: unknown): LanguageModelV3Strea
   if (type === "message_delta") {
     const delta = asRecord(event.delta)
     const stopReason = stringValue(delta?.stop_reason) ?? stringValue(delta?.stopReason) ?? "stop"
-    const usage = usageToAiSdk(event.usage)
-    return [
-      {
-        type: "finish",
-        finishReason: mapFinishReason(stopReason),
-        usage: usage ?? {
-          inputTokens: { total: 0, noCache: 0, cacheRead: 0, cacheWrite: 0 },
-          outputTokens: { total: 0, text: 0, reasoning: 0 },
-        },
-      },
-    ]
+    return [finishPart(mapFinishReason(stopReason), usageToAiSdk(event.usage))]
   }
 
   // Alternative terminal: { type: "message_stop" } without usage — emit generic finish
   if (type === "message_stop") {
-    return [
-      {
-        type: "finish",
-        finishReason: { unified: "stop", raw: "stop" },
-        usage: {
-          inputTokens: { total: 0, noCache: 0, cacheRead: 0, cacheWrite: 0 },
-          outputTokens: { total: 0, text: 0, reasoning: 0 },
-        },
-      },
-    ]
+    return [finishPart(undefined, undefined)]
   }
 
   // Ping/heartbeat or other known non-content types
@@ -447,18 +443,213 @@ export function anthropicEventToStreamPart(event: unknown): LanguageModelV3Strea
     const usage = usageToAiSdk(event.usage)
     if (usage) {
       return [
-        {
-          type: "finish",
-          finishReason: mapFinishReason(
-            stringValue((event as Record<string, unknown>).finish_reason) ?? "stop",
-          ),
+        finishPart(
+          mapFinishReason(stringValue((event as Record<string, unknown>).finish_reason) ?? "stop"),
           usage,
-        },
+        ),
       ]
     }
   }
 
   return []
+}
+
+// --- Per-stream stateful parsers (issue #55: tool-call parity) ---
+//
+// The stateless mappers above cannot complete a tool call whose arguments
+// arrive in multiple SSE events (OpenAI streams `arguments` fragments across
+// chunks; Anthropic streams `input_json_delta` fragments before
+// `content_block_stop`): the final `tool-call` part would never be emitted
+// and fragment deltas would carry empty/index-only ids. These factories close
+// over per-stream tool-call buffers so one stream produces the same
+// observable parts as the legacy transport: tool-input-start / tool-input-
+// delta / tool-input-end / tool-call with the real tool id, then finish.
+
+// Per-stream tool-call accumulator shared by both provider parsers: OpenAI
+// keys by tool-call `index` (fragmented `arguments`), Anthropic by content
+// block `index` (`input_json_delta` fragments); `input` holds the raw
+// accumulated JSON arguments either way.
+interface ToolCallBuffer {
+  id: string
+  name: string
+  input: string
+  started: boolean
+  emitted: boolean
+}
+
+export function createOpenAIStreamParser(): (event: unknown) => LanguageModelV3StreamPart[] {
+  const toolBuffers = new Map<number, ToolCallBuffer>()
+  let nextIndex = 0
+  return (event) => {
+    if (!isRecord(event)) return []
+    // Error events flow through the stateless mapper (redacted throw).
+    if (event.error !== undefined || stringValue(event.type) === "error") {
+      return openAIEventToStreamPart(event)
+    }
+    const parts: LanguageModelV3StreamPart[] = []
+    const choice = firstChoice(event)
+    const delta = choice ? deltaFromChoice(choice) : undefined
+    if (delta) {
+      const content = stringValue(delta.content)
+      if (typeof content === "string" && content.length > 0) {
+        parts.push(textDeltaPart((event as Record<string, unknown>).id, content))
+      }
+      const reasoning = stringValue(delta.reasoning) ?? stringValue(delta.reasoning_content)
+      if (typeof reasoning === "string" && reasoning.length > 0) {
+        parts.push(reasoningDeltaPart((event as Record<string, unknown>).id, reasoning))
+      }
+      const toolCalls = delta.tool_calls ?? delta.toolCalls
+      if (Array.isArray(toolCalls)) {
+        for (const tc of toolCalls) {
+          if (!isRecord(tc)) continue
+          const fn = isRecord(tc.function) ? tc.function : {}
+          const name = stringValue(fn.name) ?? stringValue(tc.name) ?? ""
+          const args = stringValue(fn.arguments) ?? ""
+          const id = stringValue(tc.id) ?? ""
+          let index = numberValue(tc.index)
+          if (index === undefined) {
+            // Fragments usually carry `index`; when absent, continue the most
+            // recent tool call (OpenAI includes id+name only on the first chunk).
+            index = toolBuffers.size > 0 ? Math.max(...toolBuffers.keys()) : nextIndex++
+          }
+          let buffer = toolBuffers.get(index)
+          if (!buffer) {
+            buffer = { id: id || `tool-${index}`, name, input: "", started: false, emitted: false }
+            toolBuffers.set(index, buffer)
+          }
+          if (id) buffer.id = id
+          if (name) buffer.name = name
+          if (!buffer.started && buffer.name) {
+            buffer.started = true
+            parts.push({ type: "tool-input-start", id: buffer.id, toolName: buffer.name })
+          }
+          if (args && !buffer.emitted) {
+            buffer.input += args
+            parts.push({ type: "tool-input-delta", id: buffer.id, delta: args })
+            // Complete as soon as the accumulated arguments parse as JSON; the
+            // finish chunk below flushes anything that never completes.
+            try {
+              JSON.parse(buffer.input)
+              buffer.emitted = true
+              parts.push({ type: "tool-input-end", id: buffer.id })
+              parts.push({
+                type: "tool-call",
+                toolCallId: buffer.id,
+                toolName: buffer.name,
+                input: buffer.input,
+              })
+            } catch {
+              // fragment — keep accumulating
+            }
+          }
+        }
+      }
+    }
+    const rawUsage = (event as Record<string, unknown>).usage
+    const hasUsage = rawUsage !== undefined && rawUsage !== null
+    const finishReasonRaw =
+      stringValue(choice?.finish_reason) ??
+      stringValue(choice?.finishReason) ??
+      stringValue((event as Record<string, unknown>).finish_reason) ??
+      stringValue((event as Record<string, unknown>).finishReason)
+    const finishReason = finishReasonRaw ? mapFinishReason(finishReasonRaw) : undefined
+    if (finishReason || hasUsage) {
+      // Flush any tool call whose terminal args chunk never arrived.
+      for (const [index, buffer] of toolBuffers) {
+        if (buffer.started && !buffer.emitted) {
+          parts.push({ type: "tool-input-end", id: buffer.id })
+          parts.push({
+            type: "tool-call",
+            toolCallId: buffer.id,
+            toolName: buffer.name,
+            input: buffer.input,
+          })
+        }
+        toolBuffers.delete(index)
+      }
+      parts.push(finishPart(finishReason, hasUsage ? usageToAiSdk(rawUsage) : undefined))
+    }
+    return parts
+  }
+}
+
+export function createAnthropicStreamParser(): (event: unknown) => LanguageModelV3StreamPart[] {
+  const toolBlocks = new Map<number, ToolCallBuffer>()
+  return (event) => {
+    if (!isRecord(event)) return []
+    const type = stringValue(event.type)
+    if (type === "content_block_start") {
+      const block = asRecord(event.content_block)
+      const index = numberValue(event.index) ?? 0
+      const blockType = stringValue(block?.type)
+      if (blockType === "tool_use") {
+        const id = stringValue(block?.id) ?? `tool-${index}`
+        const name = stringValue(block?.name) ?? ""
+        toolBlocks.set(index, { id, name, input: "", started: true, emitted: false })
+        return [{ type: "tool-input-start", id, toolName: name }]
+      }
+      if (blockType === "text") return [{ type: "text-start", id: `text-${index}` }]
+      return []
+    }
+    if (type === "content_block_delta") {
+      const delta = asRecord(event.delta)
+      const index = numberValue(event.index) ?? 0
+      const text = stringValue(delta?.text)
+      if (typeof text === "string" && text.length > 0) {
+        return [{ type: "text-delta", id: `text-${index}`, delta: text }]
+      }
+      const partial = stringValue(delta?.partial_json)
+      if (typeof partial === "string" && partial.length > 0) {
+        const block = toolBlocks.get(index)
+        if (block) {
+          if (block.emitted) return []
+          block.input += partial
+          const out: LanguageModelV3StreamPart[] = [
+            { type: "tool-input-delta", id: block.id, delta: partial },
+          ]
+          // Complete early when a single delta already carries valid JSON;
+          // content_block_stop below flushes multi-delta accumulation.
+          try {
+            JSON.parse(block.input)
+            block.emitted = true
+            out.push({ type: "tool-input-end", id: block.id })
+            out.push({
+              type: "tool-call",
+              toolCallId: block.id,
+              toolName: block.name,
+              input: block.input,
+            })
+          } catch {
+            // fragment — keep accumulating until stop
+          }
+          return out
+        }
+        return [{ type: "tool-input-delta", id: `tool-${index}`, delta: partial }]
+      }
+      return []
+    }
+    if (type === "content_block_stop") {
+      const index = numberValue(event.index) ?? 0
+      const block = toolBlocks.get(index)
+      if (block) {
+        toolBlocks.delete(index)
+        if (block.emitted) return []
+        return [
+          { type: "tool-input-end", id: block.id },
+          {
+            type: "tool-call",
+            toolCallId: block.id,
+            toolName: block.name,
+            input: block.input,
+          },
+        ]
+      }
+      return [{ type: "text-end", id: `text-${index}` }]
+    }
+    // Everything else (message_delta, message_stop, ping, error, …) shares the
+    // stateless mapper's handling.
+    return anthropicEventToStreamPart(event)
+  }
 }
 
 // Convenience: dispatch any provider event (tries OpenAI then Anthropic shapes)

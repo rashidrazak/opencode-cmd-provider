@@ -31,8 +31,8 @@ import {
 import {
   parseStreamEventLine,
   ccEventToStreamPart,
-  openAIEventToStreamPart,
-  anthropicEventToStreamPart,
+  createOpenAIStreamParser,
+  createAnthropicStreamParser,
 } from "./stream.js"
 import { getApiBase } from "../env.js"
 import { resolvePlan, type PlanResolutionCache } from "../deals/plan-summary.js"
@@ -409,9 +409,12 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
   ): ReadableStream<LanguageModelV3StreamPart> {
     const url = this.providerEndpoint()
     const bodyStr = JSON.stringify(body)
+    // Per-stream stateful parsers complete tool calls whose arguments arrive
+    // across multiple SSE events (issue #55 tool-call parity); the stateless
+    // mappers are kept for direct codec use.
     const parser: (event: unknown) => LanguageModelV3StreamPart[] = isClaude
-      ? anthropicEventToStreamPart
-      : openAIEventToStreamPart
+      ? createAnthropicStreamParser()
+      : createOpenAIStreamParser()
     return this.transportStream(url, bodyStr, headers, signal, sink, parser)
   }
 
