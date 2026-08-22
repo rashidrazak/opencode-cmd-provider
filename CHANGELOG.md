@@ -1,5 +1,51 @@
 # Changelog
 
+## 1.3.0 - 2026-08-23
+
+Feature: dual-transport Provider API — non-Go plans now use the documented
+`/provider/v1/*` endpoints with self-healing fallback to the legacy transport.
+
+### Features
+
+- **Provider API routing** (issues #51, #53): non-Go plans (goat, pro, max,
+  max20, teampro, provider aliases) route through the documented Provider API —
+  `claude-*` models to `POST /provider/v1/messages` (Anthropic shape), everything
+  else to `POST /provider/v1/chat/completions` (OpenAI shape) — with retry,
+  timeout, abort, and redaction parity with the legacy transport. Go /
+  individual-go sessions stay byte-for-byte on the legacy `POST /alpha/generate`
+  wire format, proven by golden byte-parity tests.
+- **Session-cached plan resolution** (issue #54): transport is chosen per model
+  instance from the shared plan-resolution seam — explicit override →
+  `COMMANDCODE_PLAN` env → cached `GET /alpha/whoami` → default Provider API.
+  Only a resolved `go` selects the legacy transport; next session after a plan
+  upgrade auto-switches.
+- **Self-healing upgrade flip** (issue #56): if a plan-detection miss sends a
+  true Go user to the Provider API, a documented `403 upgrade_required` pins the
+  session to the legacy transport and retries the same call once there — no
+  second Provider API hit, no double-counted usage.
+- **ZDR passthrough** (issue #57): `CMD_ZDR=1` sends `x-cmd-zdr: 1` on every
+  Provider API request; the documented `422 cmd_zdr_no_providers` flows through
+  the existing error/redaction pipeline. The legacy transport never sends it.
+- **Transport hardening** (issue #58): the finish part now waits for a trailing
+  OpenAI usage-only chunk so cost reflects real token counts; non-image file
+  parts are rejected with a clear role-aware error instead of silently
+  base64-encoding; stateful SSE parsers complete tool calls whose arguments
+  arrive across multiple events.
+
+### Fixes
+
+- Restored the "Command Code" TUI sidebar section for Ox Alpha and DeepSeek V4
+  Flash Vision (exp): the deals-coverage gate now fails loudly when scraped
+  records lack a snapshot model, and the fixtures were refreshed to cover every
+  model (issue #61).
+
+### Chores
+
+- Added the `refresh` project skill documenting the offline catalog refresh
+  (`npm run refresh` from `tests/fixtures/*.html`).
+- New test suites: provider transport, parity, upgrade-fallback, ZDR, and
+  deals coverage — all wired into `test:unit`.
+
 ## 1.2.2 - 2026-08-22
 
 Chore: catalog refresh to `command-code@1.32.1`.
