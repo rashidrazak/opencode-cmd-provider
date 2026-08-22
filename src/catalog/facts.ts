@@ -5,18 +5,20 @@
 // modalities parsed from its CLI bundle (dist/cli.mjs). Regenerate
 // with `npm run refresh:snapshot`.
 
-export const FACTS_SOURCE_URL = "https://unpkg.com/command-code@1.31.0/dist/bundled/command-code-knowledge/reference/models.md"
-export const MODALITIES_SOURCE_URL = "https://unpkg.com/command-code@1.31.0/dist/cli.mjs"
-export const FACTS_PACKAGE_VERSION = "1.31.0"
-export const FACTS_LAST_REFRESHED = "2026-08-21"
+export const FACTS_SOURCE_URL = "https://unpkg.com/command-code@1.32.1/dist/bundled/command-code-knowledge/reference/models.md"
+export const MODALITIES_SOURCE_URL = "https://unpkg.com/command-code@1.32.1/dist/cli.mjs"
+export const FACTS_PACKAGE_VERSION = "1.32.1"
+export const FACTS_LAST_REFRESHED = "2026-08-22"
 
 export const MODEL_EFFORTS: Readonly<Record<string, readonly string[]>> = {
   "deepseek/deepseek-v4-pro": ["high","max"],
   "deepseek/deepseek-v4-flash": ["high","max"],
+  "deepseek/deepseek-v4-flash-vision-exp": ["high","max"],
   "zai-org/GLM-5.3": ["low","high","max"],
   "zai-org/GLM-5.2": ["high","max"],
   "Qwen/Qwen3.8-Max": ["low","medium","xhigh"],
   "Qwen/Qwen3.8-27B": ["low","medium","xhigh"],
+  "stealth/ox-alpha": ["low","high","max"],
   "claude-sonnet-5": ["low","medium","high","xhigh","max"],
   "claude-sonnet-4-6": ["low","medium","high","xhigh","max"],
   "claude-fable-5": ["low","medium","high","xhigh","max"],
@@ -45,6 +47,7 @@ export const MODEL_COSTS: Readonly<
 > = {
   "deepseek/deepseek-v4-pro": { input: 0.66, output: 1.98, cacheRead: 0.022, cacheWrite: 0 },
   "deepseek/deepseek-v4-flash": { input: 0.22, output: 0.66, cacheRead: 0.007, cacheWrite: 0 },
+  "deepseek/deepseek-v4-flash-vision-exp": { input: 0.22, output: 0.66, cacheRead: 0.01, cacheWrite: 0 },
   "moonshotai/Kimi-K3": { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 0 },
   "moonshotai/Kimi-K2.7-Code": { input: 0.95, output: 4, cacheRead: 0.19, cacheWrite: 0 },
   "moonshotai/Kimi-K2.7-Code-Highspeed": { input: 1.9, output: 8, cacheRead: 0.38, cacheWrite: 0 },
@@ -118,6 +121,7 @@ export const MODEL_INPUT_MODALITIES: Readonly<
   "claude-opus-5": ["text","image"],
   "claude-sonnet-4-6": ["text","image"],
   "claude-sonnet-5": ["text","image"],
+  "deepseek/deepseek-v4-flash-vision-exp": ["text","image"],
   "google/gemini-3.1-flash-lite": ["text","image"],
   "google/gemini-3.5-flash": ["text","image"],
   "google/gemini-3.5-flash-lite": ["text","image"],

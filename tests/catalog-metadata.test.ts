@@ -44,6 +44,7 @@ const NON_REASONING_MODELS = new Set([
 const EFFORTS_MODELS = new Set([
   "deepseek/deepseek-v4-pro",
   "deepseek/deepseek-v4-flash",
+  "deepseek/deepseek-v4-flash-vision-exp",
   "zai-org/GLM-5.3",
   "zai-org/GLM-5.2",
   "Qwen/Qwen3.8-Max",

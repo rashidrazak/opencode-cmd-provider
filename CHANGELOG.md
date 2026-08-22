@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.2.2 - 2026-08-22
+
+Chore: catalog refresh to `command-code@1.32.1`.
+
+- Added `deepseek/deepseek-v4-flash-vision-exp` (DeepSeek V4 Flash Vision (exp)):
+  1M context, text+image input, reasoning efforts `high`/`max`, $0.22/$0.66 per
+  1M input/output tokens.
+- Added reasoning efforts for `stealth/ox-alpha` (`low`, `high`, `max`).
+- Deals catalog unchanged (56 entries).
+
 ## 1.2.1 - 2026-08-21
 
 Fix: `/connect` no longer lists Command Code — the plugin failed to load.

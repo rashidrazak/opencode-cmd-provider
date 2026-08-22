@@ -27,6 +27,7 @@ export const MODEL_SNAPSHOT: readonly CatalogModel[] = [
   { id: "gpt-5.4-mini", name: "GPT-5.4 Mini", contextLength: 400000 },
   { id: "deepseek/deepseek-v4-pro", name: "DeepSeek V4 Pro (latest)", contextLength: 1000000 },
   { id: "deepseek/deepseek-v4-flash", name: "DeepSeek V4 Flash (latest)", contextLength: 1000000 },
+  { id: "deepseek/deepseek-v4-flash-vision-exp", name: "DeepSeek V4 Flash Vision (exp)", contextLength: 1000000 },
   { id: "moonshotai/Kimi-K3", name: "Kimi K3", contextLength: 1000000 },
   { id: "moonshotai/Kimi-K2.7-Code", name: "Kimi K2.7 Code", contextLength: 256000 },
   { id: "moonshotai/Kimi-K2.7-Code-Highspeed", name: "Kimi K2.7 Code HighSpeed", contextLength: 262000 },
