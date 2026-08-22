@@ -1,13 +1,35 @@
 # Changelog
 
-## Unreleased
+## 1.4.0 - 2026-08-23
 
-Feature: `/connect` now mirrors the credential under `command-code` in
-OpenCode's auth store and to `~/.commandcode/auth.json` (official CLI layout,
-never clobbering a different existing login there), so ecosystem consumers
-such as OpenChamber's Usage page find the key without manual setup (#64).
-Existing users re-run `/connect` once (or copy the entry manually) to pick
-the mirror up.
+Feature: after a successful `/connect`, the credential is mirrored under
+`command-code` in OpenCode's auth store and to `~/.commandcode/auth.json`
+(official CLI layout), so ecosystem consumers such as OpenChamber's Usage
+page find the key without manual setup.
+
+### Features
+
+- **Credential mirroring** (issue #64): `/connect` now writes the credential
+  under `command-code` in OpenCode's auth store — refreshed on every
+  successful re-auth so the mirror stays in sync — and to
+  `~/.commandcode/auth.json` in the official CLI layout, which is only
+  written when it does not already hold a different credential, so an
+  official CLI login is never clobbered. Writes are atomic; new auth files
+  get owner-only permissions and existing file modes are preserved.
+- Mirroring is best-effort: failures are swallowed and never fail `/connect`
+  itself, and `mirror: false` opts out (used by the oauth tests). Users who
+  authenticate via `COMMANDCODE_API_KEY` alone are unaffected.
+- Existing users re-run `/connect` once (or copy the entry manually) to pick
+  the mirror up.
+
+### Chores
+
+- New `tests/auth-mirror.test.ts` suite: preserves unrelated auth-store
+  entries, owner-only permissions on create, stale-entry refresh on re-auth,
+  no-clobber of a differing CLI credential, idempotent no-op, blank-key
+  guard, and the end-to-end `/connect` flow including `mirror: false` —
+  wired into `test:unit`.
+- Docs: README notes the mirror locations and that mirroring is best-effort.
 
 ## 1.3.0 - 2026-08-23
 
