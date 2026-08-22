@@ -36,7 +36,11 @@ import {
 } from "./stream.js"
 import { getApiBase } from "../env.js"
 import { resolvePlan, type PlanResolutionCache } from "../deals/plan-summary.js"
-import { redactCommandCodeErrorText, commandCodeErrorMessage } from "./redact.js"
+import {
+  redactCommandCodeErrorText,
+  commandCodeErrorMessage,
+  isUpgradeRequiredError,
+} from "./redact.js"
 import { calculateCommandCodeCost, costUsageFromAiSdkUsage } from "./cost.js"
 import { ZERO_MODEL_COST, MODEL_COSTS } from "./pricing.js"
 import {
@@ -111,6 +115,32 @@ function errorStream(message: string): ReadableStream<LanguageModelV3StreamPart>
   })
 }
 
+/**
+ * Internal marker (issue #56 safety net): the Provider API returned a
+ * documented `403 upgrade_required` ("You're on the Go plan, the only plan
+ * without API access"). The transport flips the session to the legacy
+ * `/alpha/generate` transport and retries once. Never surfaced to callers.
+ */
+class UpgradeRequiredError extends Error {
+  constructor() {
+    super("Command Code Provider API requires a plan upgrade (403 upgrade_required)")
+  }
+}
+
+/** One transport pass: endpoint, body, headers, event mapper, and whether a
+ * documented `403 upgrade_required` on this endpoint flips the session to the
+ * legacy transport. Only the Provider API descriptor flips; the legacy
+ * descriptor never does, so a 403 on `/alpha/generate` flows through the
+ * existing error pipeline instead of re-entering the fallback (issue #56
+ * "retries once"). */
+interface TransportDescriptor {
+  url: string
+  bodyStr: string
+  headers: Record<string, string>
+  eventToParts: (event: unknown) => LanguageModelV3StreamPart[]
+  flipOnUpgradeRequired: boolean
+}
+
 export class CommandCodeLanguageModel implements LanguageModelV3 {
   readonly specificationVersion = "v3" as const
   readonly provider = "commandcode"
@@ -141,6 +171,18 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
   private readonly planCache: PlanResolutionCache = {}
 
   /**
+   * Safety-net flag (issue #56): once the Provider API answers a documented
+   * `403 upgrade_required`, the session is pinned to the legacy
+   * `/alpha/generate` transport for the lifetime of this model instance —
+   * subsequent turns stay on legacy without re-hitting the Provider API (no
+   * second 403). The Provider API has no path for Go-plan users (that is
+   * exactly what the 403 documents), so the plugin's legacy transport is the
+   * only way to keep serving a plan-detection miss that routed a true Go user
+   * there.
+   */
+  private pinnedToLegacy = false
+
+  /**
    * Resolves the transport plan through the shared plan-resolution seam:
    * explicit override (providerOptions plan, model option `plan`) →
    * COMMANDCODE_PLAN env → cached whoami → default Provider API. Only a
@@ -150,6 +192,7 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
    * and injected fetch as inference.
    */
   private async shouldUseProviderTransport(options: ModelCallOptions): Promise<boolean> {
+    if (this.pinnedToLegacy) return false
     const plan = await resolvePlan(this.planArgFor(options), process.env, {
       defaultPlan: "provider",
       cache: this.planCache,
@@ -415,7 +458,23 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
     const parser: (event: unknown) => LanguageModelV3StreamPart[] = isClaude
       ? createAnthropicStreamParser()
       : createOpenAIStreamParser()
-    return this.transportStream(url, bodyStr, headers, signal, sink, parser)
+    // Safety net (issue #56): a documented `403 upgrade_required` pins this
+    // session to the legacy transport and retries the same call once via
+    // POST {base}/alpha/generate with the legacy CLI wire format. The legacy
+    // descriptor itself never flips, so the retry is bounded to one.
+    const legacyFallback: TransportDescriptor = {
+      url: `${this.apiBase()}/alpha/generate`,
+      bodyStr: JSON.stringify(this.bodyFor(options)),
+      headers: this.headersFor(options),
+      eventToParts: ccEventToStreamPart,
+      flipOnUpgradeRequired: false,
+    }
+    return this.transportStream(
+      { url, bodyStr, headers, eventToParts: parser, flipOnUpgradeRequired: true },
+      signal,
+      sink,
+      legacyFallback,
+    )
   }
 
   private runStream(
@@ -427,7 +486,11 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
   ): ReadableStream<LanguageModelV3StreamPart> {
     const url = `${this.apiBase()}/alpha/generate`
     const bodyStr = JSON.stringify(body)
-    return this.transportStream(url, bodyStr, headers, signal, sink, ccEventToStreamPart)
+    return this.transportStream(
+      { url, bodyStr, headers, eventToParts: ccEventToStreamPart, flipOnUpgradeRequired: false },
+      signal,
+      sink,
+    )
   }
 
   /**
@@ -437,14 +500,20 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
    * the event→parts mapper. Depth gives leverage (N callers) and locality
    * (fix once, fixed everywhere). The eventToParts adapter varies across
    * the seam (CC vs OpenAI vs Anthropic) while the transport stays fixed.
+   *
+   * The optional legacyFallback implements the issue #56 safety net: when the
+   * Provider API answers a documented `403 upgrade_required` (Go plan, no API
+   * access), the session is pinned to the legacy `/alpha/generate` transport
+   * and the same call retries once there — the retry is bounded because only
+   * the provider descriptor carries flipOnUpgradeRequired. The pin is sticky
+   * for the lifetime of this model instance (no second Provider API hit on
+   * later turns).
    */
   private transportStream(
-    url: string,
-    bodyStr: string,
-    headers: Record<string, string>,
+    descriptor: TransportDescriptor,
     signal: AbortSignal | undefined,
-    sink: LanguageModelV3StreamPart[] | undefined,
-    eventToParts: (event: unknown) => LanguageModelV3StreamPart[],
+    sink?: LanguageModelV3StreamPart[],
+    legacyFallback?: TransportDescriptor,
   ): ReadableStream<LanguageModelV3StreamPart> {
     const timeoutMs = this.options.timeout
     const maxRetries = this.options.maxRetries ?? DEFAULT_MAX_RETRIES
@@ -479,189 +548,230 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
           return
         }
 
-        const handleEvent = (event: unknown): boolean => {
-          if (!isRecord(event)) return false
-          try {
-            const parts = eventToParts(event)
-            let finished = false
-            for (const part of parts) {
-              if (part.type === "finish") {
-                finished = true
-                calculateCommandCodeCost(this.costForModel(), costUsageFromAiSdkUsage(part.usage))
-              }
-              emit(part)
-            }
-            return finished
-          } catch (streamError) {
-            fail(streamError)
-            return true
-          }
-        }
-
-        let reader: ReadableStreamDefaultReader<Uint8Array> | undefined
-        const controller = new AbortController()
-        const onOuterAbort = () => controller.abort()
-        try {
-          signal?.addEventListener("abort", onOuterAbort, { once: true })
-          if (signal?.aborted) throw abortError("Aborted")
-          let response!: Response
-          let finished = false
-          retryLoop: for (let attempt = 0; ; attempt++) {
-            const attemptController = new AbortController()
-            let attemptTimedOut = false
-            let attemptTimeoutId: ReturnType<typeof setTimeout> | undefined
-
-            const clearAttemptTimeout = () => {
-              if (attemptTimeoutId !== undefined) {
-                clearTimeout(attemptTimeoutId)
-                attemptTimeoutId = undefined
-              }
-            }
-
-            if (timeoutMs !== undefined) {
-              attemptTimeoutId = setTimeout(() => {
-                attemptTimedOut = true
-                attemptController.abort()
-              }, timeoutMs)
-            }
-            const onOuterAbort2 = () => attemptController.abort()
-            controller.signal.addEventListener("abort", onOuterAbort2, { once: true })
-            const raceAttempt = <T>(promise: Promise<T>): Promise<T> =>
-              raceAbort(promise, attemptController.signal).catch((error: unknown) => {
-                if (attemptTimedOut) throw timeoutError(timeoutMs)
-                throw error
-              })
-
+        /**
+         * Runs one full request/read pass against a transport descriptor.
+         * Emits parts as they arrive and closes the stream on success or on
+         * an outer abort; any other error is rethrown so the caller decides
+         * (upgrade fallback vs. surface as an error part).
+         */
+        const runTransport = async (t: TransportDescriptor): Promise<void> => {
+          const handleEvent = (event: unknown): boolean => {
+            if (!isRecord(event)) return false
             try {
-              try {
-                response = await fetchImpl(url, {
-                  method: "POST",
-                  headers,
-                  body: bodyStr,
-                  signal: attemptController.signal,
-                })
-              } catch (fetchError: unknown) {
-                if (controller.signal.aborted) throw abortError("Aborted")
-                if (attemptTimedOut) {
-                  if (attempt < maxRetries) continue retryLoop
-                  throw timeoutError(timeoutMs)
+              const parts = t.eventToParts(event)
+              let finished = false
+              for (const part of parts) {
+                if (part.type === "finish") {
+                  finished = true
+                  calculateCommandCodeCost(this.costForModel(), costUsageFromAiSdkUsage(part.usage))
                 }
-                throw fetchError
+                emit(part)
+              }
+              return finished
+            } catch (streamError) {
+              fail(streamError)
+              return true
+            }
+          }
+
+          let reader: ReadableStreamDefaultReader<Uint8Array> | undefined
+          const controller = new AbortController()
+          const onOuterAbort = () => controller.abort()
+          try {
+            signal?.addEventListener("abort", onOuterAbort, { once: true })
+            if (signal?.aborted) throw abortError("Aborted")
+            let response!: Response
+            let finished = false
+            retryLoop: for (let attempt = 0; ; attempt++) {
+              const attemptController = new AbortController()
+              let attemptTimedOut = false
+              let attemptTimeoutId: ReturnType<typeof setTimeout> | undefined
+
+              const clearAttemptTimeout = () => {
+                if (attemptTimeoutId !== undefined) {
+                  clearTimeout(attemptTimeoutId)
+                  attemptTimeoutId = undefined
+                }
               }
 
-              // --- HTTP-level retry ---
-              if (!response.ok && isRetryableStatus(response.status)) {
-                const retryAfter = response.headers.get("retry-after")
-                const waitMs = retryDelayMs(attempt, retryAfter, maxRetryDelayMs)
-                if (waitMs < 0) {
-                  throw new Error(
-                    `Command Code API error ${response.status}: Retry-After delay exceeds max retry delay`,
-                  )
+              if (timeoutMs !== undefined) {
+                attemptTimeoutId = setTimeout(() => {
+                  attemptTimedOut = true
+                  attemptController.abort()
+                }, timeoutMs)
+              }
+              const onOuterAbort2 = () => attemptController.abort()
+              controller.signal.addEventListener("abort", onOuterAbort2, { once: true })
+              const raceAttempt = <T>(promise: Promise<T>): Promise<T> =>
+                raceAbort(promise, attemptController.signal).catch((error: unknown) => {
+                  if (attemptTimedOut) throw timeoutError(timeoutMs)
+                  throw error
+                })
+
+              try {
+                try {
+                  response = await fetchImpl(t.url, {
+                    method: "POST",
+                    headers: t.headers,
+                    body: t.bodyStr,
+                    signal: attemptController.signal,
+                  })
+                } catch (fetchError: unknown) {
+                  if (controller.signal.aborted) throw abortError("Aborted")
+                  if (attemptTimedOut) {
+                    if (attempt < maxRetries) continue retryLoop
+                    throw timeoutError(timeoutMs)
+                  }
+                  throw fetchError
                 }
-                if (attempt < maxRetries) {
-                  await response.text().catch(() => "")
+
+                // --- HTTP-level retry ---
+                if (!response.ok && isRetryableStatus(response.status)) {
+                  const retryAfter = response.headers.get("retry-after")
+                  const waitMs = retryDelayMs(attempt, retryAfter, maxRetryDelayMs)
+                  if (waitMs < 0) {
+                    throw new Error(
+                      `Command Code API error ${response.status}: Retry-After delay exceeds max retry delay`,
+                    )
+                  }
+                  if (attempt < maxRetries) {
+                    await response.text().catch(() => "")
+                    if (waitMs > 0) await delay(waitMs, controller.signal)
+                    continue retryLoop
+                  }
+                }
+
+                if (!response.ok) {
+                  const errBody = await raceAttempt(response.text().catch(() => ""))
+                  let parsedBody: unknown
+                  let errorDetail: string | undefined
+                  try {
+                    parsedBody = JSON.parse(errBody)
+                    errorDetail = commandCodeErrorMessage(parsedBody)
+                  } catch {
+                    // Preserve useful plain-text provider errors only after secret
+                    // redaction; upstream/proxy bodies may echo credentials.
+                  }
+                  // Safety net (issue #56): a documented 403 upgrade_required
+                  // on the Provider API flips the session to the legacy
+                  // transport; the legacy descriptor itself never flips (so
+                  // the retry is bounded to one), and any other status flows
+                  // through the existing error/redaction pipeline unchanged.
+                  if (
+                    t.flipOnUpgradeRequired &&
+                    isUpgradeRequiredError(response.status, parsedBody ?? errBody)
+                  ) {
+                    throw new UpgradeRequiredError()
+                  }
+                  const safeBody = redactCommandCodeErrorText(errBody).slice(0, 500)
+                  const detail = redactCommandCodeErrorText(
+                    errorDetail ?? (safeBody || "Provider returned an error"),
+                  )
+                  throw new Error(`Command Code API error ${response.status}: ${detail}`)
+                }
+
+                // --- Read response stream ---
+                reader = response.body?.getReader()
+                if (!reader) throw new Error("No response body")
+
+                const decoder = new TextDecoder()
+                let buffer = ""
+
+                readLoop: for (;;) {
+                  if (controller.signal.aborted) throw abortError("Aborted")
+                  const { done, value } = await raceAbort(reader.read(), attemptController.signal)
+                  if (done) {
+                    if (buffer.trim()) handleEvent(parseStreamEventLine(buffer))
+                    break
+                  }
+                  if (controller.signal.aborted) throw abortError("Aborted")
+
+                  buffer += decoder.decode(value, { stream: true })
+                  const lines = buffer.split("\n")
+                  buffer = lines.pop() ?? ""
+
+                  for (const line of lines) {
+                    if (controller.signal.aborted) throw abortError("Aborted")
+                    if (handleEvent(parseStreamEventLine(line))) {
+                      finished = true
+                      break readLoop
+                    }
+                  }
+                }
+
+                // Stream completed successfully.
+                break retryLoop
+              } catch (streamError: unknown) {
+                // Stream-level error (e.g. API returned 200 OK but sent an error
+                // event) or per-attempt timeout during stream reading.
+                await reader?.cancel().catch(() => {})
+                try {
+                  reader?.releaseLock()
+                } catch {}
+                reader = undefined
+
+                // 403 upgrade_required is a transport flip, never a retry:
+                // fall back to the legacy transport immediately (issue #56),
+                // regardless of maxRetries.
+                if (streamError instanceof UpgradeRequiredError) throw streamError
+
+                if (controller.signal.aborted) throw streamError
+
+                // Never retry after visible content was emitted (including timeout mid-stream).
+                const canRetry = !finished && attempt < maxRetries
+                if (canRetry) {
+                  finished = false
+                  const waitMs = attemptTimedOut ? 0 : retryDelayMs(attempt, null, maxRetryDelayMs)
                   if (waitMs > 0) await delay(waitMs, controller.signal)
                   continue retryLoop
                 }
+                if (attemptTimedOut) throw timeoutError(timeoutMs)
+                throw streamError
+              } finally {
+                controller.signal.removeEventListener("abort", onOuterAbort2)
+                clearAttemptTimeout()
               }
+            }
 
-              if (!response.ok) {
-                const errBody = await raceAttempt(response.text().catch(() => ""))
-                let errorDetail: string | undefined
-                try {
-                  const parsedBody: unknown = JSON.parse(errBody)
-                  errorDetail = commandCodeErrorMessage(parsedBody)
-                } catch {
-                  // Preserve useful plain-text provider errors only after secret
-                  // redaction; upstream/proxy bodies may echo credentials.
-                }
-                const safeBody = redactCommandCodeErrorText(errBody).slice(0, 500)
-                const detail = redactCommandCodeErrorText(
-                  errorDetail ?? (safeBody || "Provider returned an error"),
-                )
-                throw new Error(`Command Code API error ${response.status}: ${detail}`)
-              }
+            if (!finished) {
+              // The server closed the stream without a finish event; the AI SDK
+              // expects a finish part to terminate a stream.
+              emit({
+                type: "finish",
+                finishReason: { unified: "stop", raw: "stop" },
+                usage: {
+                  inputTokens: { total: 0, noCache: 0, cacheRead: 0, cacheWrite: 0 },
+                  outputTokens: { total: 0, text: 0, reasoning: 0 },
+                },
+              })
+            }
+            streamController.close()
+          } catch (error: unknown) {
+            if (controller.signal.aborted) {
+              // Outer abort: emit a proper AbortError part (AI SDK contract).
+              fail(abortError())
+            } else {
+              throw error
+            }
+          } finally {
+            signal?.removeEventListener("abort", onOuterAbort)
+          }
+        }
 
-              // --- Read response stream ---
-              reader = response.body?.getReader()
-              if (!reader) throw new Error("No response body")
-
-              const decoder = new TextDecoder()
-              let buffer = ""
-
-              readLoop: for (;;) {
-                if (controller.signal.aborted) throw abortError("Aborted")
-                const { done, value } = await raceAbort(reader.read(), attemptController.signal)
-                if (done) {
-                  if (buffer.trim()) handleEvent(parseStreamEventLine(buffer))
-                  break
-                }
-                if (controller.signal.aborted) throw abortError("Aborted")
-
-                buffer += decoder.decode(value, { stream: true })
-                const lines = buffer.split("\n")
-                buffer = lines.pop() ?? ""
-
-                for (const line of lines) {
-                  if (controller.signal.aborted) throw abortError("Aborted")
-                  if (handleEvent(parseStreamEventLine(line))) {
-                    finished = true
-                    break readLoop
-                  }
-                }
-              }
-
-              // Stream completed successfully.
-              break retryLoop
-            } catch (streamError: unknown) {
-              // Stream-level error (e.g. API returned 200 OK but sent an error
-              // event) or per-attempt timeout during stream reading.
-              await reader?.cancel().catch(() => {})
-              try {
-                reader?.releaseLock()
-              } catch {}
-              reader = undefined
-
-              if (controller.signal.aborted) throw streamError
-
-              // Never retry after visible content was emitted (including timeout mid-stream).
-              const canRetry = !finished && attempt < maxRetries
-              if (canRetry) {
-                finished = false
-                const waitMs = attemptTimedOut ? 0 : retryDelayMs(attempt, null, maxRetryDelayMs)
-                if (waitMs > 0) await delay(waitMs, controller.signal)
-                continue retryLoop
-              }
-              if (attemptTimedOut) throw timeoutError(timeoutMs)
-              throw streamError
-            } finally {
-              controller.signal.removeEventListener("abort", onOuterAbort2)
-              clearAttemptTimeout()
+        try {
+          await runTransport(descriptor)
+        } catch (error: unknown) {
+          if (legacyFallback && error instanceof UpgradeRequiredError) {
+            this.pinnedToLegacy = true
+            try {
+              await runTransport(legacyFallback)
+              return
+            } catch (fallbackError: unknown) {
+              fail(fallbackError)
+              return
             }
           }
-
-          if (!finished) {
-            // The server closed the stream without a finish event; the AI SDK
-            // expects a finish part to terminate a stream.
-            emit({
-              type: "finish",
-              finishReason: { unified: "stop", raw: "stop" },
-              usage: {
-                inputTokens: { total: 0, noCache: 0, cacheRead: 0, cacheWrite: 0 },
-                outputTokens: { total: 0, text: 0, reasoning: 0 },
-              },
-            })
-          }
-          streamController.close()
-        } catch (error: unknown) {
-          if (controller.signal.aborted) {
-            // Outer abort: emit a proper AbortError part (AI SDK contract).
-            fail(abortError())
-          } else {
-            fail(error)
-          }
-        } finally {
-          signal?.removeEventListener("abort", onOuterAbort)
+          fail(error)
         }
       },
     })
