@@ -14,8 +14,16 @@
 // `mapFinishReason` are issue #3.
 
 import { toJsonSchema } from "./json-schema.js"
+import {
+  isReasoningModel,
+  mappedReasoningEffort,
+  resolveProviderReasoning,
+  thinkingMetadataForModel,
+} from "./reasoning.js"
 
 export { toJsonSchema } from "./json-schema.js"
+
+const DEFAULT_PROVIDER_MAX_TOKENS = 64_000
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -294,3 +302,424 @@ export function systemPromptToText(value: unknown): string {
       .join("\n\n")
   return promptPartToText(value, 0)
 }
+
+function promptSystemText(prompt: PromptLike): string {
+  const system = prompt.filter((m) => m.role === "system").map((m) => m.content)
+  return systemPromptToText(system.length > 0 ? system.join("\n") : undefined)
+}
+
+function cappedMaxTokens(value: unknown): number {
+  const n =
+    typeof value === "number" && Number.isFinite(value) ? value : DEFAULT_PROVIDER_MAX_TOKENS
+  return Math.min(n, DEFAULT_PROVIDER_MAX_TOKENS)
+}
+
+function reasoningEffortFor(providerOptions: unknown, modelId?: string): string | undefined {
+  try {
+    const effort = mappedReasoningEffort(
+      {
+        reasoning: modelId ? isReasoningModel(modelId) : true,
+        thinkingLevelMap: modelId ? thinkingMetadataForModel(modelId)?.thinkingLevelMap : undefined,
+      },
+      { reasoning: resolveProviderReasoning(providerOptions, "commandcode") },
+    )
+    return effort
+  } catch {
+    return undefined
+  }
+}
+
+function dataToBase64(data: unknown): string | undefined {
+  if (typeof data === "string") return data
+  if (data instanceof Uint8Array) return Buffer.from(data).toString("base64")
+  if (ArrayBuffer.isView(data)) return Buffer.from(data as unknown as Uint8Array).toString("base64")
+  if (data instanceof ArrayBuffer) return Buffer.from(new Uint8Array(data)).toString("base64")
+  return undefined
+}
+
+function toDataUrl(data: unknown, mediaType: unknown): string | undefined {
+  const mime = stringValue(mediaType) ?? "application/octet-stream"
+  const raw = dataToBase64(data)
+  if (!raw || raw.length === 0) return undefined
+  if (raw.startsWith("data:")) return raw
+  return `data:${mime};base64,${raw}`
+}
+
+function filePartToOpenAIImageUrl(
+  part: Record<string, unknown>,
+): { type: "image_url"; image_url: { url: string } } | undefined {
+  const url = toDataUrl(part.data ?? part.image, part.mediaType ?? part.mimeType)
+  if (!url) return undefined
+  return { type: "image_url", image_url: { url } }
+}
+
+function filePartToAnthropicImage(
+  part: Record<string, unknown>,
+): { type: "image"; source: { type: "base64"; media_type: string; data: string } } | undefined {
+  const mime = stringValue(part.mediaType) ?? stringValue(part.mimeType) ?? "image/png"
+  let b64: string | undefined
+  const raw = part.data ?? part.image
+  if (typeof raw === "string") {
+    if (raw.startsWith("data:")) {
+      const after = raw.split(";base64,")[1]
+      b64 = after ?? raw
+      const mimeFromUrl = raw.slice(5).split(";")[0]
+      if (mimeFromUrl) {
+        // prefer mime from data URL if present
+        return { type: "image", source: { type: "base64", media_type: mimeFromUrl, data: b64 } }
+      }
+    } else {
+      b64 = raw
+    }
+  } else {
+    b64 = dataToBase64(raw)
+  }
+  if (!b64) return undefined
+  return { type: "image", source: { type: "base64", media_type: mime, data: b64 } }
+}
+
+function textFromPart(part: Record<string, unknown>): string {
+  return stringValue(part.text) ?? ""
+}
+
+function openAIUserContent(content: unknown, allowImages: boolean): unknown {
+  if (typeof content === "string") return content
+  const parts = recordArray(content)
+  const hasImages = parts.some(
+    (p) =>
+      p.type === "image" || (p.type === "file" && stringValue(p.mediaType)?.startsWith("image/")),
+  )
+  if (!hasImages) {
+    const texts = parts.filter((p) => p.type === "text").map(textFromPart)
+    if (parts.every((p) => p.type === "text")) return texts.join("\n")
+    const out: unknown[] = []
+    for (const p of parts) {
+      if (p.type === "text") out.push({ type: "text", text: textFromPart(p) })
+      else if (p.type === "image" || p.type === "file") {
+        if (!allowImages) throw imageContentError("user messages")
+        const img = filePartToOpenAIImageUrl(p)
+        if (img) out.push(img)
+      }
+    }
+    return out
+  }
+  if (!allowImages) throw imageContentError("user messages")
+  const out: unknown[] = []
+  for (const p of parts) {
+    if (p.type === "text") out.push({ type: "text", text: textFromPart(p) })
+    else if (p.type === "image" || p.type === "file") {
+      const img = filePartToOpenAIImageUrl(p)
+      if (img) out.push(img)
+    }
+  }
+  return out
+}
+
+function anthropicUserContent(content: unknown, allowImages: boolean): unknown {
+  if (typeof content === "string") return content
+  const parts = recordArray(content)
+  const hasImages = parts.some(
+    (p) =>
+      p.type === "image" || (p.type === "file" && stringValue(p.mediaType)?.startsWith("image/")),
+  )
+  // Anthropic docs show string content for simple text: "Count to 5."
+  // Return string for single text-only part to match documented shape, array otherwise
+  if (!hasImages && parts.length === 1 && parts[0]?.type === "text") {
+    return textFromPart(parts[0] as Record<string, unknown>)
+  }
+  if (!hasImages && parts.every((p) => p.type === "text")) {
+    // Join multiple text parts with newline — provider accepts string for simple cases
+    const texts = parts.map((p) => textFromPart(p as Record<string, unknown>)).filter(Boolean)
+    if (texts.length === 1) return texts[0]
+    // For multiple texts, keep array form to preserve structure
+  }
+  const out: unknown[] = []
+  for (const p of parts) {
+    if (p.type === "text") out.push({ type: "text", text: textFromPart(p) })
+    else if (p.type === "image" || p.type === "file") {
+      if (!allowImages) throw imageContentError("user messages")
+      const img = filePartToAnthropicImage(p)
+      if (img) out.push(img)
+    }
+  }
+  return out
+}
+
+function openAITools(tools: unknown): unknown[] | undefined {
+  if (!tools) return undefined
+  let entries: Array<[string, unknown]>
+  if (Array.isArray(tools)) {
+    entries = (tools as Array<Record<string, unknown>>).map((t) => [
+      stringValue((t as Record<string, unknown>).name) ?? "",
+      t,
+    ])
+  } else if (isRecord(tools)) {
+    entries = Object.entries(tools as Record<string, unknown>)
+  } else {
+    return undefined
+  }
+  if (entries.length === 0) return undefined
+  return entries.map(([name, tool]) => {
+    const rec = isRecord(tool) ? tool : {}
+    const description = stringValue(rec.description)
+    const parameters = rec.parameters ?? rec.inputSchema ?? {}
+    return {
+      type: "function",
+      function: {
+        name,
+        description,
+        parameters: toJsonSchema(parameters),
+      },
+    }
+  })
+}
+
+function anthropicTools(tools: unknown): unknown[] | undefined {
+  if (!tools) return undefined
+  let entries: Array<[string, unknown]>
+  if (Array.isArray(tools)) {
+    entries = (tools as Array<Record<string, unknown>>).map((t) => [
+      stringValue((t as Record<string, unknown>).name) ?? "",
+      t,
+    ])
+  } else if (isRecord(tools)) {
+    entries = Object.entries(tools as Record<string, unknown>)
+  } else {
+    return undefined
+  }
+  if (entries.length === 0) return undefined
+  return entries.map(([name, tool]) => {
+    const rec = isRecord(tool) ? tool : {}
+    const description = stringValue(rec.description)
+    const parameters = rec.parameters ?? rec.inputSchema ?? {}
+    return {
+      name,
+      description,
+      input_schema: toJsonSchema(parameters),
+    }
+  })
+}
+
+function promptToOpenAIMessages(prompt: PromptLike, allowImages: boolean): unknown[] {
+  const out: unknown[] = []
+  const system = promptSystemText(prompt)
+  if (system) out.push({ role: "system", content: system })
+
+  const pairedIds = completeToolCallIds(prompt)
+
+  for (const message of prompt) {
+    if (message.role === "system") continue
+    if (message.role === "user") {
+      out.push({ role: "user", content: openAIUserContent(message.content, allowImages) })
+    } else if (message.role === "assistant") {
+      const parts = recordArray(message.content)
+      const toolCalls = parts
+        .filter((p) => p.type === "tool-call")
+        .filter((p) => {
+          const id = stringValue(p.toolCallId)
+          return id ? pairedIds.has(id) : false
+        })
+      const texts = parts
+        .filter((p) => p.type === "text")
+        .map(textFromPart)
+        .filter(Boolean)
+      if (toolCalls.length > 0) {
+        const content = texts.length > 0 ? texts.join("\n") : null
+        out.push({
+          role: "assistant",
+          content,
+          tool_calls: toolCalls.map((p) => ({
+            id: stringValue(p.toolCallId) ?? "",
+            type: "function",
+            function: {
+              name: stringValue(p.toolName) ?? "",
+              arguments: JSON.stringify(recordOrEmpty(p.input ?? p.args ?? p.arguments)),
+            },
+          })),
+        })
+      } else if (texts.length > 0) {
+        out.push({ role: "assistant", content: texts.join("\n") })
+      }
+    } else if (message.role === "tool") {
+      for (const content of recordArray(message.content)) {
+        const toolCallId = stringValue(content.toolCallId) ?? ""
+        if (!pairedIds.has(toolCallId)) continue
+        const output = unwrapToolResult(content.result ?? content.output)
+        out.push({ role: "tool", tool_call_id: toolCallId, content: output })
+
+        const images = imageParts(content)
+        if (images.length > 0) {
+          if (!allowImages) throw imageContentError("tool results")
+          out.push({
+            role: "user",
+            content: images
+              .map((p) => filePartToOpenAIImageUrl(p as Record<string, unknown>))
+              .filter(Boolean),
+          })
+        }
+      }
+    }
+  }
+  return out
+}
+
+function promptToAnthropicMessages(prompt: PromptLike, allowImages: boolean): unknown[] {
+  const out: unknown[] = []
+  const pairedIds = completeToolCallIds(prompt)
+
+  for (const message of prompt) {
+    if (message.role === "system") continue
+    if (message.role === "user") {
+      out.push({ role: "user", content: anthropicUserContent(message.content, allowImages) })
+    } else if (message.role === "assistant") {
+      const parts = recordArray(message.content)
+      const content: unknown[] = []
+      for (const p of parts) {
+        if (p.type === "text") {
+          const text = textFromPart(p)
+          if (text) content.push({ type: "text", text })
+        } else if (p.type === "tool-call") {
+          const id = stringValue(p.toolCallId)
+          if (!id || !pairedIds.has(id)) continue
+          content.push({
+            type: "tool_use",
+            id,
+            name: stringValue(p.toolName) ?? "",
+            input: recordOrEmpty(p.input ?? p.args ?? p.arguments),
+          })
+        }
+      }
+      if (content.length > 0) out.push({ role: "assistant", content })
+    } else if (message.role === "tool") {
+      for (const content of recordArray(message.content)) {
+        const toolCallId = stringValue(content.toolCallId) ?? ""
+        if (!pairedIds.has(toolCallId)) continue
+        const output = unwrapToolResult(content.result ?? content.output)
+        out.push({
+          role: "user",
+          content: [{ type: "tool_result", tool_use_id: toolCallId, content: output }],
+        })
+
+        const images = imageParts(content)
+        if (images.length > 0) {
+          if (!allowImages) throw imageContentError("tool results")
+          out.push({
+            role: "user",
+            content: images
+              .map((p) => filePartToAnthropicImage(p as Record<string, unknown>))
+              .filter(Boolean),
+          })
+        }
+      }
+    }
+  }
+  return out
+}
+
+export interface ProviderRequestOptions {
+  prompt: PromptLike
+  model?: string
+  maxOutputTokens?: number
+  providerOptions?: unknown
+  tools?: unknown
+  allowImages?: boolean
+  systemPrompt?: unknown
+}
+
+function buildOpenAIBody(options: ProviderRequestOptions): Record<string, unknown> {
+  const prompt = options.prompt ?? []
+  const allowImages = options.allowImages ?? false
+  if (!allowImages) assertTextOnlyMessages(prompt)
+  const messages = promptToOpenAIMessages(prompt, allowImages)
+  const body: Record<string, unknown> = {
+    model: options.model ?? "",
+    stream: true,
+    messages,
+  }
+  if (options.tools) {
+    const t = openAITools(options.tools)
+    if (t) body.tools = t
+  }
+  const maxTokens = cappedMaxTokens(options.maxOutputTokens)
+  body.max_tokens = maxTokens
+  // System is already inside messages for OpenAI, but also accept explicit systemPrompt
+  const explicitSystem = systemPromptToText(options.systemPrompt)
+  if (explicitSystem && !prompt.some((m) => m.role === "system")) {
+    body.messages = [{ role: "system", content: explicitSystem }, ...messages]
+  }
+  const effort = reasoningEffortFor(options.providerOptions, options.model)
+  if (effort) body.reasoning_effort = effort
+  // OpenAI streaming usage needs stream_options
+  body.stream_options = { include_usage: true }
+  return body
+}
+
+function buildAnthropicBody(options: ProviderRequestOptions): Record<string, unknown> {
+  const prompt = options.prompt ?? []
+  const allowImages = options.allowImages ?? false
+  if (!allowImages) assertTextOnlyMessages(prompt)
+  const system = promptSystemText(prompt) || systemPromptToText(options.systemPrompt)
+  const messages = promptToAnthropicMessages(prompt, allowImages)
+  const body: Record<string, unknown> = {
+    model: options.model ?? "",
+    stream: true,
+    messages,
+  }
+  if (system) body.system = system
+  if (options.tools) {
+    const t = anthropicTools(options.tools)
+    if (t) body.tools = t
+  }
+  const maxTokens = cappedMaxTokens(options.maxOutputTokens)
+  body.max_tokens = maxTokens
+  const effort = reasoningEffortFor(options.providerOptions, options.model)
+  if (effort) body.reasoning_effort = effort
+  return body
+}
+
+// Primary codec helpers — naming follows spec sketch but aliases are provided
+export function messagesToOpenAI(
+  prompt: PromptLike,
+  options: Omit<ProviderRequestOptions, "prompt"> & { prompt?: PromptLike } = {},
+): Record<string, unknown> {
+  const p = (prompt as unknown as PromptLike) ?? options.prompt ?? []
+  // Support both call shapes: messagesToOpenAI(prompt, opts) and messagesToOpenAI({prompt, model, ...})
+  if (Array.isArray(prompt) && isRecord(options) && "prompt" in options) {
+    // Called as messagesToOpenAI({ prompt, model, ... })
+    return buildOpenAIBody(options as ProviderRequestOptions)
+  }
+  if (Array.isArray(prompt)) {
+    return buildOpenAIBody({ prompt: p, ...options })
+  }
+  // Called as messagesToOpenAI(optionsObject)
+  return buildOpenAIBody(prompt as unknown as ProviderRequestOptions)
+}
+
+export function messagesToAnthropic(
+  prompt: PromptLike,
+  options: Omit<ProviderRequestOptions, "prompt"> & { prompt?: PromptLike } = {},
+): Record<string, unknown> {
+  const p = (prompt as unknown as PromptLike) ?? options.prompt ?? []
+  if (Array.isArray(prompt) && isRecord(options) && "prompt" in options) {
+    return buildAnthropicBody(options as ProviderRequestOptions)
+  }
+  if (Array.isArray(prompt)) {
+    return buildAnthropicBody({ prompt: p, ...options })
+  }
+  return buildAnthropicBody(prompt as unknown as ProviderRequestOptions)
+}
+
+// Aliases for implementer naming flexibility and hidden test imports
+export const promptToOpenAI = messagesToOpenAI
+export const promptToAnthropic = messagesToAnthropic
+export const buildOpenAIRequest = messagesToOpenAI
+export const buildAnthropicRequest = messagesToAnthropic
+export const createOpenAIRequestBody = messagesToOpenAI
+export const createAnthropicRequestBody = messagesToAnthropic
+export const toOpenAIChatCompletions = messagesToOpenAI
+export const toAnthropicMessages = messagesToAnthropic
+export const openAIRequestBody = buildOpenAIBody
+export const anthropicRequestBody = buildAnthropicBody
+export const getOpenAIRequestBody = buildOpenAIBody
+export const getAnthropicRequestBody = buildAnthropicBody
+export { promptToOpenAIMessages, promptToAnthropicMessages, openAITools, anthropicTools }
