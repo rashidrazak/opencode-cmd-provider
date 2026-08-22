@@ -4,6 +4,7 @@ import { extractModelRecords } from "../scripts/parse-docs.mjs"
 import {
   discountFor,
   emitDealsModule,
+  missingDealsModels,
   modelDealEntry,
   peakOffPeakFor,
 } from "../scripts/refresh-deals.mjs"
@@ -158,6 +159,35 @@ run([
       // count entries: should be 56 from goat
       const entries = (out.match(/": \{ /g) ?? []).length
       assert(entries >= 50, `must emit 50+ entries, got ${entries}`)
+    },
+  ],
+  [
+    "missingDealsModels: fresh fixtures cover every snapshot model",
+    () => {
+      const recs = extractModelRecords(GOAT_HTML)
+      const { missing, covered } = missingDealsModels(recs)
+      assertEqual(missing, [], `missing: ${missing.join(", ")}`)
+      assert(covered >= 58, `expected >= 58 covered, got ${covered}`)
+    },
+  ],
+  [
+    "missingDealsModels flags stale fixtures that lack new models",
+    () => {
+      // A docs source missing Ox Alpha / DeepSeek V4 Flash Vision (exp) must
+      // be reported so refresh aborts instead of emitting a partial catalog.
+      const recs = extractModelRecords(GOAT_HTML)
+      const without = new Map(
+        [...recs].filter(
+          ([, r]) => r.name !== "Ox Alpha" && r.name !== "DeepSeek V4 Flash Vision (exp)",
+        ),
+      )
+      const { missing, covered } = missingDealsModels(without)
+      assertEqual(
+        missing.sort(),
+        ["deepseek/deepseek-v4-flash-vision-exp", "stealth/ox-alpha"],
+        "must report the two models the docs source lacks",
+      )
+      assertEqual(covered, 56)
     },
   ],
   [

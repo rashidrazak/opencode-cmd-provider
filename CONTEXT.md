@@ -34,6 +34,9 @@ Per-model pricing intelligence scraped from the Command Code docs
 benchmarks (intelligence, tok/s), deal discounts (`was`/`now` rates), peak/off-peak
 windows, and GOAT/Pro monthly allowances. Bundled in `src/deals/catalog.ts`
 and regenerated via `npm run refresh:deals` (or offline from `tests/fixtures/*.html`).
+The refresh **fails loudly (exit 1) when the scraped/fixture records lack a
+snapshot model**, so a partial catalog can never be emitted silently — the
+fixtures must stay in sync with the snapshot.
 _Avoid_: pricing table, deal feed
 
 **Deals intelligence**:
