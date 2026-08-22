@@ -33,6 +33,41 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null
 }
 
+/**
+ * Detects the documented Provider API `403 upgrade_required` signal — "You're
+ * on the Go plan, the only plan without API access. Upgrade to GOAT or
+ * higher." (https://commandcode.ai/docs/provider). Tolerant to the documented
+ * variants: the JSON `error.code` / `error.type` may be `upgrade_required` and
+ * the message may phrase the same upgrade intent ("without API access",
+ * "Upgrade to GOAT"). A 403 that merely mentions the Go plan without that
+ * intent (e.g. "forbidden") is not a flip signal, and any status other than
+ * 403 (401, 422 cmd_zdr_no_providers, 429, 5xx, ...) never is either.
+ */
+export function isUpgradeRequiredError(status: number, body: unknown): boolean {
+  if (status !== 403) return false
+  const candidates: string[] = []
+  const pushStrings = (record: Record<string, unknown>): void => {
+    for (const key of ["code", "type", "message"]) {
+      const part = record[key]
+      if (typeof part === "string") candidates.push(part)
+    }
+  }
+  if (typeof body === "string") {
+    candidates.push(body)
+    try {
+      body = JSON.parse(body)
+    } catch {
+      // keep the raw text as the only candidate below
+    }
+  }
+  if (isRecord(body)) {
+    const error = body.error
+    if (isRecord(error)) pushStrings(error)
+    pushStrings(body)
+  }
+  return candidates.some((c) => /upgrade_required|upgrade to goat|without api access/i.test(c))
+}
+
 export function commandCodeErrorMessage(value: unknown): string | undefined {
   if (typeof value === "string") return value
   if (!isRecord(value)) return undefined

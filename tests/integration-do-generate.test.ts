@@ -18,9 +18,11 @@ run([
         stream: [reasoningDelta("think"), textDelta("Hello "), textDelta("world"), finishEvent()],
       })
       try {
-        const model = createCommandCode({ apiKey: "user_test", baseURL: mock.url }).languageModel(
-          "claude-sonnet-5",
-        )
+        const model = createCommandCode({
+          apiKey: "user_test",
+          baseURL: mock.url,
+          plan: "go",
+        }).languageModel("claude-sonnet-5")
         const result = await model.doGenerate({ prompt })
         const texts = (result.content ?? [])
           .filter((p) => (p as { type?: string }).type === "text")
@@ -48,9 +50,11 @@ run([
         stream: [toolCall("t1", "read", { path: "x" }), finishEvent({ finishReason: "tool_use" })],
       })
       try {
-        const model = createCommandCode({ apiKey: "user_test", baseURL: mock.url }).languageModel(
-          "claude-sonnet-5",
-        )
+        const model = createCommandCode({
+          apiKey: "user_test",
+          baseURL: mock.url,
+          plan: "go",
+        }).languageModel("claude-sonnet-5")
         const result = await model.doGenerate({ prompt })
         assertEqual(result.finishReason, { unified: "tool-calls", raw: "tool_use" })
         const calls = (result.content ?? []).filter(
@@ -71,9 +75,11 @@ run([
     async () => {
       const mock = await startMockCc({ stream: [{ type: "error", error: { message: "nope" } }] })
       try {
-        const model = createCommandCode({ apiKey: "user_test", baseURL: mock.url }).languageModel(
-          "claude-sonnet-5",
-        )
+        const model = createCommandCode({
+          apiKey: "user_test",
+          baseURL: mock.url,
+          plan: "go",
+        }).languageModel("claude-sonnet-5")
         await rejects(model.doGenerate({ prompt }), /nope/)
       } finally {
         await mock.close()

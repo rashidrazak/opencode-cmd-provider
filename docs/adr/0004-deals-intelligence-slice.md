@@ -17,5 +17,6 @@ Delivery is zero-step: `package.json` exports `".": "./dist/index.js"` and `"./t
 ## Consequences
 
 - `src/deals/` is the deep module boundary; deleting it plus two lines in `src/plugin/index.ts` (enrichment + tool registration) leaves core green.
+- **Plan resolution is a shared seam, not excisable.** `normalizePlan()`/`resolvePlan()`/`PLAN_ALIASES` in `plan-summary.ts` are reused by core transport selection (`src/provider/command-code-model.ts`, per the #51 provider-API spec and tickets #53/#54) — only a resolved `go` selects the legacy transport. An excision of `src/deals/` must retain the plan-resolution functions (or rewire transport selection) or core stops building.
 - `tui.json` is not hand-written by users; docs and README point to `opencode plugin`.
 - Published 1.1.1 omitted `./tui` export, so `opencode plugin` only wrote server target — next release must include it.
