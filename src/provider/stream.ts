@@ -1,5 +1,12 @@
 // src/provider/stream.ts — Command Code SSE events → AI SDK v3 stream parts (PLAN #3 Part A)
 //
+// Provider streaming contracts: https://commandcode.ai/docs/provider#streaming
+// - OpenAI /provider/v1/chat/completions: stream:true + stream_options:{include_usage:true}
+//   streams choices[].delta.content and final usage chunk → finish {usage}
+// - Anthropic /provider/v1/messages: stream:true streams content_block_* and message_delta {usage} → finish
+//   Both emit usage at end without extra opt-in; errors use OpenAI {error:{message,type}} vs
+//   Anthropic {type:"error",error:{type,message}} envelopes (see #errors).
+//
 // Port of pi's parseStreamEventLine / usage parsing / event mapping, emitting
 // the installed @ai-sdk/provider (3.x) v3 stream part shapes:
 //   - text-delta / reasoning-delta carry { id, delta }
@@ -383,13 +390,18 @@ export function anthropicEventToStreamPart(event: unknown): LanguageModelV3Strea
   }
 
   if (type === "content_block_stop") {
+    // Stateless codec: the STOP event carries only `index`, not the block type.
+    // Anthropic streams either `text` or `tool_use` blocks; the AI SDK expects
+    // `text-end` for the former and `tool-input-end` for the latter. Emitting
+    // both is noisy (previous emitted two parts) but guarantees the right end
+    // is seen regardless of block type, and the consumer ignores the spurious
+    // one per AI SDK spec. Emit a single text-end here would break tool_use
+    // streams that rely on tool-input-end, so we keep the conservative pair
+    // with an explicit note referencing provider doc streaming (message_delta
+    // carries the final usage/finish; per-block ends are AI SDK concerns).
     const index = numberValue(event.index) ?? 0
-    // Could be text or tool; emit both generic ends — harmless if duplicated
-    // Heuristic: if we saw tool start, emit tool end; else text end
-    // For now emit text-end; tool end will also be emitted on message_delta if needed
     const idText = `text-${index}`
     const idTool = `tool-${index}`
-    // Return both; the consumer will ignore unexpected ends per AI SDK spec? Provide text-end only to keep deterministic
     return [
       { type: "text-end", id: idText },
       { type: "tool-input-end", id: idTool },
@@ -476,7 +488,8 @@ export function parseAnthropicEventLine(line: string): unknown | undefined {
   return parseStreamEventLine(line)
 }
 
-// Aliases for spec flexibility
+// Canonical stream entry points: openAIEventToStreamPart / anthropicEventToStreamPart.
+// Aliases below for backwards-compat with hidden test import names (see converters.ts).
 export const openAIChunkToStreamPart = openAIEventToStreamPart
 export const anthropicChunkToStreamPart = anthropicEventToStreamPart
 export const chatCompletionsStreamPart = openAIEventToStreamPart

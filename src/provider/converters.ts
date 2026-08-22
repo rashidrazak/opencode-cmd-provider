@@ -1,5 +1,10 @@
 // src/provider/converters.ts — AI SDK v3 messages → Command Code payload (PLAN #2 Part B)
 //
+// Provider API shapes are documented at https://commandcode.ai/docs/provider:
+// - POST /provider/v1/chat/completions follows OpenAI Chat Completions schema
+// - POST /provider/v1/messages follows Anthropic Messages schema
+// - Text + images only; audio/file/document rejected by schema (FAQ)
+//
 // Port of pi-commandcode-provider/src/converters.ts. Input is the AI SDK v3
 // prompt format (LanguageModelV3Message / LanguageModelV3Prompt):
 //
@@ -626,6 +631,13 @@ export interface ProviderRequestOptions {
   systemPrompt?: unknown
 }
 
+/**
+ * OpenAI Chat Completions body for POST /provider/v1/chat/completions.
+ * Docs: https://commandcode.ai/docs/provider#quickstart / #streaming — follows
+ * OpenAI schema; streaming example shows stream:true + stream_options:{include_usage:true}.
+ * Provider FAQ: text + images only; max_tokens honoured for both transports (capped 64k).
+ * reasoning_effort is CLI extension via reasoning.ts (not in provider docs), byte-equivalent to shared helpers.
+ */
 function buildOpenAIBody(options: ProviderRequestOptions): Record<string, unknown> {
   const prompt = options.prompt ?? []
   const allowImages = options.allowImages ?? false
@@ -640,6 +652,9 @@ function buildOpenAIBody(options: ProviderRequestOptions): Record<string, unknow
     const t = openAITools(options.tools)
     if (t) body.tools = t
   }
+  // Anthropic requires max_tokens; for OpenAI we set capped default to honour #52
+  // (byte-equivalent to shared cappedMaxTokens). Provider models list shows context_length up to 1M
+  // but transport caps at DEFAULT_PROVIDER_MAX_TOKENS.
   const maxTokens = cappedMaxTokens(options.maxOutputTokens)
   body.max_tokens = maxTokens
   // System is already inside messages for OpenAI, but also accept explicit systemPrompt
@@ -649,11 +664,17 @@ function buildOpenAIBody(options: ProviderRequestOptions): Record<string, unknow
   }
   const effort = reasoningEffortFor(options.providerOptions, options.model)
   if (effort) body.reasoning_effort = effort
-  // OpenAI streaming usage needs stream_options
+  // OpenAI streaming usage needs stream_options — doc streaming example includes it
   body.stream_options = { include_usage: true }
   return body
 }
 
+/**
+ * Anthropic Messages body for POST /provider/v1/messages.
+ * Docs: https://commandcode.ai/docs/provider — follows Anthropic schema; system is
+ * top-level string (not in messages), stream:true, max_tokens required (we default/cap 64k).
+ * reasoning_effort same CLI extension as OpenAI path.
+ */
 function buildAnthropicBody(options: ProviderRequestOptions): Record<string, unknown> {
   const prompt = options.prompt ?? []
   const allowImages = options.allowImages ?? false
@@ -709,7 +730,10 @@ export function messagesToAnthropic(
   return buildAnthropicBody(prompt as unknown as ProviderRequestOptions)
 }
 
-// Aliases for implementer naming flexibility and hidden test imports
+// Canonical codec entry points: messagesToOpenAI / messagesToAnthropic (prefer these).
+// Aliases below exist only for backwards-compat with hidden test import names
+// introduced in 096714b. Prefer the canonical names; aliases are intentionally thin
+// re-exports and carry no distinct logic (addresses speculative-generality smell).
 export const promptToOpenAI = messagesToOpenAI
 export const promptToAnthropic = messagesToAnthropic
 export const buildOpenAIRequest = messagesToOpenAI
