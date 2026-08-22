@@ -50,7 +50,7 @@ jobs:
         run: npm run refresh:snapshot
 
       - name: Refresh deals catalog
-        run: npm run refresh:deals
+        run: npm run refresh:deals -- --allow-partial
 
       - name: Fail on stale catalog snapshot or facts (deals is non-blocking)
         run: |
@@ -61,7 +61,7 @@ jobs:
             exit 1
           fi
           if ! git diff -I 'DEAL_LAST_REFRESHED' -I 'DEAL_PACKAGE_VERSION' --exit-code -- src/deals/catalog.ts; then
-            echo "::warning::deals catalog is stale — scraping may be mitigated and refresh fell back to fixtures/empty. Not blocking release. To update, run 'npm run refresh:deals -- --fixtures' locally, commit src/deals/catalog.ts, and re-tag if desired."
+            echo "::warning::deals catalog is stale — scraping may be mitigated and refresh fell back to fixtures/empty. Not blocking release. To update, run 'npm run refresh:deals -- --fixtures' locally (fails loudly if the snapshot has models the docs fixtures lack), commit src/deals/catalog.ts, and re-tag if desired."
           else
             echo "deals catalog is fresh"
           fi

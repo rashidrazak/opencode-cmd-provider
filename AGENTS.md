@@ -26,8 +26,13 @@ decisions in `docs/adr/`.
 `src/catalog/snapshot.ts`, `src/catalog/facts.ts`, and `src/deals/catalog.ts`
 are generated (`scripts/refresh-snapshot.mjs`, `scripts/refresh-deals.mjs`).
 Regenerate with `npm run refresh` (offline from `tests/fixtures/*.html`).
-`refresh:deals` never exits non-zero — on a mitigated scrape it falls back to
-fixtures/empty catalog with a warning, so it can't block release.
+`refresh:deals` **fails loudly (exit 1) when the scraped/fixture records lack a
+snapshot model** — a partial deals catalog silently hides the TUI sidebar
+"Command Code" section for the missing models. This gate is why the fixtures
+must be refreshed alongside the snapshot (see `scripts/check-deals-coverage.mjs`
+and `tests/deals-coverage.test.ts`). `--allow-partial` opts out for tooling
+that must not exit non-zero (the release pipeline's non-blocking deals check);
+it never emits an empty catalog.
 
 ## Architecture
 

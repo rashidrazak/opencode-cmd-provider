@@ -6,6 +6,9 @@
 //
 // Usage: node scripts/refresh-deals.mjs [--out path] [--fixtures]
 //   --fixtures regenerates from tests/fixtures/*.html (offline)
+//   --allow-partial  do not fail on snapshot models missing from the scraped
+//                    records (off for the standalone refresh so a partial
+//                    catalog can never be committed silently)
 //   env COMMANDCODE_DEALS_PRICING_URL   overrides the pricing-limits page URL
 //   env COMMANDCODE_DEALS_GOAT_URL      overrides the goat plan page URL
 //   env COMMANDCODE_DEALS_PRO_URL       overrides the pro plan page URL
@@ -40,6 +43,22 @@ function snapshotIdsByName() {
     map.set(m[2], m[1])
   }
   return map
+}
+
+// Missing snapshot models in the chosen records source. Returns
+// `{ missing, covered }`: `missing` is the list of snapshot ids that have no
+// docs record in `records`; `covered` is the count of snapshot models the
+// records do cover. A partial catalog silently drops the TUI sidebar
+// "Command Code" section for the missing models, so refresh must fail loudly
+// instead of emitting a partial catalog (issue: Ox Alpha / DeepSeek V4 Flash
+// Vision (exp) showed no section because the fixtures predated them).
+export function missingDealsModels(records) {
+  const nameToSnapshotId = snapshotIdsByName()
+  const missing = []
+  for (const [name, id] of nameToSnapshotId) {
+    if (![...records.values()].some((record) => record.name === name)) missing.push(id)
+  }
+  return { missing, covered: nameToSnapshotId.size - missing.length }
 }
 
 function argValue(name) {
@@ -327,6 +346,26 @@ async function main() {
   }
 
   const out = argValue("--out") ?? DEFAULT_OUT
+  // Fail loudly before writing when the resolved input lacks snapshot models —
+  // a partial deals catalog silently drops the TUI sidebar "Command Code"
+  // section for the missing models (issue: Ox Alpha / DeepSeek V4 Flash
+  // Vision (exp)). `--allow-partial` overrides for tooling that must not exit
+  // non-zero (e.g. the release pipeline's non-blocking deals check).
+  if (!process.argv.includes("--allow-partial")) {
+    const records = extractModelRecords(goatHtml)
+    const { missing, covered } = missingDealsModels(records)
+    if (missing.length > 0) {
+      console.error(
+        `refresh-deals: aborting — ${missing.length} snapshot model(s) have no deals record ` +
+          `(${covered}/${covered + missing.length} covered): ${missing.join(", ")}. ` +
+          `The docs may have added models without rendering them on the scraped pages, or the ` +
+          `fixtures are stale. Re-run against live docs or refresh the fixtures before ` +
+          `regenerating; the generated catalog would silently hide the Command Code sidebar ` +
+          `section for these models.`,
+      )
+      process.exit(1)
+    }
+  }
   let module
   try {
     module = emitDealsModule({
