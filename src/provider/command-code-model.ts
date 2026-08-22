@@ -384,219 +384,12 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
     isClaude: boolean,
     sink?: LanguageModelV3StreamPart[],
   ): ReadableStream<LanguageModelV3StreamPart> {
-    const timeoutMs = this.options.timeout
-    const maxRetries = this.options.maxRetries ?? DEFAULT_MAX_RETRIES
-    const maxRetryDelayMs = this.options.maxRetryDelayMs ?? DEFAULT_MAX_RETRY_DELAY_MS
-    const fetchImpl = this.options.fetch ?? fetch
     const url = this.providerEndpoint()
     const bodyStr = JSON.stringify(body)
-
-    return new ReadableStream<LanguageModelV3StreamPart>({
-      start: async (streamController) => {
-        const emit = (part: LanguageModelV3StreamPart) => {
-          sink?.push(part)
-          streamController.enqueue(part)
-        }
-        const fail = (error: unknown) => {
-          const message = error instanceof Error ? error.message : String(error)
-          const part: LanguageModelV3StreamPart = {
-            type: "error",
-            error: new Error(redactCommandCodeErrorText(message)),
-          }
-          sink?.push(part)
-          streamController.enqueue(part)
-          streamController.close()
-        }
-
-        const key = resolveApiKey({
-          apiKey: this.options.apiKey,
-          authPaths: this.options.authPaths,
-        })
-        if (!key) {
-          fail(
-            "No Command Code API key. Run /connect and select Command Code, set the COMMANDCODE_API_KEY env var, or configure an auth file.",
-          )
-          return
-        }
-
-        const handleEvent = (event: unknown): boolean => {
-          if (!isRecord(event)) return false
-          try {
-            const parts = isClaude
-              ? anthropicEventToStreamPart(event)
-              : openAIEventToStreamPart(event)
-            let finished = false
-            for (const part of parts) {
-              if (part.type === "finish") {
-                finished = true
-                calculateCommandCodeCost(this.costForModel(), costUsageFromAiSdkUsage(part.usage))
-              }
-              emit(part)
-            }
-            return finished
-          } catch (streamError) {
-            fail(streamError)
-            return true
-          }
-        }
-
-        let reader: ReadableStreamDefaultReader<Uint8Array> | undefined
-        const controller = new AbortController()
-        const onOuterAbort = () => controller.abort()
-        try {
-          signal?.addEventListener("abort", onOuterAbort, { once: true })
-          if (signal?.aborted) throw abortError("Aborted")
-          let response!: Response
-          let finished = false
-          retryLoop: for (let attempt = 0; ; attempt++) {
-            const attemptController = new AbortController()
-            let attemptTimedOut = false
-            let attemptTimeoutId: ReturnType<typeof setTimeout> | undefined
-
-            const clearAttemptTimeout = () => {
-              if (attemptTimeoutId !== undefined) {
-                clearTimeout(attemptTimeoutId)
-                attemptTimeoutId = undefined
-              }
-            }
-
-            if (timeoutMs !== undefined) {
-              attemptTimeoutId = setTimeout(() => {
-                attemptTimedOut = true
-                attemptController.abort()
-              }, timeoutMs)
-            }
-            const onOuterAbort2 = () => attemptController.abort()
-            controller.signal.addEventListener("abort", onOuterAbort2, { once: true })
-            const raceAttempt = <T>(promise: Promise<T>): Promise<T> =>
-              raceAbort(promise, attemptController.signal).catch((error: unknown) => {
-                if (attemptTimedOut) throw timeoutError(timeoutMs)
-                throw error
-              })
-
-            try {
-              try {
-                response = await fetchImpl(url, {
-                  method: "POST",
-                  headers,
-                  body: bodyStr,
-                  signal: attemptController.signal,
-                })
-              } catch (fetchError: unknown) {
-                if (controller.signal.aborted) throw abortError("Aborted")
-                if (attemptTimedOut) {
-                  if (attempt < maxRetries) continue retryLoop
-                  throw timeoutError(timeoutMs)
-                }
-                throw fetchError
-              }
-
-              if (!response.ok && isRetryableStatus(response.status)) {
-                const retryAfter = response.headers.get("retry-after")
-                const waitMs = retryDelayMs(attempt, retryAfter, maxRetryDelayMs)
-                if (waitMs < 0) {
-                  throw new Error(
-                    `Command Code API error ${response.status}: Retry-After delay exceeds max retry delay`,
-                  )
-                }
-                if (attempt < maxRetries) {
-                  await response.text().catch(() => "")
-                  if (waitMs > 0) await delay(waitMs, controller.signal)
-                  continue retryLoop
-                }
-              }
-
-              if (!response.ok) {
-                const errBody = await raceAttempt(response.text().catch(() => ""))
-                let errorDetail: string | undefined
-                try {
-                  const parsedBody: unknown = JSON.parse(errBody)
-                  errorDetail = commandCodeErrorMessage(parsedBody)
-                } catch {
-                  // Preserve useful plain-text provider errors only after secret redaction
-                }
-                const safeBody = redactCommandCodeErrorText(errBody).slice(0, 500)
-                const detail = redactCommandCodeErrorText(
-                  errorDetail ?? (safeBody || "Provider returned an error"),
-                )
-                throw new Error(`Command Code API error ${response.status}: ${detail}`)
-              }
-
-              reader = response.body?.getReader()
-              if (!reader) throw new Error("No response body")
-
-              const decoder = new TextDecoder()
-              let buffer = ""
-
-              readLoop: for (;;) {
-                if (controller.signal.aborted) throw abortError("Aborted")
-                const { done, value } = await raceAbort(reader.read(), attemptController.signal)
-                if (done) {
-                  if (buffer.trim()) handleEvent(parseStreamEventLine(buffer))
-                  break
-                }
-                if (controller.signal.aborted) throw abortError("Aborted")
-
-                buffer += decoder.decode(value, { stream: true })
-                const lines = buffer.split("\n")
-                buffer = lines.pop() ?? ""
-
-                for (const line of lines) {
-                  if (controller.signal.aborted) throw abortError("Aborted")
-                  if (handleEvent(parseStreamEventLine(line))) {
-                    finished = true
-                    break readLoop
-                  }
-                }
-              }
-
-              break retryLoop
-            } catch (streamError: unknown) {
-              await reader?.cancel().catch(() => {})
-              try {
-                reader?.releaseLock()
-              } catch {}
-              reader = undefined
-
-              if (controller.signal.aborted) throw streamError
-
-              const canRetry = !finished && attempt < maxRetries
-              if (canRetry) {
-                finished = false
-                const waitMs = attemptTimedOut ? 0 : retryDelayMs(attempt, null, maxRetryDelayMs)
-                if (waitMs > 0) await delay(waitMs, controller.signal)
-                continue retryLoop
-              }
-              if (attemptTimedOut) throw timeoutError(timeoutMs)
-              throw streamError
-            } finally {
-              controller.signal.removeEventListener("abort", onOuterAbort2)
-              clearAttemptTimeout()
-            }
-          }
-
-          if (!finished) {
-            emit({
-              type: "finish",
-              finishReason: { unified: "stop", raw: "stop" },
-              usage: {
-                inputTokens: { total: 0, noCache: 0, cacheRead: 0, cacheWrite: 0 },
-                outputTokens: { total: 0, text: 0, reasoning: 0 },
-              },
-            })
-          }
-          streamController.close()
-        } catch (error: unknown) {
-          if (controller.signal.aborted) {
-            fail(abortError())
-          } else {
-            fail(error)
-          }
-        } finally {
-          signal?.removeEventListener("abort", onOuterAbort)
-        }
-      },
-    })
+    const parser: (event: unknown) => LanguageModelV3StreamPart[] = isClaude
+      ? anthropicEventToStreamPart
+      : openAIEventToStreamPart
+    return this.transportStream(url, bodyStr, headers, signal, sink, parser)
   }
 
   private runStream(
@@ -606,12 +399,31 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
     options: ModelCallOptions,
     sink?: LanguageModelV3StreamPart[],
   ): ReadableStream<LanguageModelV3StreamPart> {
+    const url = `${this.apiBase()}/alpha/generate`
+    const bodyStr = JSON.stringify(body)
+    return this.transportStream(url, bodyStr, headers, signal, sink, ccEventToStreamPart)
+  }
+
+  /**
+   * Deep internal seam: single SSE transport behind a small interface.
+   * All retry/timeout/abort/redaction/stream-parsing/cost/fallback logic
+   * lives here; callers supply only the endpoint URL, body, headers and
+   * the event→parts mapper. Depth gives leverage (N callers) and locality
+   * (fix once, fixed everywhere). The eventToParts adapter varies across
+   * the seam (CC vs OpenAI vs Anthropic) while the transport stays fixed.
+   */
+  private transportStream(
+    url: string,
+    bodyStr: string,
+    headers: Record<string, string>,
+    signal: AbortSignal | undefined,
+    sink: LanguageModelV3StreamPart[] | undefined,
+    eventToParts: (event: unknown) => LanguageModelV3StreamPart[],
+  ): ReadableStream<LanguageModelV3StreamPart> {
     const timeoutMs = this.options.timeout
     const maxRetries = this.options.maxRetries ?? DEFAULT_MAX_RETRIES
     const maxRetryDelayMs = this.options.maxRetryDelayMs ?? DEFAULT_MAX_RETRY_DELAY_MS
     const fetchImpl = this.options.fetch ?? fetch
-    const url = `${this.apiBase()}/alpha/generate`
-    const bodyStr = JSON.stringify(body)
 
     return new ReadableStream<LanguageModelV3StreamPart>({
       start: async (streamController) => {
@@ -644,7 +456,7 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
         const handleEvent = (event: unknown): boolean => {
           if (!isRecord(event)) return false
           try {
-            const parts = ccEventToStreamPart(event)
+            const parts = eventToParts(event)
             let finished = false
             for (const part of parts) {
               if (part.type === "finish") {
