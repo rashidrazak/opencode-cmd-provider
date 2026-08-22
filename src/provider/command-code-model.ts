@@ -79,7 +79,6 @@ const COMMAND_CODE_CLI_VERSION = "1.15.1"
 const DEFAULT_GENERATE_MAX_TOKENS = 64_000
 const DEFAULT_MAX_RETRIES = 0
 const DEFAULT_MAX_RETRY_DELAY_MS = 60_000
-const DEFAULT_BASE_URL = "https://api.commandcode.ai"
 
 function isClaudeModel(modelId: string): boolean {
   return modelId.startsWith("claude-")
@@ -569,19 +568,28 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
          * (upgrade fallback vs. surface as an error part).
          */
         const runTransport = async (t: TransportDescriptor): Promise<void> => {
+          /**
+           * The single `finish` part is held back and emitted only after the
+           * response body is fully drained. OpenAI-style Provider streams send
+           * `finish_reason` on the last content chunk and the real `usage` on
+           * a *separate* trailing usage-only chunk (choices:[]); emitting the
+           * finish as soon as a finish_reason chunk is seen would drop that
+           * trailing usage and report zeroed usage/cost. Holding the finish
+           * lets a later usage-bearing finish replace the earlier one.
+           */
+          let heldFinish: Extract<LanguageModelV3StreamPart, { type: "finish" }> | undefined
           const handleEvent = (event: unknown): boolean => {
             if (!isRecord(event)) return false
             try {
               const parts = t.eventToParts(event)
-              let finished = false
               for (const part of parts) {
                 if (part.type === "finish") {
-                  finished = true
-                  calculateCommandCodeCost(this.costForModel(), costUsageFromAiSdkUsage(part.usage))
+                  heldFinish = part
+                } else {
+                  emit(part)
                 }
-                emit(part)
               }
-              return finished
+              return heldFinish !== undefined
             } catch (streamError) {
               fail(streamError)
               return true
@@ -695,7 +703,9 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
                   if (controller.signal.aborted) throw abortError("Aborted")
                   const { done, value } = await raceAbort(reader.read(), attemptController.signal)
                   if (done) {
-                    if (buffer.trim()) handleEvent(parseStreamEventLine(buffer))
+                    if (buffer.trim()) {
+                      if (handleEvent(parseStreamEventLine(buffer))) finished = true
+                    }
                     break
                   }
                   if (controller.signal.aborted) throw abortError("Aborted")
@@ -706,10 +716,11 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
 
                   for (const line of lines) {
                     if (controller.signal.aborted) throw abortError("Aborted")
-                    if (handleEvent(parseStreamEventLine(line))) {
-                      finished = true
-                      break readLoop
-                    }
+                    if (handleEvent(parseStreamEventLine(line))) finished = true
+                    // Do NOT break on a finish event: an OpenAI Provider stream
+                    // may send the terminal `usage`-only chunk (choices:[]) after
+                    // a finish_reason chunk. Keep draining so heldFinish is
+                    // replaced with the usage-bearing finish before we emit it.
                   }
                 }
 
@@ -747,7 +758,16 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
               }
             }
 
-            if (!finished) {
+            if (heldFinish) {
+              // The finish part is emitted after the body is fully drained so
+              // the terminal usage chunk (OpenAI: separate usage-only chunk;
+              // Anthropic: message_delta) is incorporated.
+              calculateCommandCodeCost(
+                this.costForModel(),
+                costUsageFromAiSdkUsage(heldFinish.usage),
+              )
+              emit(heldFinish)
+            } else if (!finished) {
               // The server closed the stream without a finish event; the AI SDK
               // expects a finish part to terminate a stream.
               emit({

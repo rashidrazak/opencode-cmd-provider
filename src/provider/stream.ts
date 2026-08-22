@@ -480,6 +480,11 @@ interface ToolCallBuffer {
 export function createOpenAIStreamParser(): (event: unknown) => LanguageModelV3StreamPart[] {
   const toolBuffers = new Map<number, ToolCallBuffer>()
   let nextIndex = 0
+  // OpenAI streams finish_reason on the last content chunk, then the real
+  // usage on a separate trailing usage-only chunk (choices:[]). Remember the
+  // finish_reason here so the usage-only chunk's finish keeps the real reason
+  // (e.g. "length") instead of defaulting to "stop".
+  let lastFinishReason: LanguageModelV3FinishReason | undefined
   return (event) => {
     if (!isRecord(event)) return []
     // Error events flow through the stateless mapper (redacted throw).
@@ -553,7 +558,8 @@ export function createOpenAIStreamParser(): (event: unknown) => LanguageModelV3S
       stringValue((event as Record<string, unknown>).finish_reason) ??
       stringValue((event as Record<string, unknown>).finishReason)
     const finishReason = finishReasonRaw ? mapFinishReason(finishReasonRaw) : undefined
-    if (finishReason || hasUsage) {
+    if (finishReason) lastFinishReason = finishReason
+    if (lastFinishReason || hasUsage) {
       // Flush any tool call whose terminal args chunk never arrived.
       for (const [index, buffer] of toolBuffers) {
         if (buffer.started && !buffer.emitted) {
@@ -567,7 +573,10 @@ export function createOpenAIStreamParser(): (event: unknown) => LanguageModelV3S
         }
         toolBuffers.delete(index)
       }
-      parts.push(finishPart(finishReason, hasUsage ? usageToAiSdk(rawUsage) : undefined))
+      // The usage-only trailing chunk carries no finish_reason; reuse the one
+      // captured from the finish_reason chunk so the real reason survives.
+      const reason = finishReason ?? lastFinishReason
+      parts.push(finishPart(reason, hasUsage ? usageToAiSdk(rawUsage) : undefined))
     }
     return parts
   }
@@ -652,38 +661,5 @@ export function createAnthropicStreamParser(): (event: unknown) => LanguageModel
   }
 }
 
-// Convenience: dispatch any provider event (tries OpenAI then Anthropic shapes)
-export function providerEventToStreamPart(event: unknown): LanguageModelV3StreamPart[] {
-  if (!isRecord(event)) return []
-  // Heuristic: if it has choices or usage with prompt_tokens, treat as OpenAI
-  if ("choices" in event || "prompt_tokens" in event || "completion_tokens" in event) {
-    return openAIEventToStreamPart(event)
-  }
-  // Heuristic: anthropic has type with content_block_/message_
-  const t = stringValue(event.type)
-  if (t && (t.startsWith("content_block_") || t.startsWith("message_"))) {
-    return anthropicEventToStreamPart(event)
-  }
-  // Try both and merge (dedup)
-  const oa = openAIEventToStreamPart(event)
-  if (oa.length > 0) return oa
-  return anthropicEventToStreamPart(event)
-}
-
-// Parse SSE line helpers for provider shapes (retain existing parseStreamEventLine behavior but expose provider wrappers)
-export function parseOpenAIEventLine(line: string): unknown | undefined {
-  return parseStreamEventLine(line)
-}
-
-export function parseAnthropicEventLine(line: string): unknown | undefined {
-  return parseStreamEventLine(line)
-}
-
-// Canonical stream entry points: openAIEventToStreamPart / anthropicEventToStreamPart.
-// Aliases below for backwards-compat with hidden test import names (see converters.ts).
-export const openAIChunkToStreamPart = openAIEventToStreamPart
-export const anthropicChunkToStreamPart = anthropicEventToStreamPart
-export const chatCompletionsStreamPart = openAIEventToStreamPart
-export const messagesStreamPart = anthropicEventToStreamPart
-export const openAIStreamPart = openAIEventToStreamPart
-export const anthropicStreamPart = anthropicEventToStreamPart
+// Canonical stream entry points: openAIEventToStreamPart / anthropicEventToStreamPart
+// and the per-stream stateful parsers createOpenAIStreamParser / createAnthropicStreamParser.

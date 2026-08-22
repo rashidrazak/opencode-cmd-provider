@@ -156,6 +156,56 @@ run([
     },
   ],
   [
+    "non-image file parts are rejected on both Provider codecs",
+    () => {
+      // A `file` part with a non-image media type must NOT be silently encoded
+      // as an image (Provider API is text + images only; audio/file/document
+      // are rejected by the upstream schema).
+      const prompt = [
+        { role: "user", content: [{ type: "file", data: "aGVsbG8=", mediaType: "audio/mp3" }] },
+      ] as any
+
+      let threw = false
+      try {
+        messagesToOpenAI(prompt, { model: "gpt-5.6-terra", allowImages: true })
+      } catch (e: any) {
+        threw = /non-image|file|audio/i.test(e.message)
+      }
+      assert(threw, "openAI rejects a non-image file part")
+
+      threw = false
+      try {
+        messagesToAnthropic(prompt, { model: "claude-sonnet-5", allowImages: true })
+      } catch (e: any) {
+        threw = /non-image|file|audio/i.test(e.message)
+      }
+      assert(threw, "anthropic rejects a non-image file part")
+
+      // A `file` part with no media type at all cannot be verified as an image — reject it too.
+      const noMime = [{ role: "user", content: [{ type: "file", data: "aGVsbG8=" }] }] as any
+      threw = false
+      try {
+        messagesToOpenAI(noMime, { model: "gpt-5.6-terra", allowImages: true })
+      } catch (e: any) {
+        threw = /non-image|file/.test(e.message)
+      }
+      assert(threw, "openAI rejects a file part with no media type")
+
+      // An image/* file part still forwards correctly (unchanged).
+      const img = [
+        { role: "user", content: [{ type: "file", data: "aGVsbG8=", mediaType: "image/png" }] },
+      ] as any
+      const oa = messagesToOpenAI(img, { model: "gpt-5.6-terra", allowImages: true }) as any
+      const oaImg = (oa.messages.find((m: any) => m.role === "user") as any).content.find(
+        (c: any) => c.type === "image_url",
+      )
+      assert(
+        oaImg && oaImg.image_url.url.includes("data:image/png;base64,aGVsbG8="),
+        "image/* file still forwarded as image_url",
+      )
+    },
+  ],
+  [
     "tool call + result pairs flow through both codecs",
     () => {
       const prompt = [

@@ -69,16 +69,40 @@ type PromptLike = readonly {
 }[]
 
 function imageParts(value: unknown): readonly Record<string, unknown>[] {
-  if (isRecord(value)) return value.type === "image" || value.type === "file" ? [value] : []
-  return recordArray(value).filter(
-    (part) =>
-      part.type === "image" ||
-      (part.type === "file" && stringValue(part.mediaType)?.startsWith("image/")),
-  )
+  if (isRecord(value)) return isImageFilePart(value) ? [value] : []
+  return recordArray(value).filter((part) => isImageFilePart(part))
 }
 
 function imageContentError(role: string): Error {
   return new Error(`Selected Command Code model does not support image content in ${role}`)
+}
+
+function nonImageFileError(part: Record<string, unknown>, role: string): Error {
+  const mime = stringValue(part.mediaType) ?? stringValue(part.mimeType) ?? "unknown type"
+  return new Error(
+    `Selected Command Code model only accepts text and images, but ${role} contain a non-image file (${mime}). Remove the attachment or convert it to an image.`,
+  )
+}
+
+function hasImageMediaType(part: Record<string, unknown>): boolean {
+  const mime = stringValue(part.mediaType) ?? stringValue(part.mimeType)
+  // A `file` part must declare an image/* media type to be forwarded as an
+  // image; a `file` with no verifiable image type (and any non-image type) is
+  // rejected, since the Provider API accepts text + images only.
+  return mime !== undefined && mime.toLowerCase().startsWith("image/")
+}
+
+/** True for an `image` part or a `file` part carrying an image/* media type
+ * (mediaType or mimeType). Shared by the rejection guard and the content
+ * encoders so the image classification is consistent everywhere. */
+function isImageFilePart(part: Record<string, unknown>): boolean {
+  return part.type === "image" || (part.type === "file" && hasImageMediaType(part))
+}
+
+function assertProviderContentParts(parts: readonly Record<string, unknown>[], role: string): void {
+  for (const part of parts) {
+    if (part.type === "file" && !hasImageMediaType(part)) throw nonImageFileError(part, role)
+  }
 }
 
 export function assertTextOnlyMessages(messages?: PromptLike): void {
@@ -390,17 +414,15 @@ function textFromPart(part: Record<string, unknown>): string {
 function openAIUserContent(content: unknown, allowImages: boolean): unknown {
   if (typeof content === "string") return content
   const parts = recordArray(content)
-  const hasImages = parts.some(
-    (p) =>
-      p.type === "image" || (p.type === "file" && stringValue(p.mediaType)?.startsWith("image/")),
-  )
+  assertProviderContentParts(parts, "user messages")
+  const hasImages = parts.some(isImageFilePart)
   if (!hasImages) {
     const texts = parts.filter((p) => p.type === "text").map(textFromPart)
     if (parts.every((p) => p.type === "text")) return texts.join("\n")
     const out: unknown[] = []
     for (const p of parts) {
       if (p.type === "text") out.push({ type: "text", text: textFromPart(p) })
-      else if (p.type === "image" || p.type === "file") {
+      else if (isImageFilePart(p)) {
         if (!allowImages) throw imageContentError("user messages")
         const img = filePartToOpenAIImageUrl(p)
         if (img) out.push(img)
@@ -412,7 +434,7 @@ function openAIUserContent(content: unknown, allowImages: boolean): unknown {
   const out: unknown[] = []
   for (const p of parts) {
     if (p.type === "text") out.push({ type: "text", text: textFromPart(p) })
-    else if (p.type === "image" || p.type === "file") {
+    else if (isImageFilePart(p)) {
       const img = filePartToOpenAIImageUrl(p)
       if (img) out.push(img)
     }
@@ -423,10 +445,8 @@ function openAIUserContent(content: unknown, allowImages: boolean): unknown {
 function anthropicUserContent(content: unknown, allowImages: boolean): unknown {
   if (typeof content === "string") return content
   const parts = recordArray(content)
-  const hasImages = parts.some(
-    (p) =>
-      p.type === "image" || (p.type === "file" && stringValue(p.mediaType)?.startsWith("image/")),
-  )
+  assertProviderContentParts(parts, "user messages")
+  const hasImages = parts.some(isImageFilePart)
   // Anthropic docs show string content for simple text: "Count to 5."
   // Return string for single text-only part to match documented shape, array otherwise
   if (!hasImages && parts.length === 1 && parts[0]?.type === "text") {
@@ -441,7 +461,7 @@ function anthropicUserContent(content: unknown, allowImages: boolean): unknown {
   const out: unknown[] = []
   for (const p of parts) {
     if (p.type === "text") out.push({ type: "text", text: textFromPart(p) })
-    else if (p.type === "image" || p.type === "file") {
+    else if (isImageFilePart(p)) {
       if (!allowImages) throw imageContentError("user messages")
       const img = filePartToAnthropicImage(p)
       if (img) out.push(img)
@@ -546,7 +566,9 @@ function promptToOpenAIMessages(prompt: PromptLike, allowImages: boolean): unkno
         out.push({ role: "assistant", content: texts.join("\n") })
       }
     } else if (message.role === "tool") {
-      for (const content of recordArray(message.content)) {
+      const toolContent = recordArray(message.content)
+      assertProviderContentParts(toolContent, "tool results")
+      for (const content of toolContent) {
         const toolCallId = stringValue(content.toolCallId) ?? ""
         if (!pairedIds.has(toolCallId)) continue
         const output = unwrapToolResult(content.result ?? content.output)
@@ -596,7 +618,9 @@ function promptToAnthropicMessages(prompt: PromptLike, allowImages: boolean): un
       }
       if (content.length > 0) out.push({ role: "assistant", content })
     } else if (message.role === "tool") {
-      for (const content of recordArray(message.content)) {
+      const toolContent = recordArray(message.content)
+      assertProviderContentParts(toolContent, "tool results")
+      for (const content of toolContent) {
         const toolCallId = stringValue(content.toolCallId) ?? ""
         if (!pairedIds.has(toolCallId)) continue
         const output = unwrapToolResult(content.result ?? content.output)
@@ -730,20 +754,5 @@ export function messagesToAnthropic(
   return buildAnthropicBody(prompt as unknown as ProviderRequestOptions)
 }
 
-// Canonical codec entry points: messagesToOpenAI / messagesToAnthropic (prefer these).
-// Aliases below exist only for backwards-compat with hidden test import names
-// introduced in 096714b. Prefer the canonical names; aliases are intentionally thin
-// re-exports and carry no distinct logic (addresses speculative-generality smell).
-export const promptToOpenAI = messagesToOpenAI
-export const promptToAnthropic = messagesToAnthropic
-export const buildOpenAIRequest = messagesToOpenAI
-export const buildAnthropicRequest = messagesToAnthropic
-export const createOpenAIRequestBody = messagesToOpenAI
-export const createAnthropicRequestBody = messagesToAnthropic
-export const toOpenAIChatCompletions = messagesToOpenAI
-export const toAnthropicMessages = messagesToAnthropic
-export const openAIRequestBody = buildOpenAIBody
-export const anthropicRequestBody = buildAnthropicBody
-export const getOpenAIRequestBody = buildOpenAIBody
-export const getAnthropicRequestBody = buildAnthropicBody
-export { promptToOpenAIMessages, promptToAnthropicMessages, openAITools, anthropicTools }
+// Canonical codec entry points: messagesToOpenAI / messagesToAnthropic.
+export { openAITools, anthropicTools }

@@ -233,7 +233,7 @@ export function startMockCc(
             return
           }
           // Anthropic SSE may include event: lines; the mock emits just data: lines
-          // The body already contains type, so providerEventToStreamPart can infer.
+          // The event body already carries its `type`, so the parser can infer the shape.
           res.write(`data: ${JSON.stringify(evt)}\n\n`)
           index++
         }, 5)

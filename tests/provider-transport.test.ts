@@ -429,6 +429,56 @@ run([
     },
   ],
   [
+    "provider: OpenAI split terminal chunk — usage-only chunk after finish_reason is still consumed",
+    async () => {
+      // Real OpenAI SSE with include_usage: finish_reason arrives on a content chunk,
+      // then a SEPARATE trailing usage-only chunk (choices:[]) carries the tokens.
+      const mock = await startMockCc({
+        chatCompletionsStream: [
+          { id: "chatcmpl-test", choices: [{ delta: { content: "Hello" }, finish_reason: null }] },
+          {
+            id: "chatcmpl-test",
+            choices: [{ delta: { content: " world" }, finish_reason: "length" }],
+          },
+          // Separate terminal usage chunk
+          {
+            id: "chatcmpl-test",
+            choices: [],
+            usage: { prompt_tokens: 20, completion_tokens: 8, total_tokens: 28 },
+          },
+        ],
+      })
+      try {
+        const parts = await collect(
+          createCommandCode({ apiKey: "k", baseURL: mock.url }).languageModel("gpt-5.6-terra"),
+          [{ role: "user", content: "hi" }],
+        )
+        const deltas = parts
+          .filter((p) => p.type === "text-delta")
+          .map((p) => (p as never as { delta: string }).delta)
+        assertEqual(deltas, ["Hello", " world"])
+        const finish = parts.find((p) => p.type === "finish") as {
+          finishReason?: { unified?: string }
+          usage?: { inputTokens: { total: number }; outputTokens: { total: number } }
+        }
+        // The non-stop finish_reason is carried on the content chunk; the
+        // usage-only trailing chunk must not mask it back to "stop".
+        assertEqual(finish.finishReason?.unified, "length")
+        // Regression: usage from the trailing split chunk must be honoured, not zeroed.
+        assertEqual(finish.usage?.inputTokens.total, 20)
+        assertEqual(finish.usage?.outputTokens.total, 8)
+        const cu = costUsageFromAiSdkUsage(finish.usage as never)
+        calculateCommandCodeCost(
+          { cost: { input: 1, output: 5, cacheRead: 0.2, cacheWrite: 1 } },
+          cu,
+        )
+        assert(cu.cost.total > 0, "split-usage-chunk cost positive")
+      } finally {
+        await mock.close()
+      }
+    },
+  ],
+  [
     "provider: doGenerate non-streaming returns same content/usage/cost as doStream aggregated",
     async () => {
       await withEnv("max", async () => {
