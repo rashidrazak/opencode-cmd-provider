@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+Feature: `/connect` now mirrors the credential under `command-code` in
+OpenCode's auth store and to `~/.commandcode/auth.json` (official CLI layout,
+never clobbering a different existing login there), so ecosystem consumers
+such as OpenChamber's Usage page find the key without manual setup (#64).
+Existing users re-run `/connect` once (or copy the entry manually) to pick
+the mirror up.
+
 ## 1.3.0 - 2026-08-23
 
 Feature: dual-transport Provider API — non-Go plans now use the documented

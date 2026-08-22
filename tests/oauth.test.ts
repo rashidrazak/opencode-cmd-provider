@@ -51,7 +51,7 @@ run([
   [
     "runAuthFlow returns AuthOAuthResult with working callback",
     async () => {
-      const result = await runAuthFlow({ startPort: 0 })
+      const result = await runAuthFlow({ startPort: 0, mirror: false })
       assertEqual(result.method, "auto")
       assert(result.url.includes("commandcode.ai"))
       assert(result.instructions.length > 0)
