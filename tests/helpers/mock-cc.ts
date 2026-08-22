@@ -64,6 +64,30 @@ export function startMockCc(
   options: MockCcOptions = {},
 ): Promise<{ url: string; close: () => Promise<void>; hits: MockCcHits }> {
   const hits: MockCcHits = { generate: 0, models: 0, chatCompletions: 0, messages: 0, whoami: 0 }
+  /**
+   * Serves an error response for an endpoint: status + error body with an
+   * optional Retry-After. `errorsLeft` is the number of consecutive error
+   * responses still owed before the endpoint falls through to its SSE stream;
+   * `POSITIVE_INFINITY` means always error. Returns true when an error was
+   * served (caller must return), false when the request should be served as a
+   * stream.
+   */
+  const serveError = (
+    res: import("node:http").ServerResponse,
+    errorsLeft: number,
+    status: number | undefined,
+    retryAfter: number | undefined,
+    errorBody: string | undefined,
+    fallbackBody: string,
+  ): boolean => {
+    if (errorsLeft <= 0) return false
+    res.writeHead(status ?? 500, {
+      "content-type": "application/json",
+      ...(retryAfter !== undefined ? { "retry-after": String(retryAfter) } : {}),
+    })
+    res.end(errorBody ?? fallbackBody)
+    return true
+  }
   const server: Server = createServer((req, res) => {
     let body = ""
     req.on("data", (c) => (body += c))
@@ -97,20 +121,22 @@ export function startMockCc(
           body ? (JSON.parse(body) as Record<string, unknown>) : {},
           (req.headers ?? {}) as Record<string, string>,
         )
-        const errorsLeft =
+        const generateErrorsLeft =
           options.generateErrorCount !== undefined
             ? options.generateErrorCount - (hits.generate - 1)
             : options.status && options.status >= 400
               ? Number.POSITIVE_INFINITY
               : 0
-        if (errorsLeft > 0) {
-          res.writeHead(options.status ?? 500, {
-            "content-type": "application/json",
-            ...(options.retryAfter !== undefined
-              ? { "retry-after": String(options.retryAfter) }
-              : {}),
-          })
-          res.end(options.errorBody ?? JSON.stringify({ error: { message: "mock error" } }))
+        if (
+          serveError(
+            res,
+            generateErrorsLeft,
+            options.status,
+            options.retryAfter,
+            options.errorBody,
+            JSON.stringify({ error: { message: "mock error" } }),
+          )
+        ) {
           return
         }
         res.writeHead(200, { "content-type": "text/event-stream" })
@@ -140,19 +166,18 @@ export function startMockCc(
             : options.chatCompletionsStatus && options.chatCompletionsStatus >= 400
               ? Number.POSITIVE_INFINITY
               : 0
-        if (chatErrorsLeft > 0) {
-          res.writeHead(options.chatCompletionsStatus ?? 500, {
-            "content-type": "application/json",
-            ...(options.chatCompletionsRetryAfter !== undefined
-              ? { "retry-after": String(options.chatCompletionsRetryAfter) }
-              : {}),
-          })
-          res.end(
-            options.chatCompletionsErrorBody ??
-              JSON.stringify({
-                error: { message: "mock chat completions error", type: "invalid_request_error" },
-              }),
+        if (
+          serveError(
+            res,
+            chatErrorsLeft,
+            options.chatCompletionsStatus,
+            options.chatCompletionsRetryAfter,
+            options.chatCompletionsErrorBody,
+            JSON.stringify({
+              error: { message: "mock chat completions error", type: "invalid_request_error" },
+            }),
           )
+        ) {
           return
         }
         res.writeHead(200, { "content-type": "text/event-stream" })
@@ -182,20 +207,19 @@ export function startMockCc(
             : options.messagesStatus && options.messagesStatus >= 400
               ? Number.POSITIVE_INFINITY
               : 0
-        if (messagesErrorsLeft > 0) {
-          res.writeHead(options.messagesStatus ?? 500, {
-            "content-type": "application/json",
-            ...(options.messagesRetryAfter !== undefined
-              ? { "retry-after": String(options.messagesRetryAfter) }
-              : {}),
-          })
-          res.end(
-            options.messagesErrorBody ??
-              JSON.stringify({
-                type: "error",
-                error: { type: "invalid_request_error", message: "mock messages error" },
-              }),
+        if (
+          serveError(
+            res,
+            messagesErrorsLeft,
+            options.messagesStatus,
+            options.messagesRetryAfter,
+            options.messagesErrorBody,
+            JSON.stringify({
+              type: "error",
+              error: { type: "invalid_request_error", message: "mock messages error" },
+            }),
           )
+        ) {
           return
         }
         res.writeHead(200, { "content-type": "text/event-stream" })

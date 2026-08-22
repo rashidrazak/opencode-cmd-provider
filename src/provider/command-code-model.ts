@@ -444,7 +444,14 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
     // opt-in — CMD_ZDR=1 → every Provider API request carries x-cmd-zdr: 1
     // (https://commandcode.ai/docs/provider "Zero data retention (ZDR)").
     // Only the exact value "1" opts in; the legacy /alpha/generate transport
-    // never sends the header (headersFor is untouched).
+    // never sends the header (headersFor is untouched). The header's presence
+    // is owned solely by the env opt-in, not by caller-supplied headers: with
+    // CMD_ZDR=1 the value is forced to "1", and with it off any caller-supplied
+    // x-cmd-zdr (any casing) is stripped so a non-opted-in session never emits
+    // ZDR.
+    for (const key of Object.keys(headers)) {
+      if (key.toLowerCase() === "x-cmd-zdr") delete headers[key]
+    }
     if (getCmdZdr()) headers["x-cmd-zdr"] = "1"
     return headers
   }

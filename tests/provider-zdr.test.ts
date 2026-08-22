@@ -23,7 +23,7 @@ import {
   headersToRecord,
 } from "./helpers/mock-cc.js"
 import type { LanguageModelV3Prompt } from "../src/provider/aisdk-types.js"
-import { assert, assertEqual, run } from "./harness.js"
+import { assert, assertEqual, run, rejects } from "./harness.js"
 
 type Model = ReturnType<ReturnType<typeof createCommandCode>["languageModel"]>
 
@@ -433,6 +433,113 @@ run([
             await mock.close()
           }
         }
+      })
+    },
+  ],
+  [
+    "caller-supplied x-cmd-zdr is stripped when CMD_ZDR is off, forced to 1 when on",
+    async () => {
+      // CMD_ZDR off: a caller-supplied x-cmd-zdr must NOT reach the wire —
+      // the header's presence is owned by the env opt-in alone.
+      await withZdr(undefined, async () => {
+        const calls: SpyCall[] = []
+        const fetchImpl: typeof fetch = async (input, init) => {
+          const url = typeof input === "string" ? input : (input as URL).toString()
+          calls.push({
+            url,
+            method: (init?.method ?? "GET") as string,
+            headers: headersToRecord(init?.headers),
+          })
+          if (url.includes("/alpha/whoami")) return new Response("not found", { status: 404 })
+          if (url.includes("/chat/completions")) return sseResponse(OPENAI_EVENTS)
+          return new Response("not found", { status: 404 })
+        }
+        const provider = createCommandCode({
+          apiKey: "k",
+          baseURL: "https://x",
+          fetch: fetchImpl,
+          headers: { "x-cmd-zdr": "0" },
+        })
+        await collect(provider.languageModel("gpt-5.6-terra"))
+        const providerCalls = calls.filter((c) => c.url.includes("/chat/completions"))
+        assertEqual(providerCalls.length, 1)
+        assertEqual(
+          providerCalls[0].headers["x-cmd-zdr"],
+          undefined,
+          "caller-supplied x-cmd-zdr stripped when CMD_ZDR off",
+        )
+      })
+      // CMD_ZDR=1: a caller-supplied value is overridden to "1" — the env
+      // opt-in wins (issue #57: "every Provider API request … x-cmd-zdr: 1").
+      await withZdr("1", async () => {
+        const calls: SpyCall[] = []
+        const fetchImpl: typeof fetch = async (input, init) => {
+          const url = typeof input === "string" ? input : (input as URL).toString()
+          calls.push({
+            url,
+            method: (init?.method ?? "GET") as string,
+            headers: headersToRecord(init?.headers),
+          })
+          if (url.includes("/alpha/whoami")) return new Response("not found", { status: 404 })
+          if (url.includes("/chat/completions")) return sseResponse(OPENAI_EVENTS)
+          return new Response("not found", { status: 404 })
+        }
+        const provider = createCommandCode({
+          apiKey: "k",
+          baseURL: "https://x",
+          fetch: fetchImpl,
+          headers: { "x-cmd-zdr": "0" },
+        })
+        await collect(provider.languageModel("gpt-5.6-terra"))
+        const providerCalls = calls.filter((c) => c.url.includes("/chat/completions"))
+        assertEqual(providerCalls.length, 1)
+        assertEqual(
+          providerCalls[0].headers["x-cmd-zdr"],
+          "1",
+          "CMD_ZDR=1 forces x-cmd-zdr: 1 over caller-supplied value",
+        )
+      })
+    },
+  ],
+  [
+    "422 cmd_zdr_no_providers surfaces as a redacted error via doGenerate too",
+    async () => {
+      await withZdr("1", async () => {
+        const secret = "sk-zdr-gen-secret-1234567890abcdef"
+        const documented = JSON.parse(zdrNoProvidersBody()) as { error: { message: string } }
+        documented.error.message = `${documented.error.message} api_key=${secret}`
+        const body = JSON.stringify(documented)
+        const calls: SpyCall[] = []
+        const fetchImpl: typeof fetch = async (input, init) => {
+          const url = typeof input === "string" ? input : (input as URL).toString()
+          calls.push({
+            url,
+            method: (init?.method ?? "GET") as string,
+            headers: headersToRecord(init?.headers),
+          })
+          if (url.includes("/alpha/whoami")) return new Response("not found", { status: 404 })
+          return errorResponse(422, body)
+        }
+        const provider = createCommandCode({ apiKey: "k", baseURL: "https://x", fetch: fetchImpl })
+        const model = provider.languageModel("gpt-5.6-terra")
+        await rejects(
+          model.doGenerate({ prompt: [{ role: "user", content: "hi" }] } as never),
+          (err: unknown) => {
+            const message = (err as Error).message
+            return (
+              message.includes("Command Code API error 422") &&
+              message.includes("cmd_zdr_no_providers") &&
+              message.includes("x-cmd-zdr: 1 was set") &&
+              message.includes("[redacted]") &&
+              !message.includes(secret)
+            )
+          },
+          "doGenerate 422 surfaces redacted",
+        )
+        const providerCall = calls.find((c) => c.url.includes("/chat/completions"))
+        assertEqual(providerCall?.headers["x-cmd-zdr"], "1", "failing doGenerate carried ZDR")
+        assertEqual(calls.filter((c) => c.url.includes("/chat/completions")).length, 1)
+        assert(!calls.some((c) => c.url.includes("/alpha/generate")), "no legacy fallback")
       })
     },
   ],
