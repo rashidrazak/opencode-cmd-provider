@@ -32,7 +32,7 @@ run([
     async () => {
       const mock = await startMockCc({ stream: [textDelta("hel"), textDelta("lo"), finishEvent()] })
       try {
-        const provider = createCommandCode({ apiKey: "user_test", baseURL: mock.url })
+        const provider = createCommandCode({ apiKey: "user_test", baseURL: mock.url, plan: "go" })
         const model = provider.languageModel("claude-sonnet-5")
         const parts = await collect(model, [{ role: "user", content: "hi" }])
         const texts = parts
@@ -70,7 +70,7 @@ run([
         ],
       })
       try {
-        const provider = createCommandCode({ apiKey: "user_test", baseURL: mock.url })
+        const provider = createCommandCode({ apiKey: "user_test", baseURL: mock.url, plan: "go" })
         const parts = await collect(provider.languageModel("claude-sonnet-5"), [
           { role: "user", content: "hi" },
         ])
@@ -92,7 +92,7 @@ run([
         stream: [reasoningDelta("think"), textDelta("answer"), finishEvent()],
       })
       try {
-        const provider = createCommandCode({ apiKey: "user_test", baseURL: mock.url })
+        const provider = createCommandCode({ apiKey: "user_test", baseURL: mock.url, plan: "go" })
         const parts = await collect(provider.languageModel("claude-sonnet-5"), [
           { role: "user", content: "hi" },
         ])
@@ -114,7 +114,7 @@ run([
         ],
       })
       try {
-        const provider = createCommandCode({ apiKey: "user_test", baseURL: mock.url })
+        const provider = createCommandCode({ apiKey: "user_test", baseURL: mock.url, plan: "go" })
         const parts = await collect(provider.languageModel("claude-sonnet-5"), [
           { role: "user", content: "hi" },
         ])
@@ -141,7 +141,7 @@ run([
         onGenerate: (body, headers) => received.push({ body, headers }),
       })
       try {
-        const provider = createCommandCode({ apiKey: "user_test", baseURL: mock.url })
+        const provider = createCommandCode({ apiKey: "user_test", baseURL: mock.url, plan: "go" })
         await collect(provider.languageModel("claude-sonnet-5"), [{ role: "user", content: "hi" }])
         assertEqual(received.length, 1)
         const { body, headers } = received[0]
@@ -164,9 +164,11 @@ run([
     async () => {
       const mock = await startMockCc({ stream: [finishEvent()] })
       try {
-        const model = createCommandCode({ baseURL: mock.url, authPaths: [] }).languageModel(
-          "claude-sonnet-5",
-        )
+        const model = createCommandCode({
+          baseURL: mock.url,
+          authPaths: [],
+          plan: "go",
+        }).languageModel("claude-sonnet-5")
         const result = await model.doStream({
           prompt: [{ role: "user", content: "hi" }],
           mode: { type: "regular" },

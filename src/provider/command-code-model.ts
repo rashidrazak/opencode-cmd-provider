@@ -35,7 +35,7 @@ import {
   anthropicEventToStreamPart,
 } from "./stream.js"
 import { getApiBase } from "../env.js"
-import { normalizePlan } from "../deals/plan-summary.js"
+import { resolvePlan, type PlanResolutionCache } from "../deals/plan-summary.js"
 import { redactCommandCodeErrorText, commandCodeErrorMessage } from "./redact.js"
 import { calculateCommandCodeCost, costUsageFromAiSdkUsage } from "./cost.js"
 import { ZERO_MODEL_COST, MODEL_COSTS } from "./pricing.js"
@@ -134,14 +134,37 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
     return { cost: MODEL_COSTS[this.modelId] ?? ZERO_MODEL_COST }
   }
 
-  private shouldUseProviderTransport(options: ModelCallOptions): boolean {
-    const fromProviderOptions = planFromProviderOptions(options.providerOptions)
-    const fromModelOptions = this.options.plan
-    const fromEnv = process.env.COMMANDCODE_PLAN
-    const raw = fromProviderOptions ?? fromModelOptions ?? fromEnv
-    const normalized = normalizePlan(raw)
-    if (!normalized) return false
-    return normalized !== "go"
+  /**
+   * Per-instance whoami cache: the `GET /alpha/whoami` fetch happens at most
+   * once for the lifetime of this model instance and is reused across turns.
+   */
+  private readonly planCache: PlanResolutionCache = {}
+
+  /**
+   * Resolves the transport plan through the shared plan-resolution seam:
+   * explicit override (providerOptions plan, model option `plan`) →
+   * COMMANDCODE_PLAN env → cached whoami → default Provider API. Only a
+   * resolved `go` selects the legacy transport; every other resolution
+   * selects the Provider API. The whoami fetch is cached for the lifetime of
+   * this instance (see planCache) and honours the same resolved key, base URL
+   * and injected fetch as inference.
+   */
+  private async shouldUseProviderTransport(options: ModelCallOptions): Promise<boolean> {
+    const plan = await resolvePlan(this.planArgFor(options), process.env, {
+      defaultPlan: "provider",
+      cache: this.planCache,
+      apiKey: resolveApiKey({
+        apiKey: this.options.apiKey,
+        authPaths: this.options.authPaths,
+      }),
+      baseURL: this.options.baseURL,
+      fetch: this.options.fetch,
+    })
+    return plan !== "go"
+  }
+
+  private planArgFor(options: ModelCallOptions): string | undefined {
+    return planFromProviderOptions(options.providerOptions) ?? this.options.plan
   }
 
   private providerEndpoint(): string {
@@ -199,7 +222,7 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
   async doStream(
     options: ModelCallOptions,
   ): Promise<{ stream: ReadableStream<LanguageModelV3StreamPart>; error?: unknown }> {
-    if (this.shouldUseProviderTransport(options)) {
+    if (await this.shouldUseProviderTransport(options)) {
       const isClaude = isClaudeModel(this.modelId)
       const body = this.providerBodyFor(options, isClaude)
       const headers = this.providerHeadersFor(options)
@@ -239,7 +262,7 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
     }
     const parts: LanguageModelV3StreamPart[] = []
     let stream: ReadableStream<LanguageModelV3StreamPart>
-    if (this.shouldUseProviderTransport(options)) {
+    if (await this.shouldUseProviderTransport(options)) {
       const isClaude = isClaudeModel(this.modelId)
       const body = this.providerBodyFor(options, isClaude)
       const headers = this.providerHeadersFor(options)

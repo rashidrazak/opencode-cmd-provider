@@ -32,6 +32,12 @@ export interface MockCcOptions {
   factsMd?: string
   /** served at GET /cli.mjs (raw command-code CLI bundle) */
   modalitiesBundle?: string
+  /** JSON body served at GET /alpha/whoami (plan detection); 404 when unset */
+  whoami?: unknown
+  /** status for GET /alpha/whoami (e.g. 500 to exercise the fall-through) */
+  whoamiStatus?: number
+  /** called with the headers of each GET /alpha/whoami request */
+  onWhoami?: (headers: Record<string, string>) => void
 }
 
 export interface MockCcHits {
@@ -39,12 +45,13 @@ export interface MockCcHits {
   models: number
   chatCompletions: number
   messages: number
+  whoami: number
 }
 
 export function startMockCc(
   options: MockCcOptions = {},
 ): Promise<{ url: string; close: () => Promise<void>; hits: MockCcHits }> {
-  const hits: MockCcHits = { generate: 0, models: 0, chatCompletions: 0, messages: 0 }
+  const hits: MockCcHits = { generate: 0, models: 0, chatCompletions: 0, messages: 0, whoami: 0 }
   const server: Server = createServer((req, res) => {
     let body = ""
     req.on("data", (c) => (body += c))
@@ -53,6 +60,23 @@ export function startMockCc(
         hits.models++
         res.writeHead(200, { "content-type": "application/json" })
         res.end(JSON.stringify(options.models ?? { object: "list", data: [] }))
+        return
+      }
+      if (req.url === "/alpha/whoami" && req.method === "GET") {
+        hits.whoami++
+        options.onWhoami?.((req.headers ?? {}) as Record<string, string>)
+        if (options.whoamiStatus !== undefined && options.whoamiStatus >= 400) {
+          res.writeHead(options.whoamiStatus, { "content-type": "application/json" })
+          res.end(JSON.stringify({ error: { message: "mock whoami error" } }))
+          return
+        }
+        if (options.whoami === undefined) {
+          res.writeHead(404)
+          res.end("not found")
+          return
+        }
+        res.writeHead(200, { "content-type": "application/json" })
+        res.end(JSON.stringify(options.whoami))
         return
       }
       if (req.url === "/alpha/generate" && req.method === "POST") {

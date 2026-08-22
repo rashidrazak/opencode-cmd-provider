@@ -8,6 +8,8 @@ import {
   anthropicMessageDelta,
   openAIChunk,
   openAIFinishChunk,
+  textDelta,
+  finishEvent,
 } from "./helpers/mock-cc.js"
 import type { LanguageModelV3Prompt } from "../src/provider/aisdk-types.js"
 import { assert, assertEqual, run } from "./harness.js"
@@ -36,26 +38,32 @@ async function collect(
   return parts
 }
 
-function withEnv(plan: string | undefined, fn: () => Promise<void> | void): Promise<void> {
-  const prev = process.env.COMMANDCODE_PLAN
-  if (plan === undefined) delete process.env.COMMANDCODE_PLAN
-  else process.env.COMMANDCODE_PLAN = plan
+/** Sets/clears COMMANDCODE_* env vars for the duration of fn, restoring after. */
+function withEnvVars(
+  vars: Record<string, string | undefined>,
+  fn: () => Promise<void> | void,
+): Promise<void> {
+  const prev = new Map<string, string | undefined>()
+  for (const [key, value] of Object.entries(vars)) {
+    prev.set(key, process.env[key])
+    if (value === undefined) delete process.env[key]
+    else process.env[key] = value
+  }
   const p = Promise.resolve().then(() => fn() as unknown as Promise<void>)
   return p.finally(() => {
-    if (prev === undefined) delete process.env.COMMANDCODE_PLAN
-    else process.env.COMMANDCODE_PLAN = prev
+    for (const [key, value] of prev) {
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
   })
 }
 
+function withEnv(plan: string | undefined, fn: () => Promise<void> | void): Promise<void> {
+  return withEnvVars({ COMMANDCODE_PLAN: plan }, fn)
+}
+
 function withBaseEnv(base: string | undefined, fn: () => Promise<void> | void): Promise<void> {
-  const prev = process.env.COMMANDCODE_API_BASE
-  if (base === undefined) delete process.env.COMMANDCODE_API_BASE
-  else process.env.COMMANDCODE_API_BASE = base
-  const p = Promise.resolve().then(() => fn() as unknown as Promise<void>)
-  return p.finally(() => {
-    if (prev === undefined) delete process.env.COMMANDCODE_API_BASE
-    else process.env.COMMANDCODE_API_BASE = prev
-  })
+  return withEnvVars({ COMMANDCODE_API_BASE: base }, fn)
 }
 
 run([
@@ -240,31 +248,51 @@ run([
     },
   ],
   [
-    "provider routing: no plan defaults to legacy (no /provider traffic)",
+    "provider routing: no plan defaults to Provider API (default-flip, issue #54)",
     async () => {
-      await withEnv(undefined, async () => {
-        const mock = await startMockCc({
-          stream: [
-            { type: "text-delta", text: "hi" },
-            {
-              type: "finish",
-              finishReason: "stop",
-              totalUsage: { inputTokens: 2, outputTokens: 2 },
-            },
-          ],
-        })
-        try {
-          const provider = createCommandCode({ apiKey: "k", baseURL: mock.url })
-          await collect(provider.languageModel("claude-sonnet-5"), [
-            { role: "user", content: "hi" },
-          ])
-          assertEqual(mock.hits.generate, 1)
-          assertEqual(mock.hits.chatCompletions, 0)
-          assertEqual(mock.hits.messages, 0)
-        } finally {
-          await mock.close()
-        }
-      })
+      // scrub plan/key/base env so the resolution is exactly: no override →
+      // key present (model option) → whoami 404 → default Provider API
+      await withEnvVars(
+        {
+          COMMANDCODE_PLAN: undefined,
+          COMMANDCODE_API_KEY: undefined,
+          COMMANDCODE_API_BASE: undefined,
+        },
+        async () => {
+          {
+            const mock = await startMockCc({
+              chatCompletionsStream: [openAIChunk("hi"), openAIFinishChunk()],
+            })
+            try {
+              const provider = createCommandCode({ apiKey: "k", baseURL: mock.url })
+              await collect(provider.languageModel("gpt-5.6-terra"), [
+                { role: "user", content: "hi" },
+              ])
+              assertEqual(mock.hits.whoami, 1) // whoami 404 (unset) → falls to Provider
+              assertEqual(mock.hits.chatCompletions, 1)
+              assertEqual(mock.hits.generate, 0)
+              assertEqual(mock.hits.messages, 0)
+            } finally {
+              await mock.close()
+            }
+          }
+          {
+            const mock = await startMockCc({
+              messagesStream: [anthropicContentBlockDelta("hi"), anthropicMessageDelta()],
+            })
+            try {
+              const provider = createCommandCode({ apiKey: "k", baseURL: mock.url })
+              await collect(provider.languageModel("claude-sonnet-5"), [
+                { role: "user", content: "hi" },
+              ])
+              assertEqual(mock.hits.messages, 1)
+              assertEqual(mock.hits.generate, 0)
+            } finally {
+              await mock.close()
+            }
+          }
+        },
+      )
     },
   ],
   [
@@ -795,6 +823,294 @@ run([
           "saw messages endpoint",
         )
       })
+    },
+  ],
+  [
+    "transport: whoami goat selects Provider API via cached GET /alpha/whoami (issue #54)",
+    async () => {
+      let whoamiHeaders: Record<string, string> | undefined
+      const mock = await startMockCc({
+        whoami: { planId: "goat" },
+        chatCompletionsStream: [openAIChunk("hi"), openAIFinishChunk()],
+        onWhoami: (headers) => {
+          whoamiHeaders = headers
+        },
+      })
+      try {
+        await withEnvVars(
+          {
+            COMMANDCODE_PLAN: undefined,
+            COMMANDCODE_API_KEY: "test_key",
+            COMMANDCODE_API_BASE: mock.url,
+          },
+          async () => {
+            const provider = createCommandCode({ apiKey: "test_key", baseURL: mock.url })
+            await collect(provider.languageModel("gpt-5.6-terra"), [
+              { role: "user", content: "hi" },
+            ])
+            assertEqual(mock.hits.whoami, 1)
+            assertEqual(mock.hits.chatCompletions, 1)
+            assertEqual(mock.hits.generate, 0)
+            assertEqual(mock.hits.messages, 0)
+            assert(whoamiHeaders, "whoami headers captured")
+            assertEqual(whoamiHeaders!["authorization"], "Bearer test_key")
+          },
+        )
+      } finally {
+        await mock.close()
+      }
+    },
+  ],
+  [
+    "transport: whoami says go selects legacy /alpha/generate",
+    async () => {
+      const mock = await startMockCc({
+        whoami: { planId: "go" },
+        stream: [textDelta("hi"), finishEvent()],
+      })
+      try {
+        await withEnvVars(
+          { COMMANDCODE_PLAN: undefined, COMMANDCODE_API_KEY: "k", COMMANDCODE_API_BASE: mock.url },
+          async () => {
+            const provider = createCommandCode({ apiKey: "k", baseURL: mock.url })
+            const parts = await collect(provider.languageModel("claude-sonnet-5"), [
+              { role: "user", content: "hi" },
+            ])
+            assertEqual(mock.hits.whoami, 1)
+            assertEqual(mock.hits.generate, 1)
+            assertEqual(mock.hits.chatCompletions, 0)
+            assertEqual(mock.hits.messages, 0)
+            assert(
+              parts.some((p) => p.type === "text-delta"),
+              "legacy delta emitted",
+            )
+          },
+        )
+      } finally {
+        await mock.close()
+      }
+    },
+  ],
+  [
+    "transport: non-go whoami plans (pro/max/max20/teampro/provider) all select Provider API",
+    async () => {
+      for (const planId of ["pro", "max", "max20", "teampro", "provider"]) {
+        const mock = await startMockCc({
+          whoami: { planId },
+          chatCompletionsStream: [openAIChunk("hi"), openAIFinishChunk()],
+        })
+        try {
+          await withEnvVars(
+            {
+              COMMANDCODE_PLAN: undefined,
+              COMMANDCODE_API_KEY: "k",
+              COMMANDCODE_API_BASE: mock.url,
+            },
+            async () => {
+              const provider = createCommandCode({ apiKey: "k", baseURL: mock.url })
+              await collect(provider.languageModel("gpt-5.6-terra"), [
+                { role: "user", content: "hi" },
+              ])
+              assertEqual(mock.hits.chatCompletions, 1, `whoami ${planId} → chat/completions`)
+              assertEqual(mock.hits.generate, 0, `whoami ${planId} no /alpha/generate`)
+            },
+          )
+        } finally {
+          await mock.close()
+        }
+      }
+    },
+  ],
+  [
+    "transport: whoami fetched at most once per model instance (two turns → one fetch)",
+    async () => {
+      const mock = await startMockCc({
+        whoami: { planId: "goat" },
+        chatCompletionsStream: [openAIChunk("hi"), openAIFinishChunk()],
+      })
+      try {
+        await withEnvVars(
+          { COMMANDCODE_PLAN: undefined, COMMANDCODE_API_KEY: "k", COMMANDCODE_API_BASE: mock.url },
+          async () => {
+            const provider = createCommandCode({ apiKey: "k", baseURL: mock.url })
+            const model = provider.languageModel("gpt-5.6-terra")
+            await collect(model, [{ role: "user", content: "hi" }])
+            await collect(model, [{ role: "user", content: "hi" }])
+            assertEqual(mock.hits.whoami, 1)
+            assertEqual(mock.hits.chatCompletions, 2)
+            assertEqual(mock.hits.generate, 0)
+          },
+        )
+      } finally {
+        await mock.close()
+      }
+    },
+  ],
+  [
+    "transport: non-OK whoami (500) falls through to Provider API — not go",
+    async () => {
+      const mock = await startMockCc({
+        whoamiStatus: 500,
+        chatCompletionsStream: [openAIChunk("hi"), openAIFinishChunk()],
+      })
+      try {
+        await withEnvVars(
+          { COMMANDCODE_PLAN: undefined, COMMANDCODE_API_KEY: "k", COMMANDCODE_API_BASE: mock.url },
+          async () => {
+            const provider = createCommandCode({ apiKey: "k", baseURL: mock.url })
+            await collect(provider.languageModel("gpt-5.6-terra"), [
+              { role: "user", content: "hi" },
+            ])
+            assertEqual(mock.hits.whoami, 1)
+            assertEqual(mock.hits.chatCompletions, 1)
+            assertEqual(mock.hits.generate, 0)
+          },
+        )
+      } finally {
+        await mock.close()
+      }
+    },
+  ],
+  [
+    "transport: whoami non-OK via model base falls through to Provider — not go (doStream + doGenerate)",
+    async () => {
+      const mock = await startMockCc({
+        chatCompletionsStream: [openAIChunk("hi"), openAIFinishChunk()],
+      })
+      try {
+        await withEnvVars(
+          {
+            COMMANDCODE_PLAN: undefined,
+            COMMANDCODE_API_KEY: "k",
+            // env base is unreachable, but the model's baseURL option wins for
+            // whoami too, so the fetch reaches the mock (which serves 404)
+            COMMANDCODE_API_BASE: "http://127.0.0.1:1",
+          },
+          async () => {
+            const provider = createCommandCode({ apiKey: "k", baseURL: mock.url })
+            await collect(provider.languageModel("gpt-5.6-terra"), [
+              { role: "user", content: "hi" },
+            ])
+            const gen = await provider.languageModel("gpt-5.6-terra").doGenerate({
+              prompt: [{ role: "user", content: "hi" }],
+              mode: { type: "regular" },
+            } as never)
+            // two model instances (doStream + doGenerate) → two whoami attempts,
+            // both 404 → Provider transport
+            assertEqual(mock.hits.whoami, 2)
+            assertEqual(mock.hits.chatCompletions, 2)
+            assertEqual(mock.hits.generate, 0)
+            assert(gen.content.length >= 1, "doGenerate produced content")
+          },
+        )
+      } finally {
+        await mock.close()
+      }
+    },
+  ],
+  [
+    "transport: COMMANDCODE_PLAN=go env beats whoami — no whoami fetch, legacy transport",
+    async () => {
+      const mock = await startMockCc({
+        whoami: { planId: "goat" },
+        stream: [textDelta("hi"), finishEvent()],
+      })
+      try {
+        await withEnvVars(
+          { COMMANDCODE_PLAN: "go", COMMANDCODE_API_KEY: "k", COMMANDCODE_API_BASE: mock.url },
+          async () => {
+            const provider = createCommandCode({ apiKey: "k", baseURL: mock.url })
+            await collect(provider.languageModel("claude-sonnet-5"), [
+              { role: "user", content: "hi" },
+            ])
+            assertEqual(mock.hits.whoami, 0)
+            assertEqual(mock.hits.generate, 1)
+            assertEqual(mock.hits.chatCompletions, 0)
+          },
+        )
+      } finally {
+        await mock.close()
+      }
+    },
+  ],
+  [
+    "transport: planArg beats env — providerOptions plan go wins over COMMANDCODE_PLAN=goat",
+    async () => {
+      const mock = await startMockCc({
+        stream: [textDelta("hi"), finishEvent()],
+      })
+      try {
+        await withEnvVars(
+          {
+            COMMANDCODE_PLAN: "goat",
+            COMMANDCODE_API_KEY: undefined,
+            COMMANDCODE_API_BASE: undefined,
+          },
+          async () => {
+            const provider = createCommandCode({ apiKey: "k", baseURL: mock.url })
+            await collect(
+              provider.languageModel("gpt-5.6-terra"),
+              [{ role: "user", content: "hi" }],
+              { commandcode: { plan: "go" } },
+            )
+            assertEqual(mock.hits.generate, 1)
+            assertEqual(mock.hits.chatCompletions, 0)
+            assertEqual(mock.hits.whoami, 0)
+          },
+        )
+      } finally {
+        await mock.close()
+      }
+    },
+  ],
+  [
+    "transport: fetch spy observes whoami and transport choice (issue #54)",
+    async () => {
+      await withEnvVars(
+        {
+          COMMANDCODE_PLAN: undefined,
+          COMMANDCODE_API_KEY: "spy_key",
+          // no baseURL option on the model: whoami URL comes from getApiBase(env)
+          COMMANDCODE_API_BASE: "https://api.commandcode.ai",
+        },
+        async () => {
+          const seen: Array<{ url: string; headers: Record<string, string> }> = []
+          const fakeFetch: typeof fetch = async (input, init) => {
+            const url = typeof input === "string" ? input : (input as URL).toString()
+            seen.push({ url, headers: (init?.headers ?? {}) as Record<string, string> })
+            if (url.includes("/alpha/whoami")) {
+              return new Response(JSON.stringify({ planId: "goat" }), {
+                status: 200,
+                headers: { "content-type": "application/json" },
+              })
+            }
+            const body = new ReadableStream<Uint8Array>({
+              start(c) {
+                const enc = new TextEncoder()
+                c.enqueue(enc.encode(`data: ${JSON.stringify(openAIChunk("hi"))}\n\n`))
+                c.enqueue(enc.encode(`data: ${JSON.stringify(openAIFinishChunk())}\n\n`))
+                c.enqueue(enc.encode(`data: [DONE]\n\n`))
+                c.close()
+              },
+            })
+            return new Response(body, {
+              status: 200,
+              headers: { "content-type": "text/event-stream" },
+            })
+          }
+          const provider = createCommandCode({ apiKey: "spy_key", fetch: fakeFetch })
+          const model = provider.languageModel("gpt-5.6-terra")
+          await collect(model, [{ role: "user", content: "hi" }])
+          await collect(model, [{ role: "user", content: "hi" }])
+          const whoamiCalls = seen.filter((s) => s.url.includes("/alpha/whoami"))
+          assertEqual(whoamiCalls.length, 1, "whoami observed exactly once across two turns")
+          assertEqual(whoamiCalls[0].url, "https://api.commandcode.ai/alpha/whoami")
+          assertEqual(whoamiCalls[0].headers["authorization"], "Bearer spy_key")
+          const inference = seen.filter((s) => s.url.includes("/provider/v1/chat/completions"))
+          assertEqual(inference.length, 2, "provider transport chosen via spy")
+          assert(!seen.some((s) => s.url.includes("/alpha/generate")), "no legacy traffic")
+        },
+      )
     },
   ],
 ])
