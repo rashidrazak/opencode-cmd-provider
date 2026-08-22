@@ -25,7 +25,7 @@ Updating the snapshot to match the live model catalog; happens on plugin release
 _Avoid_: model sync, catalog update, live refresh
 
 **Core**:
-`provider.commandcode` auto-registration (snapshot → `provider.commandcode.models`), `[CMD]` display names, `COMMANDCODE_API_KEY` auth, and `provider/*` streaming. Deals intelligence is not part of core.
+`provider.commandcode` auto-registration (snapshot → `provider.commandcode.models`), configurable display-name prefix (default `[CMD]`), `COMMANDCODE_API_KEY` auth, and `provider/*` streaming. Deals intelligence is not part of core.
 _Avoid_: base provider, essential plugin
 
 **Deals catalog**:
@@ -48,5 +48,5 @@ A versioned publication of the package: a git tag `vX.Y.Z` matching the `package
 _Avoid_: publish, deploy, ship (when meaning the whole publication)
 
 **Display name**:
-The name shown for a model in OpenCode's picker: the raw catalog name with the `[CMD]` prefix (`[CMD] Claude Sonnet 5`).
+The name shown for a model in OpenCode's picker: the raw catalog name with the configurable display prefix (default `[CMD]`, e.g. `[CMD] Claude Sonnet 5`; `provider.commandcode.options.display_prefix` overrides it, empty string disables).
 _Avoid_: label, model name, pretty name

@@ -6,9 +6,21 @@ import { reasoningVariantsForModel, isReasoningModel } from "../provider/reasoni
 import { inputModalitiesForModel } from "../provider/modalities.js"
 
 const DEFAULT_MAX_OUTPUT_TOKENS = 65_536
+export const DEFAULT_DISPLAY_PREFIX = "[CMD] "
 
 type ConfigModel = NonNullable<NonNullable<ProviderConfig["models"]>[string]>
 type ConfigVariants = NonNullable<ConfigModel["variants"]>
+
+/**
+ * Resolves the auto-registration display-name prefix from the user-declared
+ * `provider.commandcode.options.display_prefix` key. A string value is used
+ * verbatim (empty string disables the prefix); anything else falls back to
+ * `[CMD] `. Read-only: never persisted into the user's config.
+ */
+export function resolveDisplayPrefix(entry: ProviderConfig | undefined): string {
+  const value = entry?.options?.display_prefix
+  return typeof value === "string" ? value : DEFAULT_DISPLAY_PREFIX
+}
 
 export interface AutoRegisterOptions {
   npm: string
@@ -35,6 +47,9 @@ export interface AutoRegisterOptions {
  *   config key or by the entry's `id`);
  * - declared models are never modified, and declared models that left the
  *   catalog stay usable.
+ * - `options.display_prefix` (string) overrides the default `[CMD] `
+ *   display-name prefix for auto-registered models; an empty string disables
+ *   the prefix.
  */
 export function autoRegister(
   config: Config,
@@ -52,6 +67,7 @@ export function autoRegister(
   entry.options.baseURL ??= options.baseURL
   entry.models ??= {}
 
+  const prefix = resolveDisplayPrefix(entry)
   const declaredById = new Set(
     Object.values(entry.models)
       .map((model) => model?.id)
@@ -60,7 +76,7 @@ export function autoRegister(
 
   for (const model of snapshot) {
     if (entry.models[model.id] !== undefined || declaredById.has(model.id)) continue
-    entry.models[model.id] = configModelFor(model)
+    entry.models[model.id] = configModelFor(model, prefix)
   }
   return config
 }
@@ -92,15 +108,15 @@ export function augmentConfigCommandCodeModels(config: Config): void {
 
 /**
  * Config-schema model entry (not the SDK `Model` shape) for a snapshot model:
- * `[CMD]`-prefixed display name, context/output limits with output capped at
+ * prefixed display name, context/output limits with output capped at
  * 65_536, and metadata enriched from the reasoning, modality, and pricing
  * tables.
  */
-function configModelFor(model: CatalogModel): ConfigModel {
+function configModelFor(model: CatalogModel, prefix = DEFAULT_DISPLAY_PREFIX): ConfigModel {
   const variants = reasoningVariantsForModel(model.id)
   const costs: CommandCodeModelCost = MODEL_COSTS[model.id] ?? ZERO_MODEL_COST
   return {
-    name: `[CMD] ${model.name}`,
+    name: `${prefix}${model.name}`,
     limit: {
       context: model.contextLength,
       output: Math.min(model.contextLength, DEFAULT_MAX_OUTPUT_TOKENS),
