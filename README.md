@@ -49,6 +49,8 @@ Select **Command Code**, complete the browser flow, and pick a model with `/mode
 
 Run `/connect` in OpenCode and select **Command Code**. The browser flow stores the returned credential in OpenCode's auth store.
 
+The credential is also mirrored under `command-code` in OpenCode's auth store and to `~/.commandcode/auth.json` (official CLI layout, only written when that file does not already hold a different credential). Ecosystem consumers such as OpenChamber's Usage page read those locations. Mirroring is best-effort; if it fails, `/connect` still succeeds.
+
 If automatic transfer from the browser fails, copy the API key shown by Command Code and export it as `COMMANDCODE_API_KEY` (see below).
 
 ### Environment variable
