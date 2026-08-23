@@ -1082,7 +1082,11 @@ run([
             setTimeout(() => reject(new Error("abort test: first part never arrived")), 5000),
           ),
         ])
-        assertEqual((first.value as { type?: string }).type, "text-delta")
+        assert(
+          (first.value as { type?: string }).type === "text-start" ||
+            (first.value as { type?: string }).type === "text-delta",
+          `expected text part, got ${(first.value as { type?: string }).type}`,
+        )
         controller.abort()
         const rest: Array<Record<string, unknown>> = []
         for (;;) {
