@@ -30,7 +30,7 @@ during the `config` hook, which OpenCode runs before it parses `config.provider`
 - Auto-registration merges with user declarations: user entries and provider-level keys
   win, snapshot fills only what's missing; `whitelist`/`blacklist` still filter snapshot
   models.
-- Model display names use the `[CMD]` prefix (`[CMD] Claude Sonnet 5`).
+- Model display names use a configurable prefix (default `[CMD]`; `options.display_prefix` on the declared entry overrides it, empty string disables).
 - The registered entry declares `env: ["COMMANDCODE_API_KEY"]`, so setting the env var
   marks the provider connected in `/models`.
 - With no opt-out, users control picker clutter via `whitelist`/`blacklist` on a declared

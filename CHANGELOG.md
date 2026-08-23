@@ -77,6 +77,16 @@ Feature: dual-transport Provider API — non-Go plans now use the documented
 - New test suites: provider transport, parity, upgrade-fallback, ZDR, and
   deals coverage — all wired into `test:unit`.
 
+## Unreleased
+
+Feature: configurable display-name prefix for auto-registered models
+([#60](https://github.com/rashidrazak/opencode-cmd-provider/issues/60)).
+
+- Set `provider.commandcode.options.display_prefix` to a string to replace the
+  default `[CMD] ` prefix; an empty string disables the prefix entirely.
+- Declared model entries are unaffected; the prefix only applies to models
+  auto-registered from the bundled snapshot.
+
 ## 1.2.2 - 2026-08-22
 
 Chore: catalog refresh to `command-code@1.32.1`.

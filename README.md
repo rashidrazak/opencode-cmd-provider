@@ -133,6 +133,24 @@ can still declare your own `provider.commandcode` entry; your declarations
 always win and the snapshot fills in only what's missing (`whitelist`/
 `blacklist` on a declared entry filter the auto-registered models too).
 
+The `[CMD] ` display-name prefix is configurable through the declared
+provider entry's options:
+
+```jsonc
+{
+  "provider": {
+    "commandcode": {
+      "options": {
+        "display_prefix": "", // default "[CMD] "; empty string disables
+      },
+    },
+  },
+}
+```
+
+Declared model entries are never renamed; the prefix applies to
+auto-registered models only.
+
 - Snapshot — `src/catalog/snapshot.ts` (model ids, names, context lengths) plus
   `src/catalog/facts.ts` (reasoning efforts, per-1M-token rates, input
   modalities). Regenerated from the live catalog via `npm run refresh:snapshot`.

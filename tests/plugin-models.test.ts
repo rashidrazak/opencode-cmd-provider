@@ -1,6 +1,11 @@
 // tests/plugin-models.test.ts — snapshot auto-registration + config augmentation
 // (issue #16)
-import { autoRegister, augmentConfigCommandCodeModels } from "../src/plugin/models.js"
+import {
+  autoRegister,
+  augmentConfigCommandCodeModels,
+  DEFAULT_DISPLAY_PREFIX,
+  resolveDisplayPrefix,
+} from "../src/plugin/models.js"
 import type { CatalogModel } from "../src/catalog/snapshot.js"
 import { assert, assertEqual, run } from "./harness.js"
 
@@ -161,6 +166,81 @@ run([
       assertEqual(entry.npm, "opencode-cmd-provider")
       assertEqual(entry.env, ["COMMANDCODE_API_KEY"])
       assertEqual(entry.options, { baseURL: "https://api.commandcode.ai" })
+    },
+  ],
+
+  [
+    "resolveDisplayPrefix falls back to the [CMD] default",
+    () => {
+      assertEqual(DEFAULT_DISPLAY_PREFIX, "[CMD] ")
+      assertEqual(resolveDisplayPrefix(undefined), "[CMD] ")
+      assertEqual(resolveDisplayPrefix({}), "[CMD] ")
+      assertEqual(resolveDisplayPrefix({ options: {} }), "[CMD] ")
+      assertEqual(resolveDisplayPrefix({ options: { display_prefix: 42 } }), "[CMD] ")
+    },
+  ],
+
+  [
+    "display_prefix overrides auto-registered model names",
+    () => {
+      const config = {
+        provider: {
+          commandcode: {
+            options: { display_prefix: "CC/" },
+          },
+        },
+      }
+      autoRegister(config, SNAPSHOT, OPTIONS)
+      const entry = config.provider.commandcode
+      assertEqual(entry.models["claude-sonnet-5"].name, "CC/Claude Sonnet 5")
+      assertEqual(entry.models["unknown/foo"].name, "CC/Foo")
+    },
+  ],
+
+  [
+    "an empty display_prefix disables the prefix entirely",
+    () => {
+      const config = {
+        provider: {
+          commandcode: {
+            options: { display_prefix: "" },
+          },
+        },
+      }
+      autoRegister(config, SNAPSHOT, OPTIONS)
+      const entry = config.provider.commandcode
+      assertEqual(entry.models["claude-sonnet-5"].name, "Claude Sonnet 5")
+      assertEqual(entry.models["deepseek/deepseek-v4-flash"].name, "DeepSeek V4 Flash (latest)")
+      // Non-name metadata must be unaffected.
+      assertEqual(entry.models["claude-sonnet-5"].limit, { context: 200000, output: 65536 })
+      assertEqual(entry.models["claude-sonnet-5"].reasoning, true)
+    },
+  ],
+
+  [
+    "declared models keep their names; empty prefix also applies to auto-registered ones",
+    () => {
+      const declared = {
+        "my-sonnet": {
+          id: "claude-sonnet-5",
+          name: "My Sonnet",
+          limit: { context: 999, output: 999 },
+        },
+      }
+      const config = {
+        provider: {
+          commandcode: {
+            options: { display_prefix: "" },
+            models: declared,
+          },
+        },
+      }
+      autoRegister(config, SNAPSHOT, OPTIONS)
+      const entry = config.provider.commandcode
+      // Declared entries are preserved verbatim.
+      assertEqual(entry.models["my-sonnet"], declared["my-sonnet"])
+      // The empty prefix applies to auto-registered models.
+      assertEqual(entry.models["unknown/foo"].name, "Foo")
     },
   ],
 
