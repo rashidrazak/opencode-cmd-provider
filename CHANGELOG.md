@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.5.0 - 2026-08-23
+
+Feature: the `[CMD] ` display-name prefix for auto-registered models is now
+configurable via `provider.commandcode.options.display_prefix`.
+
+### Features
+
+- **Configurable display-name prefix** (issue #60): a string value replaces the
+  default `[CMD] ` prefix, and an empty string disables it entirely. The option
+  is read-only at resolution time — nothing is persisted into the user's config
+  (unlike `npm`/`name`/`env`/`options.baseURL`, which are filled when unset).
+- Non-string values fall back to the default `[CMD] ` prefix.
+- Declared model entries are never renamed — the prefix applies only to models
+  auto-registered from the bundled snapshot.
+
+### Chores
+
+- New `tests/plugin-models.test.ts` cases: `resolveDisplayPrefix` fallback,
+  prefix override (`"CC/"`), empty string disabling the prefix (with non-name
+  metadata unaffected), and declared models keeping their names regardless of
+  the setting.
+
 ## 1.4.0 - 2026-08-23
 
 Feature: after a successful `/connect`, the credential is mirrored under
@@ -76,16 +98,6 @@ Feature: dual-transport Provider API — non-Go plans now use the documented
   (`npm run refresh` from `tests/fixtures/*.html`).
 - New test suites: provider transport, parity, upgrade-fallback, ZDR, and
   deals coverage — all wired into `test:unit`.
-
-## Unreleased
-
-Feature: configurable display-name prefix for auto-registered models
-([#60](https://github.com/rashidrazak/opencode-cmd-provider/issues/60)).
-
-- Set `provider.commandcode.options.display_prefix` to a string to replace the
-  default `[CMD] ` prefix; an empty string disables the prefix entirely.
-- Declared model entries are unaffected; the prefix only applies to models
-  auto-registered from the bundled snapshot.
 
 ## 1.2.2 - 2026-08-22
 
