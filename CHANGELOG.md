@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.5.1 - 2026-08-24
+
+Fix: provider parsers now synthesize the full reasoning and text lifecycle —
+`reasoning-start`/`reasoning-end` and `text-start`/`text-end` — for both
+OpenAI-style and Anthropic-style streams, so AI SDK consumers see balanced
+section boundaries instead of missing or duplicated end events.
+
+### Fixes
+
+- **OpenAI-style streams** now emit `reasoning-start` before the first
+  reasoning delta and `reasoning-end` before text, tool calls, or finish; the
+  same for `text-start`/`text-end`. Reasoning and text sections use stable ids
+  from the first chunk (instead of per-chunk ids), and unfinished sections are
+  closed when the stream finishes.
+- **Anthropic-style streams** now recognize `thinking` blocks and emit
+  `reasoning-start`/`reasoning-delta`/`reasoning-end` for them. `content_block_stop`
+  closes each block with the correct end event per its type (`text-end`,
+  `reasoning-end`, or `tool-input-end` + a single `tool-call`), replacing the
+  previous "emit both text-end and tool-input-end" pair that left consumers to
+  ignore the spurious one.
+- New `tests/stream.test.ts` cases cover the OpenAI reasoning→text ordering,
+  reasoning-only finishes, and the Anthropic thinking-block lifecycle;
+  `tests/provider-parity.test.ts` accepts `text-start` as the first text part.
+
 ## 1.5.0 - 2026-08-23
 
 Feature: the `[CMD] ` display-name prefix for auto-registered models is now

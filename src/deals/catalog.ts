@@ -113,5 +113,5 @@ export const PLAN_CATALOG: Readonly<Record<PlanId, PlanInfo>> = {
 }
 
 export const DEAL_SOURCE_URL = "https://commandcode.ai/docs/resources/pricing-limits"
-export const DEAL_LAST_REFRESHED = "2026-08-23"
+export const DEAL_LAST_REFRESHED = "2026-08-24"
 export const DEAL_PACKAGE_VERSION = "docs"
