@@ -396,6 +396,10 @@ export function anthropicEventToStreamPart(event: unknown): LanguageModelV3Strea
       const id = `text-${index}`
       return [{ type: "text-start", id }]
     }
+    if (blockType === "thinking") {
+      const id = stringValue(block?.id) ?? `thinking-${index}`
+      return [{ type: "reasoning-start", id }]
+    }
     if (blockType === "tool_use") {
       const id = stringValue(block?.id) ?? `tool-${index}`
       const name = stringValue(block?.name) ?? ""
@@ -404,16 +408,33 @@ export function anthropicEventToStreamPart(event: unknown): LanguageModelV3Strea
     return []
   }
 
+  if (type === "content_block_delta") {
+    const delta = asRecord(event.delta)
+    const index = numberValue(event.index) ?? 0
+    const text = stringValue(delta?.text)
+    if (typeof text === "string" && text.length > 0) {
+      const id = `text-${index}`
+      return [{ type: "text-delta", id, delta: text }]
+    }
+    const thinking = stringValue(delta?.thinking)
+    if (typeof thinking === "string" && thinking.length > 0) {
+      const id = `thinking-${index}`
+      return [{ type: "reasoning-delta", id, delta: thinking }]
+    }
+    // Tool input delta: { type: "input_json_delta", partial_json: "..." }
+    const partial = stringValue(delta?.partial_json)
+    if (typeof partial === "string" && partial.length > 0) {
+      const id = `tool-${index}`
+      // Emit as tool-input-delta; caller may have started tool
+      return [{ type: "tool-input-delta", id, delta: partial }]
+    }
+    return []
+  }
+
   if (type === "content_block_stop") {
     // Stateless codec: the STOP event carries only `index`, not the block type.
-    // Anthropic streams either `text` or `tool_use` blocks; the AI SDK expects
-    // `text-end` for the former and `tool-input-end` for the latter. Emitting
-    // both is noisy (previous emitted two parts) but guarantees the right end
-    // is seen regardless of block type, and the consumer ignores the spurious
-    // one per AI SDK spec. Emit a single text-end here would break tool_use
-    // streams that rely on tool-input-end, so we keep the conservative pair
-    // with an explicit note referencing provider doc streaming (message_delta
-    // carries the final usage/finish; per-block ends are AI SDK concerns).
+    // Anthropic streams either `text`, `thinking` or `tool_use` blocks; the AI SDK expects
+    // `text-end` for text, `reasoning-end` for thinking, and `tool-input-end` for tool_use.
     const index = numberValue(event.index) ?? 0
     const idText = `text-${index}`
     const idTool = `tool-${index}`
@@ -485,6 +506,29 @@ export function createOpenAIStreamParser(): (event: unknown) => LanguageModelV3S
   // finish_reason here so the usage-only chunk's finish keeps the real reason
   // (e.g. "length") instead of defaulting to "stop".
   let lastFinishReason: LanguageModelV3FinishReason | undefined
+  let reasoningStarted = false
+  let reasoningEnded = false
+  let reasoningId: string | undefined
+  let textStarted = false
+  let textEnded = false
+  let textId: string | undefined
+
+  function closeReasoning(): LanguageModelV3StreamPart[] {
+    if (reasoningStarted && !reasoningEnded && reasoningId) {
+      reasoningEnded = true
+      return [{ type: "reasoning-end", id: reasoningId }]
+    }
+    return []
+  }
+
+  function closeText(): LanguageModelV3StreamPart[] {
+    if (textStarted && !textEnded && textId) {
+      textEnded = true
+      return [{ type: "text-end", id: textId }]
+    }
+    return []
+  }
+
   return (event) => {
     if (!isRecord(event)) return []
     // Error events flow through the stateless mapper (redacted throw).
@@ -494,17 +538,45 @@ export function createOpenAIStreamParser(): (event: unknown) => LanguageModelV3S
     const parts: LanguageModelV3StreamPart[] = []
     const choice = firstChoice(event)
     const delta = choice ? deltaFromChoice(choice) : undefined
+    const eventId = stringValue((event as Record<string, unknown>).id)
+
     if (delta) {
-      const content = stringValue(delta.content)
-      if (typeof content === "string" && content.length > 0) {
-        parts.push(textDeltaPart((event as Record<string, unknown>).id, content))
-      }
       const reasoning = stringValue(delta.reasoning) ?? stringValue(delta.reasoning_content)
       if (typeof reasoning === "string" && reasoning.length > 0) {
-        parts.push(reasoningDeltaPart((event as Record<string, unknown>).id, reasoning))
+        if (!reasoningStarted || reasoningEnded) {
+          if (textStarted && !textEnded) {
+            parts.push(...closeText())
+          }
+          reasoningStarted = true
+          reasoningEnded = false
+          reasoningId = eventId || "reasoning-0"
+          parts.push({ type: "reasoning-start", id: reasoningId })
+        }
+        parts.push(reasoningDeltaPart(reasoningId ?? eventId, reasoning))
       }
+
+      const content = stringValue(delta.content)
+      if (typeof content === "string" && content.length > 0) {
+        if (reasoningStarted && !reasoningEnded) {
+          parts.push(...closeReasoning())
+        }
+        if (!textStarted || textEnded) {
+          textStarted = true
+          textEnded = false
+          textId = eventId || "text-0"
+          parts.push({ type: "text-start", id: textId })
+        }
+        parts.push(textDeltaPart(textId ?? eventId, content))
+      }
+
       const toolCalls = delta.tool_calls ?? delta.toolCalls
       if (Array.isArray(toolCalls)) {
+        if (reasoningStarted && !reasoningEnded) {
+          parts.push(...closeReasoning())
+        }
+        if (textStarted && !textEnded) {
+          parts.push(...closeText())
+        }
         for (const tc of toolCalls) {
           if (!isRecord(tc)) continue
           const fn = isRecord(tc.function) ? tc.function : {}
@@ -560,6 +632,12 @@ export function createOpenAIStreamParser(): (event: unknown) => LanguageModelV3S
     const finishReason = finishReasonRaw ? mapFinishReason(finishReasonRaw) : undefined
     if (finishReason) lastFinishReason = finishReason
     if (lastFinishReason || hasUsage) {
+      if (reasoningStarted && !reasoningEnded) {
+        parts.push(...closeReasoning())
+      }
+      if (textStarted && !textEnded) {
+        parts.push(...closeText())
+      }
       // Flush any tool call whose terminal args chunk never arrived.
       for (const [index, buffer] of toolBuffers) {
         if (buffer.started && !buffer.emitted) {
@@ -584,6 +662,7 @@ export function createOpenAIStreamParser(): (event: unknown) => LanguageModelV3S
 
 export function createAnthropicStreamParser(): (event: unknown) => LanguageModelV3StreamPart[] {
   const toolBlocks = new Map<number, ToolCallBuffer>()
+  const blockTypes = new Map<number, "text" | "tool_use" | "thinking">()
   return (event) => {
     if (!isRecord(event)) return []
     const type = stringValue(event.type)
@@ -592,12 +671,21 @@ export function createAnthropicStreamParser(): (event: unknown) => LanguageModel
       const index = numberValue(event.index) ?? 0
       const blockType = stringValue(block?.type)
       if (blockType === "tool_use") {
+        blockTypes.set(index, "tool_use")
         const id = stringValue(block?.id) ?? `tool-${index}`
         const name = stringValue(block?.name) ?? ""
         toolBlocks.set(index, { id, name, input: "", started: true, emitted: false })
         return [{ type: "tool-input-start", id, toolName: name }]
       }
-      if (blockType === "text") return [{ type: "text-start", id: `text-${index}` }]
+      if (blockType === "thinking") {
+        blockTypes.set(index, "thinking")
+        const id = stringValue(block?.id) ?? `thinking-${index}`
+        return [{ type: "reasoning-start", id }]
+      }
+      if (blockType === "text") {
+        blockTypes.set(index, "text")
+        return [{ type: "text-start", id: `text-${index}` }]
+      }
       return []
     }
     if (type === "content_block_delta") {
@@ -606,6 +694,10 @@ export function createAnthropicStreamParser(): (event: unknown) => LanguageModel
       const text = stringValue(delta?.text)
       if (typeof text === "string" && text.length > 0) {
         return [{ type: "text-delta", id: `text-${index}`, delta: text }]
+      }
+      const thinking = stringValue(delta?.thinking)
+      if (typeof thinking === "string" && thinking.length > 0) {
+        return [{ type: "reasoning-delta", id: `thinking-${index}`, delta: thinking }]
       }
       const partial = stringValue(delta?.partial_json)
       if (typeof partial === "string" && partial.length > 0) {
@@ -639,6 +731,26 @@ export function createAnthropicStreamParser(): (event: unknown) => LanguageModel
     }
     if (type === "content_block_stop") {
       const index = numberValue(event.index) ?? 0
+      const bType = blockTypes.get(index)
+      blockTypes.delete(index)
+      if (bType === "tool_use") {
+        const block = toolBlocks.get(index)
+        if (block) {
+          toolBlocks.delete(index)
+          if (block.emitted) return []
+          return [
+            { type: "tool-input-end", id: block.id },
+            {
+              type: "tool-call",
+              toolCallId: block.id,
+              toolName: block.name,
+              input: block.input,
+            },
+          ]
+        }
+      } else if (bType === "thinking") {
+        return [{ type: "reasoning-end", id: `thinking-${index}` }]
+      }
       const block = toolBlocks.get(index)
       if (block) {
         toolBlocks.delete(index)

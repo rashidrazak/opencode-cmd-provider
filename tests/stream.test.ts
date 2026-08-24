@@ -10,6 +10,8 @@ import {
   mapFinishReason,
   ccEventToStreamPart,
   ccUsageToAiSdkUsage,
+  createOpenAIStreamParser,
+  createAnthropicStreamParser,
 } from "../src/provider/stream.js"
 import { assert, assertEqual, rejects, run } from "./harness.js"
 
@@ -292,6 +294,121 @@ run([
     "unknown events are ignored",
     () => {
       assertEqual(ccEventToStreamPart({ type: "heartbeat" }), [])
+    },
+  ],
+
+  [
+    "createOpenAIStreamParser emits reasoning-start before reasoning-delta and reasoning-end before text or finish",
+    () => {
+      const parser = createOpenAIStreamParser()
+      const chunkId = "gen_01M0Q3F1FQQ0EV6CQZCZ9QFPB8"
+      const chunks = [
+        { id: chunkId, choices: [{ delta: { reasoning_content: "Thinking step 1" } }] },
+        { id: chunkId, choices: [{ delta: { reasoning_content: " and step 2" } }] },
+        { id: chunkId, choices: [{ delta: { content: "Final answer" } }] },
+        {
+          id: chunkId,
+          choices: [{ delta: {}, finish_reason: "stop" }],
+          usage: { prompt_tokens: 20, completion_tokens: 15, total_tokens: 35 },
+        },
+      ]
+      const parts = chunks.flatMap((c) => parser(c))
+      const types = parts.map((p) => (p as { type: string }).type)
+      assertEqual(types, [
+        "reasoning-start",
+        "reasoning-delta",
+        "reasoning-delta",
+        "reasoning-end",
+        "text-start",
+        "text-delta",
+        "text-end",
+        "finish",
+      ])
+
+      const rStart = parts[0] as { type: string; id?: string }
+      assertEqual(rStart.id, chunkId)
+      const rDelta1 = parts[1] as { type: string; id?: string; delta?: string }
+      assertEqual(rDelta1.id, chunkId)
+      assertEqual(rDelta1.delta, "Thinking step 1")
+      const rDelta2 = parts[2] as { type: string; id?: string; delta?: string }
+      assertEqual(rDelta2.id, chunkId)
+      assertEqual(rDelta2.delta, " and step 2")
+      const rEnd = parts[3] as { type: string; id?: string }
+      assertEqual(rEnd.id, chunkId)
+
+      const tStart = parts[4] as { type: string; id?: string }
+      assertEqual(tStart.id, chunkId)
+      const tDelta = parts[5] as { type: string; id?: string; delta?: string }
+      assertEqual(tDelta.id, chunkId)
+      assertEqual(tDelta.delta, "Final answer")
+      const tEnd = parts[6] as { type: string; id?: string }
+      assertEqual(tEnd.id, chunkId)
+    },
+  ],
+
+  [
+    "createOpenAIStreamParser closes reasoning-end on finish when no text is emitted",
+    () => {
+      const parser = createOpenAIStreamParser()
+      const chunkId = "gen_reasoning_only"
+      const chunks = [
+        { id: chunkId, choices: [{ delta: { reasoning: "Thinking only" } }] },
+        {
+          id: chunkId,
+          choices: [{ delta: {}, finish_reason: "stop" }],
+          usage: { prompt_tokens: 10, completion_tokens: 5 },
+        },
+      ]
+      const parts = chunks.flatMap((c) => parser(c))
+      const types = parts.map((p) => (p as { type: string }).type)
+      assertEqual(types, ["reasoning-start", "reasoning-delta", "reasoning-end", "finish"])
+      assertEqual((parts[0] as { id: string }).id, chunkId)
+      assertEqual((parts[2] as { id: string }).id, chunkId)
+    },
+  ],
+
+  [
+    "createAnthropicStreamParser handles thinking block lifecycle",
+    () => {
+      const parser = createAnthropicStreamParser()
+      const events = [
+        {
+          type: "content_block_start",
+          index: 0,
+          content_block: { type: "thinking", thinking: "" },
+        },
+        {
+          type: "content_block_delta",
+          index: 0,
+          delta: { type: "thinking_delta", thinking: "Pondering" },
+        },
+        { type: "content_block_stop", index: 0 },
+        { type: "content_block_start", index: 1, content_block: { type: "text", text: "" } },
+        { type: "content_block_delta", index: 1, delta: { type: "text_delta", text: "Answer" } },
+        { type: "content_block_stop", index: 1 },
+        {
+          type: "message_delta",
+          delta: { stop_reason: "end_turn" },
+          usage: { input_tokens: 10, output_tokens: 5 },
+        },
+      ]
+      const parts = events.flatMap((e) => parser(e))
+      const types = parts.map((p) => (p as { type: string }).type)
+      assertEqual(types, [
+        "reasoning-start",
+        "reasoning-delta",
+        "reasoning-end",
+        "text-start",
+        "text-delta",
+        "text-end",
+        "finish",
+      ])
+      assertEqual((parts[0] as { id: string }).id, "thinking-0")
+      assertEqual((parts[1] as { delta: string }).delta, "Pondering")
+      assertEqual((parts[2] as { id: string }).id, "thinking-0")
+      assertEqual((parts[3] as { id: string }).id, "text-1")
+      assertEqual((parts[4] as { delta: string }).delta, "Answer")
+      assertEqual((parts[5] as { id: string }).id, "text-1")
     },
   ],
 ])
