@@ -38,11 +38,28 @@ function snapshotIdsByName() {
     resolve(import.meta.dirname, "..", "src", "catalog", "snapshot.ts"),
     "utf-8",
   )
+  // When a name matches multiple snapshot entries (e.g. MiniMax M3 has both a
+  // paid `MiniMaxAI/MiniMax-M3` and a free `minimax/minimax-m3-free` variant),
+  // Map.set() overwrites — so we explicitly prefer the first occurrence (the
+  // original/paid entry). Docs allowance tables only list paid models, so the
+  // paid ID gets the allowance; the free variant stays clean.
   const map = new Map()
   for (const m of text.matchAll(/\{ id: "([^"]+)", name: "([^"]+)",/g)) {
-    map.set(m[2], m[1])
+    if (!map.has(m[2])) map.set(m[2], m[1])
   }
   return map
+}
+
+function snapshotIdSet() {
+  const text = readFileSync(
+    resolve(import.meta.dirname, "..", "src", "catalog", "snapshot.ts"),
+    "utf-8",
+  )
+  const set = new Set()
+  for (const m of text.matchAll(/\{ id: "([^"]+)", name: "([^"]+)",/g)) {
+    set.add(m[1])
+  }
+  return set
 }
 
 // Missing snapshot models in the chosen records source. Returns
@@ -54,9 +71,15 @@ function snapshotIdsByName() {
 // Vision (exp) showed no section because the fixtures predated them).
 export function missingDealsModels(records) {
   const nameToSnapshotId = snapshotIdsByName()
+  const ids = new Set([...records.values()].map((record) => record.id))
+  const names = new Set([...records.values()].map((record) => record.name))
   const missing = []
   for (const [name, id] of nameToSnapshotId) {
-    if (![...records.values()].some((record) => record.name === name)) missing.push(id)
+    // Match by id first (handles free variants like `minimax/minimax-m3-free`
+    // whose snapshot name `MiniMax M3 (free)` differs from the docs record's
+    // `MiniMax M3`), then fall back to name for legacy id mismatches
+    // (claude-haiku-4-5 docs → claude-haiku-4-5-20251001 snapshot).
+    if (!ids.has(id) && !names.has(name)) missing.push(id)
   }
   return { missing, covered: nameToSnapshotId.size - missing.length }
 }
@@ -168,9 +191,20 @@ export function emitDealsModule({
   const records = goatRecords.size >= pricingRecords.size ? goatRecords : pricingRecords
   // Map docs name → snapshot id (snapshot is the source of truth for model ids).
   const nameToSnapshotId = snapshotIdsByName()
+  // Some docs ids (e.g. claude-haiku-4-5) diverge from the snapshot id
+  // (claude-haiku-4-5-20251001), so the name-based map catches those. When
+  // multiple snapshot entries share a name (paid + free variants like
+  // MiniMaxAI/MiniMax-M3 + minimax/minimax-m3-free), the docs id resolves
+  // the ambiguity: each fixture record carries its own id, so we prefer it
+  // when it matches a known snapshot id, and fall back to the name map
+  // otherwise.
+  const snapshotIds = snapshotIdSet()
   const bySnapshotId = new Map()
   for (const record of records.values()) {
-    const sid = nameToSnapshotId.get(record.name) ?? record.id
+    const sid =
+      (record.id && snapshotIds.has(record.id) ? record.id : undefined) ??
+      nameToSnapshotId.get(record.name) ??
+      record.id
     bySnapshotId.set(sid, {
       ...record,
       name: nameToSnapshotId.has(record.name) ? record.name : record.name,

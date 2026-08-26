@@ -112,7 +112,7 @@ run([
   [
     "modelDealEntry: MiniMax M3 has discount/was/now but no overContext (identical tier)",
     () => {
-      const rec = [...extractModelRecords(GOAT_HTML).values()].find((r) => r.name === "MiniMax M3")
+      const rec = extractModelRecords(GOAT_HTML).get("MiniMaxAI/MiniMax-M3")
       assert(rec, "MiniMax M3 must exist")
       assertEqual(modelDealEntry(rec), {
         tier: "opensource",
@@ -187,7 +187,7 @@ run([
         ["deepseek/deepseek-v4-flash-vision-exp", "stealth/ox-alpha"],
         "must report the two models the docs source lacks",
       )
-      assertEqual(covered, 56)
+      assertEqual(covered, 58)
     },
   ],
   [

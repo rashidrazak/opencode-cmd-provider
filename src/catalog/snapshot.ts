@@ -40,6 +40,8 @@ export const MODEL_SNAPSHOT: readonly CatalogModel[] = [
   { id: "zai-org/GLM-5", name: "GLM-5", contextLength: 200000 },
   { id: "MiniMaxAI/MiniMax-M3", name: "MiniMax M3", contextLength: 1000000 },
   { id: "MiniMaxAI/MiniMax-M2.7", name: "MiniMax M2.7", contextLength: 200000 },
+  { id: "minimax/minimax-m3-free", name: "MiniMax M3 (free)", contextLength: 1000000 },
+  { id: "minimax/minimax-m2.7-free", name: "MiniMax M2.7 (free)", contextLength: 197000 },
   { id: "MiniMaxAI/MiniMax-M2.5", name: "MiniMax M2.5", contextLength: 200000 },
   { id: "xiaomi/mimo-v2.5-pro", name: "MiMo V2.5 Pro", contextLength: 1000000 },
   { id: "xiaomi/mimo-v2.5", name: "MiMo V2.5", contextLength: 1000000 },

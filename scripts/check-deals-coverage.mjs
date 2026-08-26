@@ -12,7 +12,11 @@ import { extractModelRecords } from "./parse-docs.mjs"
 const root = resolve(import.meta.dirname, "..")
 const snap = readFileSync(resolve(root, "src/catalog/snapshot.ts"), "utf-8")
 const nameToId = new Map()
-for (const m of snap.matchAll(/\{ id: "([^"]+)", name: "([^"]+)",/g)) nameToId.set(m[2], m[1])
+const idSet = new Set()
+for (const m of snap.matchAll(/\{ id: "([^"]+)", name: "([^"]+)",/g)) {
+  if (!nameToId.has(m[2])) nameToId.set(m[2], m[1])
+  idSet.add(m[1])
+}
 
 const missing = []
 for (const [name, id] of nameToId) {
@@ -23,7 +27,11 @@ for (const [name, id] of nameToId) {
     "tests/fixtures/pricing-limits.html",
   ]) {
     const html = readFileSync(resolve(root, f), "utf-8")
-    if ([...extractModelRecords(html).values()].some((r) => r.name === name)) {
+    const records = [...extractModelRecords(html).values()]
+    // Match by id (handles free variants whose snapshot name carries a "(free)"
+    // suffix but whose docs record name matches the paid variant), then fall
+    // back to name for legacy id mismatches.
+    if (records.some((r) => r.id === id) || records.some((r) => r.name === name)) {
       covered = true
       break
     }

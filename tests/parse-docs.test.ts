@@ -19,10 +19,10 @@ const PRICING_HTML = readFileSync(
 
 run([
   [
-    "extractModelRecords parses 58 records from goat fixture",
+    "extractModelRecords parses 60 records from goat fixture",
     () => {
       const recs = extractModelRecords(GOAT_HTML)
-      assertEqual(recs.size, 58)
+      assertEqual(recs.size, 60)
       const m = recs.get("MiniMaxAI/MiniMax-M3")
       assert(m, "MiniMax M3 must exist")
       assertEqual(m.name, "MiniMax M3")

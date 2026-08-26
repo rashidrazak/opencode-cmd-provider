@@ -50,7 +50,7 @@ export const MODEL_DEALS: Readonly<Record<string, ModelDeals>> = {
   "claude-sonnet-4-6": { tier: "premium", benchmark: {"intelligence":48.4}, free: false, allowance: {"pro":20} },
   "claude-sonnet-5": { tier: "premium", benchmark: {"intelligence":55.3,"tokPerSec":81.9}, free: false, allowance: {"pro":20} },
   "deepseek/deepseek-v4-flash": { tier: "opensource", benchmark: {"intelligence":51.8,"tokPerSec":114.6}, peakOffPeak: {"peak":{"input":0.44,"output":1.32,"cacheRead":0.014,"cacheWrite":0},"offPeak":{"input":0.22,"output":0.66,"cacheRead":0.007,"cacheWrite":0},"windows":"01–04 & 06–10 UTC"}, free: false, allowance: {"goat":60,"pro":70} },
-  "deepseek/deepseek-v4-flash-vision-exp": { tier: "opensource", peakOffPeak: {"peak":{"input":0.44,"output":1.32,"cacheRead":0.02,"cacheWrite":0},"offPeak":{"input":0.22,"output":0.66,"cacheRead":0.01,"cacheWrite":0},"windows":"01–04 & 06–10 UTC"}, free: false, allowance: {"goat":20,"pro":30} },
+  "deepseek/deepseek-v4-flash-vision-exp": { tier: "opensource", peakOffPeak: {"peak":{"input":0.44,"output":1.32,"cacheRead":0.014,"cacheWrite":0},"offPeak":{"input":0.22,"output":0.66,"cacheRead":0.007,"cacheWrite":0},"windows":"01–04 & 06–10 UTC"}, free: false, allowance: {"goat":20,"pro":30} },
   "deepseek/deepseek-v4-pro": { tier: "opensource", benchmark: {"intelligence":53.2,"tokPerSec":75.3}, peakOffPeak: {"peak":{"input":1.32,"output":3.96,"cacheRead":0.044,"cacheWrite":0},"offPeak":{"input":0.66,"output":1.98,"cacheRead":0.022,"cacheWrite":0},"windows":"01–04 & 06–10 UTC"}, free: false, allowance: {"goat":20,"pro":30} },
   "google/gemini-3.1-flash-lite": { tier: "premium", benchmark: {"intelligence":25.6}, free: false, allowance: {"pro":20} },
   "google/gemini-3.5-flash": { tier: "premium", benchmark: {"intelligence":52}, free: false, allowance: {"pro":20} },
@@ -67,6 +67,8 @@ export const MODEL_DEALS: Readonly<Record<string, ModelDeals>> = {
   "meta/muse-spark-1.1": { tier: "premium", benchmark: {"intelligence":53.2}, free: false, allowance: {"pro":20} },
   "meta/muse-spark-1.2": { tier: "opensource", benchmark: {"intelligence":56.8}, free: false, allowance: {"goat":20,"pro":30} },
   "meta/muse-spark-1.2-contributor": { tier: "opensource", benchmark: {"intelligence":56.8}, free: false, allowance: {"goat":20,"pro":30} },
+  "minimax/minimax-m2.7-free": { tier: "opensource", free: true },
+  "minimax/minimax-m3-free": { tier: "opensource", free: true },
   "MiniMaxAI/MiniMax-M2.5": { tier: "opensource", benchmark: {"intelligence":34.5}, free: false },
   "MiniMaxAI/MiniMax-M2.7": { tier: "opensource", benchmark: {"intelligence":38.9}, free: false },
   "MiniMaxAI/MiniMax-M3": { tier: "opensource", discount: {"pct":50}, was: {"input":0.6,"output":2.4,"cacheRead":0.12}, now: {"input":0.3,"output":1.2,"cacheRead":0.06}, benchmark: {"intelligence":45.4,"tokPerSec":104.4}, free: false, allowance: {"goat":47,"pro":57} },
@@ -113,5 +115,5 @@ export const PLAN_CATALOG: Readonly<Record<PlanId, PlanInfo>> = {
 }
 
 export const DEAL_SOURCE_URL = "https://commandcode.ai/docs/resources/pricing-limits"
-export const DEAL_LAST_REFRESHED = "2026-08-24"
+export const DEAL_LAST_REFRESHED = "2026-08-26"
 export const DEAL_PACKAGE_VERSION = "docs"

@@ -36,6 +36,7 @@ export const REASONING_MODELS: ReadonlySet<string> = new Set([
   "meta/muse-spark-1.1",
   "meta/muse-spark-1.2",
   "meta/muse-spark-1.2-contributor",
+  "minimax/minimax-m3-free",
   "moonshotai/Kimi-K2.7-Code",
   "moonshotai/Kimi-K2.7-Code-Highspeed",
   "moonshotai/Kimi-K3",
