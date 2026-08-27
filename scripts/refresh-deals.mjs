@@ -23,44 +23,12 @@ import {
   ratesFor,
 } from "./parse-docs.mjs"
 import { readFileSync } from "node:fs"
+import { snapshotIndex } from "./snapshot-index.mjs"
 
 const DEFAULT_PRICING_URL = "https://commandcode.ai/docs/resources/pricing-limits"
 const DEFAULT_GOAT_URL = "https://commandcode.ai/docs/plans/goat"
 const DEFAULT_PRO_URL = "https://commandcode.ai/docs/plans/pro"
 const DEFAULT_OUT = resolve(import.meta.dirname, "..", "src", "deals", "catalog.ts")
-
-// Snapshot ids and names, as used by the opencode provider config. Deals keys
-// must match these ids; docs records carry ids with different slugs for some
-// models (e.g. claude-haiku-4-5 vs snapshot's claude-haiku-4-5-20251001), so we
-// map docs → snapshot by stable display name.
-function snapshotIdsByName() {
-  const text = readFileSync(
-    resolve(import.meta.dirname, "..", "src", "catalog", "snapshot.ts"),
-    "utf-8",
-  )
-  // When a name matches multiple snapshot entries (e.g. MiniMax M3 has both a
-  // paid `MiniMaxAI/MiniMax-M3` and a free `minimax/minimax-m3-free` variant),
-  // Map.set() overwrites — so we explicitly prefer the first occurrence (the
-  // original/paid entry). Docs allowance tables only list paid models, so the
-  // paid ID gets the allowance; the free variant stays clean.
-  const map = new Map()
-  for (const m of text.matchAll(/\{ id: "([^"]+)", name: "([^"]+)",/g)) {
-    if (!map.has(m[2])) map.set(m[2], m[1])
-  }
-  return map
-}
-
-function snapshotIdSet() {
-  const text = readFileSync(
-    resolve(import.meta.dirname, "..", "src", "catalog", "snapshot.ts"),
-    "utf-8",
-  )
-  const set = new Set()
-  for (const m of text.matchAll(/\{ id: "([^"]+)", name: "([^"]+)",/g)) {
-    set.add(m[1])
-  }
-  return set
-}
 
 // Missing snapshot models in the chosen records source. Returns
 // `{ missing, covered }`: `missing` is the list of snapshot ids that have no
@@ -70,18 +38,20 @@ function snapshotIdSet() {
 // instead of emitting a partial catalog (issue: Ox Alpha / DeepSeek V4 Flash
 // Vision (exp) showed no section because the fixtures predated them).
 export function missingDealsModels(records) {
-  const nameToSnapshotId = snapshotIdsByName()
+  const { byId, nameCounts } = snapshotIndex()
   const ids = new Set([...records.values()].map((record) => record.id))
   const names = new Set([...records.values()].map((record) => record.name))
   const missing = []
-  for (const [name, id] of nameToSnapshotId) {
-    // Match by id first (handles free variants like `minimax/minimax-m3-free`
-    // whose snapshot name `MiniMax M3 (free)` differs from the docs record's
-    // `MiniMax M3`), then fall back to name for legacy id mismatches
-    // (claude-haiku-4-5 docs → claude-haiku-4-5-20251001 snapshot).
-    if (!ids.has(id) && !names.has(name)) missing.push(id)
+  for (const [id, name] of byId) {
+    // Match by id first: free variants share display names with their paid
+    // siblings (MiniMax M3 / M2.7) but carry unique ids, so only an id match
+    // proves the right docs record exists. The name fallback applies only to
+    // unambiguous names (legacy id mismatches like claude-haiku-4-5 docs →
+    // claude-haiku-4-5-20251001 snapshot).
+    const covered = ids.has(id) || (nameCounts.get(name) === 1 && names.has(name))
+    if (!covered) missing.push(id)
   }
-  return { missing, covered: nameToSnapshotId.size - missing.length }
+  return { missing, covered: byId.size - missing.length }
 }
 
 function argValue(name) {
@@ -190,7 +160,7 @@ export function emitDealsModule({
   const pricingRecords = extractModelRecords(pricingLimitsHtml)
   const records = goatRecords.size >= pricingRecords.size ? goatRecords : pricingRecords
   // Map docs name → snapshot id (snapshot is the source of truth for model ids).
-  const nameToSnapshotId = snapshotIdsByName()
+  const { byName: nameToSnapshotId, byId: snapshotIds } = snapshotIndex()
   // Some docs ids (e.g. claude-haiku-4-5) diverge from the snapshot id
   // (claude-haiku-4-5-20251001), so the name-based map catches those. When
   // multiple snapshot entries share a name (paid + free variants like
@@ -198,17 +168,16 @@ export function emitDealsModule({
   // the ambiguity: each fixture record carries its own id, so we prefer it
   // when it matches a known snapshot id, and fall back to the name map
   // otherwise.
-  const snapshotIds = snapshotIdSet()
   const bySnapshotId = new Map()
   for (const record of records.values()) {
     const sid =
       (record.id && snapshotIds.has(record.id) ? record.id : undefined) ??
       nameToSnapshotId.get(record.name) ??
       record.id
-    bySnapshotId.set(sid, {
-      ...record,
-      name: nameToSnapshotId.has(record.name) ? record.name : record.name,
-    })
+    // A record that resolves to no snapshot id cannot be keyed — skip it
+    // rather than collapsing every such record under `undefined`.
+    if (sid === undefined) continue
+    bySnapshotId.set(sid, { ...record, name: record.name })
   }
   // Allowances keyed by snapshot id.
   const goatAllowances = extractPlanAllowances(goatHtml)

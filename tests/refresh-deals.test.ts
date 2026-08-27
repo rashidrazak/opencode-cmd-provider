@@ -187,7 +187,26 @@ run([
         ["deepseek/deepseek-v4-flash-vision-exp", "z-ai/glm-5.3-flash"],
         "must report the two models the docs source lacks",
       )
-      assertEqual(covered, 57)
+      assertEqual(covered, 59)
+    },
+  ],
+  [
+    "missingDealsModels flags fixtures that drop a free variant (name collision must not mask it)",
+    () => {
+      // The free MiniMax variants share display names with their paid
+      // siblings, so only id matching can prove their docs records exist —
+      // removing them must fail the gate like any other missing model.
+      const recs = extractModelRecords(GOAT_HTML)
+      const withoutFree = new Map(
+        [...recs].filter(([, r]) => !(r.id.startsWith("minimax/") && r.id.endsWith("-free"))),
+      )
+      const { missing, covered } = missingDealsModels(withoutFree)
+      assertEqual(
+        missing.sort(),
+        ["minimax/minimax-m2.7-free", "minimax/minimax-m3-free"],
+        "must report the free variants the docs source lacks",
+      )
+      assertEqual(covered, 59)
     },
   ],
   [

@@ -128,10 +128,15 @@ bundled. Core (models, auth, streaming) is unaffected.
 The plugin ships two bundled catalogs and auto-registers every model into
 OpenCode's config at startup, with the `[CMD]` display-name prefix (e.g.
 `[CMD] Claude Sonnet 5`) so they aren't confused with same-named models from
-other providers. Model availability changes when the package is updated. You
-can still declare your own `provider.commandcode` entry; your declarations
-always win and the snapshot fills in only what's missing (`whitelist`/
-`blacklist` on a declared entry filter the auto-registered models too).
+other providers. Free-tier variants that share an upstream display name with a
+paid model (e.g. the MiniMax M3 free tier) get a `(free)` suffix —
+`[CMD] MiniMax M3 (free)` — so the two are distinguishable in the model
+picker. The suffix is derived from the bundled pricing table: a model is
+labeled free only when the catalog carries an explicit zero-cost entry. Model
+availability changes when the package is updated. You can still declare your
+own `provider.commandcode` entry; your declarations always win and the
+snapshot fills in only what's missing (`whitelist`/`blacklist` on a declared
+entry filter the auto-registered models too).
 
 The `[CMD] ` display-name prefix is configurable through the declared
 provider entry's options:
