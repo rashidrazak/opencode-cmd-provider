@@ -1,10 +1,13 @@
-// tests/refresh-deals.test.ts — seam: record → ModelDeals + HTML → deals.ts
+// tests/refresh-deals.test.ts — seam: record → ModelDeals + HTML/RSC → deals.ts
 import { readFileSync } from "node:fs"
 import { extractModelRecords } from "../scripts/parse-docs.mjs"
+import { extractPricingLimitsRsc } from "../scripts/parse-rsc.mjs"
 import {
   discountFor,
   emitDealsModule,
+  emitDealsModuleFromRsc,
   missingDealsModels,
+  missingDealsModelsFromRsc,
   modelDealEntry,
   peakOffPeakFor,
 } from "../scripts/refresh-deals.mjs"
@@ -16,6 +19,12 @@ const PRICING_HTML = readFileSync(
   new URL("./fixtures/pricing-limits.html", import.meta.url),
   "utf-8",
 )
+const RSC_PRICING = readFileSync(
+  new URL("./fixtures/rsc-pricing-limits.txt", import.meta.url),
+  "utf-8",
+)
+const RSC_GOAT = readFileSync(new URL("./fixtures/rsc-goat.txt", import.meta.url), "utf-8")
+const RSC_PRO = readFileSync(new URL("./fixtures/rsc-pro.txt", import.meta.url), "utf-8")
 
 run([
   [
@@ -227,6 +236,170 @@ run([
       // No model entries with empty input
       const lines = out.split("\n").filter((l) => l.trim().startsWith('"'))
       assertEqual(lines.length, 0, "empty input must emit no model lines")
+    },
+  ],
+  [
+    "emitDealsModuleFromRsc emits a valid deals module from the RSC fixtures",
+    () => {
+      const out = emitDealsModuleFromRsc({
+        pricingLimitsRsc: RSC_PRICING,
+        goatRsc: RSC_GOAT,
+        proRsc: RSC_PRO,
+        lastRefreshed: "2026-08-28",
+        packageVersion: "rsc",
+      })
+      assert(
+        out.includes("export const MODEL_DEALS: Readonly<Record<string, ModelDeals>> = {"),
+        "must emit MODEL_DEALS header",
+      )
+      assert(out.includes("PLAN_CATALOG"), "must emit PLAN_CATALOG")
+      assert(
+        out.includes('export const DEAL_LAST_REFRESHED = "2026-08-28"'),
+        "must surface lastRefreshed",
+      )
+      assert(
+        out.includes('"moonshotai/Kimi-K3"'),
+        "must include Kimi K3 (vendor-prefixed id from goat slug)",
+      )
+      assert(
+        out.includes('"claude-haiku-4-5-20251001"'),
+        "slug-id alias must be applied to claude-haiku-4-5 → 4-5-20251001",
+      )
+      // Per-model RSC entry shape must include benchmark + allowance.
+      assert(
+        out.includes("MiniMaxAI/MiniMax-M3") &&
+          out.includes("discount") &&
+          out.includes("benchmark") &&
+          out.includes("allowance"),
+        "MiniMax M3 must carry discount+benchmark+allowance",
+      )
+    },
+  ],
+  [
+    "emitDealsModuleFromRsc covers at least the same models as the HTML path",
+    () => {
+      // The RSC is strictly a superset of the HTML scrape: every model
+      // the HTML emits must also be emitted by the RSC path, with the
+      // same id. The reverse isn't required (RSC may carry models the
+      // HTML scraped before the snapshot caught up, or vice versa).
+      const htmlOut = emitDealsModule({
+        pricingLimitsHtml: PRICING_HTML,
+        goatHtml: GOAT_HTML,
+        proHtml: PRO_HTML,
+        lastRefreshed: "2026-08-28",
+        packageVersion: "docs",
+      })
+      const rscOut = emitDealsModuleFromRsc({
+        pricingLimitsRsc: RSC_PRICING,
+        goatRsc: RSC_GOAT,
+        proRsc: RSC_PRO,
+        lastRefreshed: "2026-08-28",
+        packageVersion: "rsc",
+      })
+      const htmlIds = new Set(
+        htmlOut
+          .split("\n")
+          .map((l) => l.match(/^\s*"([^"]+)":\s*\{/))
+          .filter(Boolean)
+          .map((m2) => m2[1]),
+      )
+      const rscIds = new Set(
+        rscOut
+          .split("\n")
+          .map((l) => l.match(/^\s*"([^"]+)":\s*\{/))
+          .filter(Boolean)
+          .map((m2) => m2[1]),
+      )
+      const onlyInHtml = [...htmlIds].filter((id) => !rscIds.has(id))
+      assertEqual(
+        onlyInHtml,
+        [],
+        `RSC path must cover every model the HTML path emits. Missing: ${onlyInHtml.join(", ")}`,
+      )
+      // RSC is a superset — must carry at least the HTML count.
+      assert(
+        rscIds.size >= htmlIds.size,
+        `RSC must cover at least as many models as HTML (rsc=${rscIds.size}, html=${htmlIds.size})`,
+      )
+    },
+  ],
+  [
+    "emitDealsModuleFromRsc carries the RSC's planAllowanceUsd directly into MODEL_DEALS",
+    () => {
+      // The HTML's `extractPlanAllowances` reads the rendered HTML
+      // tables, which only list a subset of paid models. The RSC's
+      // `planAllowanceUsd` is more complete — every paid model. The
+      // test pins that gap: a model with allowance in the compact
+      // array must surface in the output.
+      const out = emitDealsModuleFromRsc({
+        pricingLimitsRsc: RSC_PRICING,
+        goatRsc: RSC_GOAT,
+        proRsc: RSC_PRO,
+        lastRefreshed: "2026-08-28",
+        packageVersion: "rsc",
+      })
+      // moonshotai/Kimi-K3: RSC compact has goat=20, pro=30.
+      const kimiLine = out.split("\n").find((l) => l.includes('"moonshotai/Kimi-K3"'))
+      assert(kimiLine, "must have a Kimi K3 entry")
+      assert(
+        kimiLine.includes('"goat":20') && kimiLine.includes('"pro":30'),
+        `Kimi K3 must carry RSC allowances (got: ${kimiLine})`,
+      )
+    },
+  ],
+  [
+    "missingDealsModelsFromRsc reports missing snapshot models for an incomplete RSC source",
+    () => {
+      // The pricing-limits RSC alone doesn't carry every model the
+      // per-plan pages do (Qwen 3.8 Flash, GLM 5.3 Flash). The RSC
+      // path merges them; feeding an empty per-plan RSC must drop
+      // those models and trip the gate.
+      const { availability } = extractPricingLimitsRsc(RSC_PRICING)
+      const bySnapshotId = new Map()
+      for (const r of availability) {
+        if (!r.name) continue
+        const sid = r.id
+        if (sid) bySnapshotId.set(sid, r)
+      }
+      const { missing, covered } = missingDealsModelsFromRsc(bySnapshotId)
+      // Qwen 3.8 Flash, GLM 5.3 Flash, and others are in the snapshot
+      // but not in the availability array. The gate must flag them.
+      assert(missing.length > 0, "an RSC source missing slug records must trip the gate")
+      assert(
+        missing.includes("Qwen/Qwen3.8-Flash") ||
+          missing.some((id) => id.includes("Qwen3.8-Flash")),
+        `gate must include Qwen3.8-Flash, got: ${missing.join(", ")}`,
+      )
+      assert(covered > 0, "covered count must be > 0")
+    },
+  ],
+  [
+    "missingDealsModelsFromRsc reports zero missing when the merged RSC source is complete",
+    () => {
+      // When the full RSC path runs (all three RSC sources present),
+      // the merged bySnapshotId Map must cover every snapshot model.
+      // The gate must therefore report zero missing.
+      const out = emitDealsModuleFromRsc({
+        pricingLimitsRsc: RSC_PRICING,
+        goatRsc: RSC_GOAT,
+        proRsc: RSC_PRO,
+        lastRefreshed: "2026-08-28",
+        packageVersion: "rsc",
+      })
+      // Reconstruct the bySnapshotId Map the emit function would have
+      // built, by extracting the ids from the emitted module. (The
+      // gate runs BEFORE emit, so the gate's contract is the same
+      // population the emit consumes.)
+      const ids = new Set(
+        out
+          .split("\n")
+          .map((l) => l.match(/^\s*"([^"]+)":\s*\{/))
+          .filter(Boolean)
+          .map((m2) => m2[1]),
+      )
+      const { missing, covered } = missingDealsModelsFromRsc(ids)
+      assertEqual(missing, [], `full RSC must cover every snapshot, missing: ${missing.join(", ")}`)
+      assert(covered > 50, `covered must be > 50, got ${covered}`)
     },
   ],
 ])

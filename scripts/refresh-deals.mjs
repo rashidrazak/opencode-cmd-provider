@@ -5,13 +5,22 @@
 // vice versa.
 //
 // Usage: node scripts/refresh-deals.mjs [--out path] [--fixtures]
-//   --fixtures regenerates from tests/fixtures/*.html (offline)
+//   --fixtures regenerates from committed fixtures (offline)
 //   --allow-partial  do not fail on snapshot models missing from the scraped
 //                    records (off for the standalone refresh so a partial
 //                    catalog can never be committed silently)
-//   env COMMANDCODE_DEALS_PRICING_URL   overrides the pricing-limits page URL
-//   env COMMANDCODE_DEALS_GOAT_URL      overrides the goat plan page URL
-//   env COMMANDCODE_DEALS_PRO_URL       overrides the pro plan page URL
+//   env COMMANDCODE_DEALS_PRICING_URL   overrides the HTML pricing-limits page URL
+//   env COMMANDCODE_DEALS_GOAT_URL      overrides the HTML goat plan page URL
+//   env COMMANDCODE_DEALS_PRO_URL       overrides the HTML pro plan page URL
+//   env COMMANDCODE_RSC_PRICING_URL     overrides the RSC pricing-limits endpoint
+//   env COMMANDCODE_RSC_GOAT_URL        overrides the RSC goat plan endpoint
+//   env COMMANDCODE_RSC_PRO_URL         overrides the RSC pro plan endpoint
+//
+// When all three RSC env vars are set, the script takes the RSC-primary
+// path (scripts/parse-rsc.mjs); otherwise the HTML path is used. The two
+// paths produce the same MODEL_DEALS shape; the RSC path is strictly
+// more complete because the RSC's `planAllowanceUsd.{goat,pro}` field
+// covers every paid model, while the HTML tables only list a subset.
 import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { dirname, resolve } from "node:path"
 import {
@@ -22,12 +31,17 @@ import {
   num,
   ratesFor,
 } from "./parse-docs.mjs"
+import { applySlugIdAlias, extractPlanPageRsc, extractPricingLimitsRsc } from "./parse-rsc.mjs"
+import { applyTierOverride } from "./tier-overrides.mjs"
 import { readFileSync } from "node:fs"
 import { snapshotIndex } from "./snapshot-index.mjs"
 
 const DEFAULT_PRICING_URL = "https://commandcode.ai/docs/resources/pricing-limits"
 const DEFAULT_GOAT_URL = "https://commandcode.ai/docs/plans/goat"
 const DEFAULT_PRO_URL = "https://commandcode.ai/docs/plans/pro"
+const DEFAULT_RSC_PRICING_URL = "https://commandcode.ai/docs/rsc/pricing-limits"
+const DEFAULT_RSC_GOAT_URL = "https://commandcode.ai/docs/rsc/plans/goat"
+const DEFAULT_RSC_PRO_URL = "https://commandcode.ai/docs/rsc/plans/pro"
 const DEFAULT_OUT = resolve(import.meta.dirname, "..", "src", "deals", "catalog.ts")
 
 // Missing snapshot models in the chosen records source. Returns
@@ -50,6 +64,21 @@ export function missingDealsModels(records) {
     // claude-haiku-4-5-20251001 snapshot).
     const covered = ids.has(id) || (nameCounts.get(name) === 1 && names.has(name))
     if (!covered) missing.push(id)
+  }
+  return { missing, covered: byId.size - missing.length }
+}
+
+// RSC equivalent of `missingDealsModels`: the records are already
+// snapshot-keyed (extractPlanPageRsc applies the slug-id alias), so the
+// gate is a direct id-set comparison. `bySnapshotId` is the Map built
+// inside `emitDealsModuleFromRsc`; the function is exported so the gate
+// can be exercised independently of the emit step.
+export function missingDealsModelsFromRsc(bySnapshotId) {
+  const { byId } = snapshotIndex()
+  const present = new Set(bySnapshotId.keys())
+  const missing = []
+  for (const [id] of byId) {
+    if (!present.has(id)) missing.push(id)
   }
   return { missing, covered: byId.size - missing.length }
 }
@@ -192,7 +221,27 @@ export function emitDealsModule({
     const sid = nameToSnapshotId.get(name)
     if (sid) proBySnapshot.set(sid, credits)
   }
+  return buildDealsModule({
+    bySnapshotId,
+    goatBySnapshot,
+    proBySnapshot,
+    lastRefreshed,
+    packageVersion,
+  })
+}
 
+// Builds the deals module text from already-normalised inputs. Both the
+// HTML and RSC paths produce a `bySnapshotId` Map (snapshot-id → record)
+// plus `goatBySnapshot` / `proBySnapshot` Maps (snapshot-id → credits),
+// then call this function. The template (PLAN_CATALOG, interfaces, header)
+// lives here so the two paths can't drift.
+export function buildDealsModule({
+  bySnapshotId,
+  goatBySnapshot,
+  proBySnapshot,
+  lastRefreshed,
+  packageVersion,
+}) {
   const modelLines = []
   for (const [id, record] of [...bySnapshotId.entries()].sort(([a], [b]) => a.localeCompare(b))) {
     const entry = modelDealEntry(record)
@@ -271,6 +320,133 @@ export function emitDealsModule({
   ].join("\n")
 }
 
+// RSC-primary path: parses the three RSC payloads with parse-rsc.mjs,
+// applies the slug-id alias map, applies the tier overrides, and emits
+// the same MODEL_DEALS shape as the HTML path. The per-plan RSC (goat,
+// pro) is the source of truth for the model `id` (the vendor-prefixed
+// form); the pricing-limits RSC's availability and compact arrays carry
+// the deal, tier, and allowance data. Cross-reference is by name.
+//
+// The pricing-limits availability array covers most models but lags the
+// per-plan pages for newly-added models (e.g. Qwen 3.8 Flash and GLM
+// 5.3 Flash are on the goat plan but not in the pricing-limits
+// availability array as of the current fixtures). The per-plan slug
+// records are merged in to fill those gaps — every model that the
+// per-plan pages expose but the pricing-limits page doesn't, plus its
+// tiers/deal/caps from the slug record.
+//
+// The snapshot index is the source of truth for which models the
+// plugin actually knows about. RSC records whose id doesn't resolve to
+// a snapshot id (via the per-plan slug Map or the slug-id alias) are
+// dropped — they could be new models the npm package hasn't picked up
+// yet, and shipping entries for unknown ids would either blow up the
+// consumers or be silently filtered downstream.
+//
+// This is the expand half of the HTML → RSC switch (ticket #82 on the
+// wayfinder map). The HTML path stays in place behind the same module
+// surface for ticket #83's contract step (and for the offline --fixtures
+// fallback to HTML when the RSC env vars are unset).
+export function buildRscInputs({ pricingLimitsRsc, goatRsc, proRsc }) {
+  // Per-plan RSC: source of truth for the snapshot id (already
+  // aliased inside extractPlanPageRsc). Union goat and pro so a model
+  // that's on goat but not pro is still reachable.
+  const goatSlug = extractPlanPageRsc(goatRsc ?? "")
+  const proSlug = extractPlanPageRsc(proRsc ?? "")
+  const slugBySnapshotId = new Map([...goatSlug, ...proSlug])
+  // Pricing-limits RSC: availability (per-model records with tiers +
+  // deal) and compact (per-model planAllowanceUsd.{goat,pro}).
+  const { availability, compact } = extractPricingLimitsRsc(pricingLimitsRsc ?? "")
+  // Snapshot index: which ids the plugin actually knows about. RSC
+  // records that don't resolve to a snapshot id are dropped.
+  const { byId: snapshotIds, byName: nameToSnapshotId } = snapshotIndex()
+  // Reuse the snapshot-index name map for the per-plan slug records
+  // (the snapshot's byName covers every model the per-plan pages
+  // could expose, by name, including paid + free variants).
+  for (const [sid, record] of slugBySnapshotId) {
+    if (record.name) nameToSnapshotId.set(record.name, sid)
+  }
+  // Build bySnapshotId from availability. Each availability record
+  // already carries tiers / deal / caps — the same fields the HTML
+  // path's `extractModelRecords` produced. Apply the tier override
+  // here so `modelDealEntry` sees the final tier (the override map
+  // grows in ticket #86).
+  //
+  // When a slug record exists for the same snapshot id, its fields
+  // fill in anything the availability record doesn't carry
+  // (intelligenceIndex, outputTokensPerSec, minPlanName, vendor). The
+  // availability record wins on conflict because it's the more
+  // recent of the two data sources.
+  const bySnapshotId = new Map()
+  for (const record of availability) {
+    if (!record.name) continue
+    const aliased = { ...record, id: applySlugIdAlias(record.id ?? "") }
+    // Resolve to a snapshot id: per-plan slug Map first (vendor-prefixed,
+    // already aliased), then the raw RSC id (after alias). Drop if
+    // neither resolves — those are new models the snapshot doesn't
+    // carry yet.
+    const sid = nameToSnapshotId.get(record.name) ?? aliased.id
+    if (sid === undefined || !snapshotIds.has(sid)) continue
+    const slugRecord = slugBySnapshotId.get(sid)
+    const merged = slugRecord ? { ...slugRecord, ...aliased, id: sid } : { ...aliased, id: sid }
+    // Apply the tier override; the function falls back to record.category
+    // when the snapshot id isn't in TIER_OVERRIDES.
+    const tier = applyTierOverride(merged)
+    bySnapshotId.set(sid, tier ? { ...merged, category: tier } : merged)
+  }
+  // Merge in per-plan slug records that aren't already covered. The
+  // pricing-limits availability array lags the per-plan pages for some
+  // models; the slug records carry the same field shape (tiers, deal,
+  // caps) so they drop in directly. Slug records are already
+  // snapshot-keyed (extractPlanPageRsc applies the alias and the Map
+  // key is the snapshot id), so the snapshot id check is implicit.
+  for (const [sid, slugRecord] of slugBySnapshotId) {
+    if (bySnapshotId.has(sid)) continue
+    if (!snapshotIds.has(sid)) continue
+    const tier = applyTierOverride(slugRecord)
+    bySnapshotId.set(
+      sid,
+      tier ? { ...slugRecord, id: sid, category: tier } : { ...slugRecord, id: sid },
+    )
+  }
+  // Build the per-plan allowance maps from the compact array. The
+  // compact record's `id` is also the un-prefixed form; apply the
+  // alias and fall back to the name map. Drop entries that don't
+  // resolve to a snapshot id.
+  const goatBySnapshot = new Map()
+  const proBySnapshot = new Map()
+  for (const record of compact) {
+    if (!record.planAllowanceUsd) continue
+    const sid = nameToSnapshotId.get(record.name ?? "") ?? applySlugIdAlias(record.id ?? "")
+    if (!sid || !snapshotIds.has(sid)) continue
+    if (record.planAllowanceUsd.goat !== undefined)
+      goatBySnapshot.set(sid, record.planAllowanceUsd.goat)
+    if (record.planAllowanceUsd.pro !== undefined)
+      proBySnapshot.set(sid, record.planAllowanceUsd.pro)
+  }
+  return { bySnapshotId, goatBySnapshot, proBySnapshot }
+}
+
+export function emitDealsModuleFromRsc({
+  pricingLimitsRsc,
+  goatRsc,
+  proRsc,
+  lastRefreshed,
+  packageVersion,
+}) {
+  const { bySnapshotId, goatBySnapshot, proBySnapshot } = buildRscInputs({
+    pricingLimitsRsc,
+    goatRsc,
+    proRsc,
+  })
+  return buildDealsModule({
+    bySnapshotId,
+    goatBySnapshot,
+    proBySnapshot,
+    lastRefreshed,
+    packageVersion,
+  })
+}
+
 async function readFixtures() {
   const fixtures = resolve(import.meta.dirname, "..", "tests", "fixtures")
   const [pricingHtml, goatHtml, proHtml] = await Promise.all([
@@ -281,7 +457,50 @@ async function readFixtures() {
   return { pricingHtml, goatHtml, proHtml }
 }
 
+async function readRscFixtures() {
+  const fixtures = resolve(import.meta.dirname, "..", "tests", "fixtures")
+  const [pricingRsc, goatRsc, proRsc] = await Promise.all([
+    readFile(resolve(fixtures, "rsc-pricing-limits.txt"), "utf-8"),
+    readFile(resolve(fixtures, "rsc-goat.txt"), "utf-8"),
+    readFile(resolve(fixtures, "rsc-pro.txt"), "utf-8"),
+  ])
+  return { pricingRsc, goatRsc, proRsc }
+}
+
+async function fetchRscOrFail(url, label) {
+  let response
+  try {
+    response = await fetch(url, { headers: { rsc: "1" } })
+  } catch (error) {
+    console.error(`refresh-deals: could not fetch RSC ${label} (${url}): ${error.message}`)
+    return ""
+  }
+  if (!response.ok) {
+    console.error(`refresh-deals: RSC ${label} returned ${response.status} — skipping`)
+    return ""
+  }
+  return response.text()
+}
+
 async function main() {
+  // The RSC-primary path is gated on all three RSC env vars being set.
+  // When any is missing, the HTML path is used. This is the expand half
+  // of the HTML → RSC switch (ticket #82 on the wayfinder map); the
+  // contract step (ticket #83) flips the default and removes the HTML
+  // path entirely.
+  const rscEnvSet = Boolean(
+    process.env.COMMANDCODE_RSC_PRICING_URL &&
+    process.env.COMMANDCODE_RSC_GOAT_URL &&
+    process.env.COMMANDCODE_RSC_PRO_URL,
+  )
+  if (rscEnvSet) {
+    await runRscPath()
+  } else {
+    await runHtmlPath()
+  }
+}
+
+async function runHtmlPath() {
   let pricingHtml
   let goatHtml
   let proHtml
@@ -396,6 +615,126 @@ async function main() {
   let writtenCount = 0
   try {
     writtenCount = extractModelRecords(goatHtml).size
+  } catch {
+    writtenCount = 0
+  }
+  console.log(`refresh-deals: wrote ${writtenCount} model entries to ${out}`)
+}
+
+async function runRscPath() {
+  let pricingRsc
+  let goatRsc
+  let proRsc
+  if (process.argv.includes("--fixtures")) {
+    try {
+      ;({ pricingRsc, goatRsc, proRsc } = await readRscFixtures())
+    } catch (error) {
+      console.warn(
+        `refresh-deals: warning — could not read RSC fixtures (${error instanceof Error ? error.message : String(error)}) — emitting empty deals catalog`,
+      )
+      pricingRsc = ""
+      goatRsc = ""
+      proRsc = ""
+    }
+  } else {
+    const pricingUrl = process.env.COMMANDCODE_RSC_PRICING_URL ?? DEFAULT_RSC_PRICING_URL
+    const goatUrl = process.env.COMMANDCODE_RSC_GOAT_URL ?? DEFAULT_RSC_GOAT_URL
+    const proUrl = process.env.COMMANDCODE_RSC_PRO_URL ?? DEFAULT_RSC_PRO_URL
+    let livePricingRsc
+    let liveGoatRsc
+    let liveProRsc
+    try {
+      ;[livePricingRsc, liveGoatRsc, liveProRsc] = await Promise.all([
+        fetchRscOrFail(pricingUrl, "pricing-limits"),
+        fetchRscOrFail(goatUrl, "plans/goat"),
+        fetchRscOrFail(proUrl, "plans/pro"),
+      ])
+    } catch (error) {
+      console.warn(
+        `refresh-deals: warning — RSC live fetch threw (${error instanceof Error ? error.message : String(error)}) — falling back to RSC fixtures`,
+      )
+      livePricingRsc = ""
+      liveGoatRsc = ""
+      liveProRsc = ""
+    }
+    const anyEmpty = !livePricingRsc || !liveGoatRsc || !liveProRsc
+    if (anyEmpty) {
+      console.warn("refresh-deals: warning — RSC live fetch failed — falling back to RSC fixtures")
+      try {
+        ;({ pricingRsc, goatRsc, proRsc } = await readRscFixtures())
+        console.warn("refresh-deals: warning — using RSC fixtures for deals catalog")
+      } catch (error) {
+        console.warn(
+          `refresh-deals: warning — RSC fixtures unavailable (${error instanceof Error ? error.message : String(error)}) — emitting empty deals catalog`,
+        )
+        pricingRsc = ""
+        goatRsc = ""
+        proRsc = ""
+      }
+    } else {
+      pricingRsc = livePricingRsc
+      goatRsc = liveGoatRsc
+      proRsc = liveProRsc
+    }
+  }
+
+  const out = argValue("--out") ?? DEFAULT_OUT
+  let module
+  try {
+    // Build the inputs once — the coverage gate consumes
+    // bySnapshotId, and the emit step consumes the same map plus
+    // the allowance maps.
+    const { bySnapshotId, goatBySnapshot, proBySnapshot } = buildRscInputs({
+      pricingLimitsRsc: pricingRsc,
+      goatRsc,
+      proRsc,
+    })
+    // Same coverage gate as the HTML path: a partial catalog silently
+    // drops the TUI sidebar "Command Code" section for the missing
+    // models. The RSC path keys records by snapshot id directly
+    // (extractPlanPageRsc applies the alias), so the gate is a direct
+    // id-set comparison via missingDealsModelsFromRsc.
+    if (!process.argv.includes("--allow-partial")) {
+      const { missing, covered } = missingDealsModelsFromRsc(bySnapshotId)
+      if (missing.length > 0) {
+        console.error(
+          `refresh-deals: aborting — ${missing.length} snapshot model(s) have no RSC record ` +
+            `(${covered}/${covered + missing.length} covered): ${missing.join(", ")}. ` +
+            `The docs may have added models without exposing them in the RSC, or the ` +
+            `RSC fixtures are stale. Re-run against live docs or refresh the RSC fixtures ` +
+            `before regenerating; the generated catalog would silently hide the Command Code ` +
+            `sidebar section for these models.`,
+        )
+        process.exit(1)
+      }
+    }
+    module = buildDealsModule({
+      bySnapshotId,
+      goatBySnapshot,
+      proBySnapshot,
+      lastRefreshed: new Date().toISOString().split("T")[0],
+      packageVersion: "docs",
+    })
+  } catch (error) {
+    console.warn(
+      `refresh-deals: warning — failed to parse RSC data (${error instanceof Error ? error.message : String(error)}) — emitting empty catalog`,
+    )
+    module = emitDealsModule({
+      pricingLimitsHtml: "",
+      goatHtml: "",
+      proHtml: "",
+      lastRefreshed: new Date().toISOString().split("T")[0],
+      packageVersion: "docs",
+    })
+  }
+  await mkdir(dirname(out), { recursive: true })
+  await writeFile(out, module, "utf-8")
+  let writtenCount = 0
+  try {
+    // Report the number of models actually written — count unique
+    // snapshot ids in the availability array.
+    const { availability } = extractPricingLimitsRsc(pricingRsc)
+    writtenCount = availability?.length ?? 0
   } catch {
     writtenCount = 0
   }
