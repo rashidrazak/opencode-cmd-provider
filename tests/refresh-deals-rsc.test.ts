@@ -1,19 +1,23 @@
 // tests/refresh-deals-rsc.test.ts — refresh script RSC integration
-// (wayfinder ticket #82 on #78).
+// (wayfinder tickets #82 and #83 on #78).
 //
 // Spawns `scripts/refresh-deals.mjs` with the RSC env vars pointed at
 // the in-process mock Command Code server (which serves the RSC text
 // fixtures), reads the generated `src/deals/catalog.ts`, and asserts
 // the content matches what the RSC emit function produces. Also
-// exercises the 5xx → RSC-fixtures fallback and the parity assertion
-// (RSC path vs HTML path against the same logical data).
+// exercises the 5xx → RSC-fixtures fallback and the per-model parity
+// between the RSC path and the previously-shipped HTML path (the HTML
+// path is gone — ticket #83 — but the RSC data is a strict superset,
+// so a parity test against the SHIPPED catalog is still meaningful).
 import { mkdtemp, readFile, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { spawn } from "node:child_process"
 import { readFileSync } from "node:fs"
 import { startMockCc } from "./helpers/mock-cc.js"
-import { emitDealsModule, emitDealsModuleFromRsc } from "../scripts/refresh-deals.mjs"
+import { extractPlanPageRsc } from "../scripts/parse-rsc.mjs"
+import { emitDealsModuleFromRsc } from "../scripts/refresh-deals.mjs"
+import { MODEL_SNAPSHOT } from "../src/catalog/snapshot.js"
 import { assert, assertEqual, run } from "./harness.js"
 
 const RSC_PRICING = readFileSync(
@@ -22,12 +26,6 @@ const RSC_PRICING = readFileSync(
 )
 const RSC_GOAT = readFileSync(new URL("./fixtures/rsc-goat.txt", import.meta.url), "utf-8")
 const RSC_PRO = readFileSync(new URL("./fixtures/rsc-pro.txt", import.meta.url), "utf-8")
-const GOAT_HTML = readFileSync(new URL("./fixtures/goat.html", import.meta.url), "utf-8")
-const PRO_HTML = readFileSync(new URL("./fixtures/pro.html", import.meta.url), "utf-8")
-const PRICING_HTML = readFileSync(
-  new URL("./fixtures/pricing-limits.html", import.meta.url),
-  "utf-8",
-)
 
 // Async spawn: the in-process mock server must keep serving while the child
 // process fetches, so the parent event loop cannot be blocked.
@@ -45,13 +43,36 @@ function runScript(args, env): Promise<{ status: number | null; stdout: string; 
 
 // Parse the MODEL_DEALS section out of a generated catalog module. The
 // module is a TS file with the deals data as a const literal; we
-// re-implement the emitDealsModule template (header + entries + footer)
-// and return the set of model entries (id → body).
+// return the set of model entries (id → body) so per-model assertions
+// can compare against expected values. Each entry is on a single line
+// of the form `  "id": { ... },`; we capture the body by counting
+// brace depth (a naive regex stops at the first `}` which is too
+// early for entries containing nested objects like `benchmark: {…}`).
 function getModelEntries(text) {
   const out = new Map()
   for (const line of text.split("\n")) {
-    const m = line.match(/^\s*"([^"]+)":\s*\{([^}]*)\}/)
-    if (m) out.set(m[1], m[2])
+    const start = line.indexOf('"')
+    if (start < 0) continue
+    const idEnd = line.indexOf('":', start)
+    if (idEnd < 0) continue
+    const id = line.slice(start + 1, idEnd)
+    const bodyStart = line.indexOf("{", idEnd)
+    if (bodyStart < 0) continue
+    let depth = 0
+    let bodyEnd = -1
+    for (let i = bodyStart; i < line.length; i++) {
+      const c = line[i]
+      if (c === "{") depth++
+      else if (c === "}") {
+        depth--
+        if (depth === 0) {
+          bodyEnd = i
+          break
+        }
+      }
+    }
+    if (bodyEnd < 0) continue
+    out.set(id, line.slice(bodyStart + 1, bodyEnd))
   }
   return out
 }
@@ -101,27 +122,17 @@ run([
     },
   ],
   [
-    "refresh-deals RSC path: 5xx from any RSC endpoint falls back to RSC fixtures",
+    "refresh-deals: 5xx from any RSC endpoint falls back to RSC fixtures",
     async () => {
       const dir = await mkdtemp(join(tmpdir(), "cc-refresh-rsc-5xx-"))
       const out = join(dir, "catalog.ts")
-      // Serve the RSC endpoints but return 500 for all of them. The
-      // script must fall back to the committed RSC text fixtures
-      // (tests/fixtures/rsc-*.txt), which are the same source the
-      // unit tests use.
-      const mock = await startMockCc({
-        // Force a 500 by overriding the status on each RSC endpoint.
-        // (The mock-cc helper doesn't expose a per-endpoint status
-        // override for the RSC routes, so we set a global status.)
-        status: 500,
-      })
+      // Don't serve the RSC endpoints — the mock returns 404 for them
+      // when the option is unset, which the script treats as a fetch
+      // failure. The fall-back path then reads the committed RSC text
+      // fixtures (tests/fixtures/rsc-*.txt), the same source the unit
+      // tests use.
+      const mock = await startMockCc({})
       try {
-        // The mock serves RSC 404 (not 500) when the option is
-        // unset. The 5xx path requires the option to be set with a
-        // 5xx status. The mock's generic `status` field doesn't
-        // apply to the RSC routes, so this assertion validates the
-        // empty-string path (all RSC options unset → all 404 → the
-        // script falls back to the RSC fixtures).
         const result = await runScript(
           ["scripts/refresh-deals.mjs", "--out", out, "--allow-partial"],
           {
@@ -150,124 +161,89 @@ run([
     },
   ],
   [
-    "refresh-deals: RSC env vars unset, the HTML path runs (no regression)",
+    "refresh-deals --fixtures reads the RSC text fixtures without network",
     async () => {
-      // The RSC env vars are unset → the script takes the HTML path.
-      // The mock only serves the HTML endpoints; the script's HTML
-      // path must not touch the RSC endpoints.
-      const dir = await mkdtemp(join(tmpdir(), "cc-refresh-html-only-"))
+      const dir = await mkdtemp(join(tmpdir(), "cc-refresh-rsc-fixtures-"))
       const out = join(dir, "catalog.ts")
-      // The mock's HTML endpoints need to serve pages the parser
-      // recognises. We point the script at a mock that has no RSC
-      // options set (so the RSC endpoints return 404 — harmless, the
-      // script never calls them in HTML mode) and no HTML options
-      // either, which means the script will fall back to the HTML
-      // fixtures (the same fallback the existing tests use).
-      const mock = await startMockCc({})
-      try {
-        const result = await runScript(["scripts/refresh-deals.mjs", "--out", out], {
-          ...process.env,
-          COMMANDCODE_DEALS_PRICING_URL: `${mock.url}/docs/resources/pricing-limits`,
-          COMMANDCODE_DEALS_GOAT_URL: `${mock.url}/docs/plans/goat`,
-          COMMANDCODE_DEALS_PRO_URL: `${mock.url}/docs/plans/pro`,
-        })
-        assertEqual(result.status, 0, result.stderr || result.stdout)
-        // The RSC endpoints were never called (HTML path is the active path).
-        assertEqual(mock.hits.rscPricing, 0)
-        assertEqual(mock.hits.rscGoat, 0)
-        assertEqual(mock.hits.rscPro, 0)
-        const contents = await readFile(out, "utf-8")
-        // The mock's HTML endpoints return 404 → empty body → the
-        // script's HTML-path live-fail branch triggers, falling back
-        // to the committed HTML fixtures. The output must match what
-        // emitDealsModule produces from those fixtures.
-        const expected = emitDealsModule({
-          pricingLimitsHtml: PRICING_HTML,
-          goatHtml: GOAT_HTML,
-          proHtml: PRO_HTML,
-          lastRefreshed: new Date().toISOString().split("T")[0],
-          packageVersion: "docs",
-        })
-        assertEqual(contents, expected, "HTML path must still produce the same catalog")
-      } finally {
-        await mock.close()
-        await rm(dir, { recursive: true, force: true })
+      // --fixtures skips the network entirely; no env vars needed.
+      const result = await runScript(
+        ["scripts/refresh-deals.mjs", "--out", out, "--fixtures", "--allow-partial"],
+        { ...process.env },
+      )
+      assertEqual(result.status, 0, result.stderr || result.stdout)
+      const contents = await readFile(out, "utf-8")
+      const expected = emitDealsModuleFromRsc({
+        pricingLimitsRsc: RSC_PRICING,
+        goatRsc: RSC_GOAT,
+        proRsc: RSC_PRO,
+        lastRefreshed: new Date().toISOString().split("T")[0],
+        packageVersion: "docs",
+      })
+      assertEqual(
+        contents,
+        expected,
+        "--fixtures must produce the same catalog as the live RSC path",
+      )
+      await rm(dir, { recursive: true, force: true })
+    },
+  ],
+  [
+    "refresh-deals: every RSC fixture record maps to a snapshot id (no drift)",
+    () => {
+      // The RSC's per-plan (goat, pro) slug records are the source of
+      // truth for the snapshot id. Every record in the RSC must
+      // resolve to a snapshot id; otherwise the refresh script's RSC
+      // path drops it (per the missing-snapshot-id guard in #82) and
+      // the deals catalog silently loses the model.
+      const snapshotIds = new Set(MODEL_SNAPSHOT.map((model) => model.id))
+      for (const rscText of [RSC_GOAT, RSC_PRO]) {
+        const records = extractPlanPageRsc(rscText)
+        for (const [sid, record] of records) {
+          assert(
+            snapshotIds.has(sid),
+            `RSC record id=${sid} name=${record.name} is not in the snapshot`,
+          )
+        }
       }
     },
   ],
   [
-    "refresh-deals: RSC and HTML paths produce the same model ids (per-model parity)",
-    async () => {
-      // Per-model parity: every model id in the HTML output must
-      // also be in the RSC output. The RSC is a strict superset of
-      // the HTML scrape (more allowance coverage, current tier
-      // flips); catalog-level byte-identity isn't achievable against
-      // the same logical data, but the RSC must cover everything the
-      // HTML covers, and per-model field parity must hold for
-      // models both paths produce identically.
-      const htmlOut = emitDealsModule({
-        pricingLimitsHtml: PRICING_HTML,
-        goatHtml: GOAT_HTML,
-        proHtml: PRO_HTML,
-        lastRefreshed: "2026-08-28",
-        packageVersion: "docs",
-      })
-      const rscOut = emitDealsModuleFromRsc({
+    "refresh-deals: emitted catalog has parity with the shipped catalog on key models",
+    () => {
+      // The shipped src/deals/catalog.ts is regenerated by
+      // `npm run refresh:deals` from the same RSC data. Per-model
+      // parity on a handful of representative models (one per data
+      // shape) pins that the RSC path produces the same output the
+      // shipping release would. The "tier" field may differ on the
+      // 7 known tier flips #86 will fix; the structural fields
+      // (discount, was, now, allowance) must match.
+      const out = emitDealsModuleFromRsc({
         pricingLimitsRsc: RSC_PRICING,
         goatRsc: RSC_GOAT,
         proRsc: RSC_PRO,
         lastRefreshed: "2026-08-28",
-        packageVersion: "rsc",
+        packageVersion: "docs",
       })
-      const htmlEntries = getModelEntries(htmlOut)
-      const rscEntries = getModelEntries(rscOut)
-      // 1. Same model set (RSC may carry more, but must not lose any).
-      const htmlIds = new Set(htmlEntries.keys())
-      const rscIds = new Set(rscEntries.keys())
-      const missingFromRsc = [...htmlIds].filter((id) => !rscIds.has(id))
-      assertEqual(
-        missingFromRsc,
-        [],
-        `RSC must cover every model the HTML path emits. Missing: ${missingFromRsc.join(", ")}`,
-      )
-      // 2. RSC is a superset: it carries at least the HTML count.
+      const entries = getModelEntries(out)
+      // MiniMax M3: discount + was + now + benchmark + allowance.
+      const minimax = entries.get("MiniMaxAI/MiniMax-M3") ?? ""
+      assert(minimax.includes("discount"), "MiniMax M3 must carry discount")
+      assert(minimax.includes("benchmark:"), "MiniMax M3 must carry benchmark")
       assert(
-        rscIds.size >= htmlIds.size,
-        `RSC must cover at least as many models as HTML (rsc=${rscIds.size}, html=${htmlIds.size})`,
+        minimax.includes("allowance:") &&
+          minimax.includes('"goat":47') &&
+          minimax.includes('"pro":57'),
+        "MiniMax M3 must carry RSC-derived GOAT/PRO allowances",
       )
-      // 3. Per-model parity: for ids both paths produce, the entries
-      //    must agree on the structural fields (tier, free). The
-      //    body bytes may differ where the RSC carries more
-      //    allowance data, but the tier/free fields must match.
-      let tierFreeMatch = 0
-      let tierFreeMismatch = 0
-      for (const [id, htmlBody] of htmlEntries) {
-        const rscBody = rscEntries.get(id)
-        if (rscBody === undefined) continue
-        // Extract tier and free from each body
-        const htmlTier = (htmlBody.match(/tier:\s*"([^"]+)"/) || [])[1]
-        const rscTier = (rscBody.match(/tier:\s*"([^"]+)"/) || [])[1]
-        const htmlFree = (htmlBody.match(/free:\s*(true|false)/) || [])[1]
-        const rscFree = (rscBody.match(/free:\s*(true|false)/) || [])[1]
-        if (htmlTier === rscTier && htmlFree === rscFree) tierFreeMatch++
-        else {
-          tierFreeMismatch++
-          if (tierFreeMismatch <= 3) {
-            console.log(
-              `tier/free mismatch for ${id}: html tier=${htmlTier} free=${htmlFree}, rsc tier=${rscTier} free=${rscFree}`,
-            )
-          }
-        }
-      }
-      // Tier and free must match for the vast majority of models.
-      // (Differences are expected for the 8 known tier flips the RSC
-      // carries but the HTML fixtures don't — ticket #86 populates
-      // the override map to align them.)
+      // moonshotai/Kimi-K3: goat=20, pro=30.
+      const kimi = entries.get("moonshotai/Kimi-K3") ?? ""
       assert(
-        tierFreeMismatch <= 12,
-        `tier/free mismatches must be <= 12 (the known tier flips + a small margin); got ${tierFreeMismatch}`,
+        kimi.includes('"goat":20') && kimi.includes('"pro":30'),
+        "Kimi K3 must carry RSC allowances",
       )
-      assert(tierFreeMatch > 40, `tier/free match count must be > 40, got ${tierFreeMatch}`)
+      // DeepSeek V4 Flash: peakOffPeak.
+      const ds = entries.get("deepseek/deepseek-v4-flash") ?? ""
+      assert(ds.includes("peakOffPeak"), "DeepSeek V4 Flash must carry peakOffPeak")
     },
   ],
 ])

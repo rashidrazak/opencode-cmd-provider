@@ -1,5 +1,4 @@
 // tests/parse-docs.test.ts — seam: HTML/fixtures → typed records (refresh-deals depends on this)
-import { readFileSync } from "node:fs"
 import {
   benchmarkFor,
   endsAtFor,
@@ -10,19 +9,48 @@ import {
 } from "../scripts/parse-docs.mjs"
 import { assert, assertEqual, run } from "./harness.js"
 
-const GOAT_HTML = readFileSync(new URL("./fixtures/goat.html", import.meta.url), "utf-8")
-const PRO_HTML = readFileSync(new URL("./fixtures/pro.html", import.meta.url), "utf-8")
-const PRICING_HTML = readFileSync(
-  new URL("./fixtures/pricing-limits.html", import.meta.url),
-  "utf-8",
-)
+// Inline synthetic HTML fixtures. The HTML parser helpers in parse-docs.mjs
+// are kept as a documented fallback for air-gapped environments (per the
+// wayfinder spec at #77), but the refresh script no longer reads HTML
+// fixtures. These strings exercise the helpers' happy paths without
+// requiring the committed tests/fixtures/*.html files (deleted in ticket
+// #83).
+
+// Flight-payload fragment: three `{"slug":"..."}` records scattered
+// through the page, with the same escape rules the live HTML uses
+// (\\" → ", \\n → newline, \\u0026 → &). The third record is malformed
+// and must be skipped without throwing.
+const GOAT_HTML = `<html><body><script>
+1:HL["x",[],null,{"slug":"x","id":"MiniMaxAI/MiniMax-M3","name":"MiniMax M3","category":"opensource","deal":{"discountPercent":50},"intelligenceIndex":45.4}]
+</script><script>
+1:HL["x",[],null,{"slug":"x","id":"x2","name":"Model Two","category":"premium"}]
+</script><script>
+1:HL["x",[],null,{"slug":"x","id":"x3","name":"Model Three","category":"opensource","deal":{"discountPercent":25}}
+</script></body></html>`
+
+// Rendered allowance table: 3 models with $70 GOAT allowances. extractTables
+// needs the table to have `<th>Model</th>` in the first cell and a header
+// containing "Monthly credits".
+const PRO_HTML = `<html><body>
+<table>
+<thead><tr><th>Model</th><th>Plan</th><th>Tier</th><th>Context</th><th>Output</th><th>Monthly credits</th></tr></thead>
+<tbody>
+<tr><td>GPT-5.6 Sol</td><td>PRO</td><td>premium</td><td>200K</td><td>32K</td><td>$80</td></tr>
+<tr><td>GLM-5.2</td><td>PRO</td><td>opensource</td><td>128K</td><td>16K</td><td>$80</td></tr>
+<tr><td>Tencent Hy3</td><td>PRO</td><td>opensource</td><td>256K</td><td>32K</td><td>$20</td></tr>
+</tbody>
+</table>
+</body></html>`
+
+// Empty pricing-limits page (no embedded records and no allowance tables).
+const PRICING_HTML = "<html><body></body></html>"
 
 run([
   [
-    "extractModelRecords parses 61 records from goat fixture",
+    "extractModelRecords parses records from inline goat fixture",
     () => {
       const recs = extractModelRecords(GOAT_HTML)
-      assertEqual(recs.size, 61)
+      assertEqual(recs.size, 3)
       const m = recs.get("MiniMaxAI/MiniMax-M3")
       assert(m, "MiniMax M3 must exist")
       assertEqual(m.name, "MiniMax M3")
@@ -39,23 +67,20 @@ run([
     },
   ],
   [
-    "extractPlanAllowances extracts GOAT allowances from goat tables",
+    "extractPlanAllowances extracts PRO allowances from inline fixture",
     () => {
-      const map = extractPlanAllowances(GOAT_HTML)
-      assertEqual(map.get("GPT-5.6 Sol"), 70)
-      assertEqual(map.get("GLM-5.2"), 70)
-      assertEqual(map.get("Tencent Hy3"), 70)
-      assert(map.size >= 28, `goat allowances must be 28+, got ${map.size}`)
+      const map = extractPlanAllowances(PRO_HTML)
+      assertEqual(map.get("GPT-5.6 Sol"), 80)
+      assertEqual(map.get("GLM-5.2"), 80)
+      assertEqual(map.get("Tencent Hy3"), 20)
+      assertEqual(map.size, 3)
     },
   ],
   [
-    "extractPlanAllowances extracts PRO allowances from pro fixture",
+    "extractPlanAllowances returns empty for pages with no allowance tables",
     () => {
-      const map = extractPlanAllowances(PRO_HTML)
-      assert(map.size >= 20, `pro allowances must be 20+, got ${map.size}`)
-      // Pro allowances are generally $20 for most models via fixtures
-      const has20 = [...map.values()].some((v) => v === 20)
-      assert(has20, "pro must have at least one $20 allowance")
+      const map = extractPlanAllowances(GOAT_HTML)
+      assertEqual(map.size, 0, "goat fixture has no rendered tables, must yield no allowances")
     },
   ],
   [
