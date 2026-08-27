@@ -1,5 +1,46 @@
 # Changelog
 
+## 1.5.2 - 2026-08-28
+
+Chore: catalog refresh to `command-code@1.36.0`, with a deals-coverage gate
+fix for name-colliding free variants.
+
+- Added `z-ai/glm-5.3-flash` (GLM-5.3 Flash) and `Qwen/Qwen3.8-Flash` with
+  deals records; removed `stealth/ox-alpha` (dropped from the upstream
+  catalog).
+- MiniMax free variants (`minimax/minimax-m3-free`,
+  `minimax/minimax-m2.7-free`) now append `(free)` to their picker display
+  name — upstream renamed them to share the paid display name — derived
+  data-driven from the zero-cost table, with updated deal allowance pricing
+  for `deepseek/deepseek-v4-flash-vision-exp`.
+- The deals-coverage gate now iterates every snapshot entry by id, so free
+  variants whose display names collide with paid siblings are actually
+  coverage-checked (a fixture that silently dropped them previously passed
+  with exit 0 and emitted a partial deals catalog); a shared
+  `scripts/snapshot-index.mjs` parser replaced the duplicated regex parsing.
+
+### Fixes
+
+- **Deals-coverage gate**: `check-deals-coverage.mjs` and the
+  `missingDealsModels` check in `refresh-deals.mjs` iterated a first-wins
+  name→id map, so MiniMax free variants — whose snapshot display names
+  collide with their paid siblings — were never actually checked. Both gates
+  now iterate by id, with the name fallback applying only to unambiguous
+  names; records that resolve to no snapshot id are skipped instead of
+  collapsing under `undefined`.
+- Catalog refresh to `command-code@1.33.0` added the MiniMax free variants;
+  the `1.36.0` refresh added GLM-5.3 Flash and Qwen 3.8 Flash, dropped Ox
+  Alpha, and extended `src/plugin/models.ts` with the zero-cost `(free)`
+  suffix. The extended pricing import now fits the print width again
+  (`format:check` passes).
+
+### Chores
+
+- New `tests/deals-coverage.test.ts` regression cases: removed free variants
+  now fail the gate; deals free flag ⇔ facts zero-cost table consistency;
+  negative suffix test (absent cost entry must not get `(free)`).
+- README documents the `(free)` suffix and its zero-cost derivation.
+
 ## 1.5.1 - 2026-08-24
 
 Fix: provider parsers now synthesize the full reasoning and text lifecycle —
