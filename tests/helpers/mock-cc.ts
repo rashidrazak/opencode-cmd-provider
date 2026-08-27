@@ -50,6 +50,24 @@ export interface MockCcOptions {
   whoamiStatus?: number
   /** called with the headers of each GET /alpha/whoami request */
   onWhoami?: (headers: Record<string, string>) => void
+  /**
+   * RSC body served at GET /docs/rsc/pricing-limits (the raw flight payload
+   * the docs site returns for `RSC: 1` requests). 404 when unset; served
+   * as `text/x-component` when set. Use the committed
+   * `tests/fixtures/rsc-pricing-limits.txt` content for parity with the
+   * offline path.
+   */
+  rscPricing?: string
+  /** RSC body served at GET /docs/rsc/plans/goat; 404 when unset. */
+  rscGoat?: string
+  /** RSC body served at GET /docs/rsc/plans/pro; 404 when unset. */
+  rscPro?: string
+  /** called with the headers of each GET /docs/rsc/pricing-limits request */
+  onRscPricing?: (headers: Record<string, string>) => void
+  /** called with the headers of each GET /docs/rsc/plans/goat request */
+  onRscGoat?: (headers: Record<string, string>) => void
+  /** called with the headers of each GET /docs/rsc/plans/pro request */
+  onRscPro?: (headers: Record<string, string>) => void
 }
 
 export interface MockCcHits {
@@ -58,12 +76,24 @@ export interface MockCcHits {
   chatCompletions: number
   messages: number
   whoami: number
+  rscPricing: number
+  rscGoat: number
+  rscPro: number
 }
 
 export function startMockCc(
   options: MockCcOptions = {},
 ): Promise<{ url: string; close: () => Promise<void>; hits: MockCcHits }> {
-  const hits: MockCcHits = { generate: 0, models: 0, chatCompletions: 0, messages: 0, whoami: 0 }
+  const hits: MockCcHits = {
+    generate: 0,
+    models: 0,
+    chatCompletions: 0,
+    messages: 0,
+    whoami: 0,
+    rscPricing: 0,
+    rscGoat: 0,
+    rscPro: 0,
+  }
   /**
    * Serves an error response for an endpoint: status + error body with an
    * optional Retry-After. `errorsLeft` is the number of consecutive error
@@ -257,6 +287,45 @@ export function startMockCc(
       if (req.url === "/cli.mjs" && req.method === "GET") {
         res.writeHead(200, { "content-type": "text/javascript" })
         res.end(options.modalitiesBundle ?? "")
+        return
+      }
+      // RSC endpoints: serve the docs site's flight payload (the raw text
+      // the live site returns for `RSC: 1` requests). 404 when the option
+      // is unset so the caller's fallback path is exercised naturally.
+      if (req.url === "/docs/rsc/pricing-limits" && req.method === "GET") {
+        hits.rscPricing++
+        options.onRscPricing?.((req.headers ?? {}) as Record<string, string>)
+        if (options.rscPricing === undefined) {
+          res.writeHead(404)
+          res.end("not found")
+          return
+        }
+        res.writeHead(200, { "content-type": "text/x-component" })
+        res.end(options.rscPricing)
+        return
+      }
+      if (req.url === "/docs/rsc/plans/goat" && req.method === "GET") {
+        hits.rscGoat++
+        options.onRscGoat?.((req.headers ?? {}) as Record<string, string>)
+        if (options.rscGoat === undefined) {
+          res.writeHead(404)
+          res.end("not found")
+          return
+        }
+        res.writeHead(200, { "content-type": "text/x-component" })
+        res.end(options.rscGoat)
+        return
+      }
+      if (req.url === "/docs/rsc/plans/pro" && req.method === "GET") {
+        hits.rscPro++
+        options.onRscPro?.((req.headers ?? {}) as Record<string, string>)
+        if (options.rscPro === undefined) {
+          res.writeHead(404)
+          res.end("not found")
+          return
+        }
+        res.writeHead(200, { "content-type": "text/x-component" })
+        res.end(options.rscPro)
         return
       }
       res.writeHead(404)
