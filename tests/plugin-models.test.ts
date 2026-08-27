@@ -7,6 +7,7 @@ import {
   resolveDisplayPrefix,
 } from "../src/plugin/models.js"
 import type { CatalogModel } from "../src/catalog/snapshot.js"
+import { MODEL_SNAPSHOT } from "../src/catalog/snapshot.js"
 import { assert, assertEqual, run } from "./harness.js"
 
 const OPTIONS = {
@@ -253,6 +254,27 @@ run([
       for (const [id, model] of Object.entries(entry.models ?? {})) {
         assertEqual(model.tool_call, true, `${id} must set tool_call`)
       }
+    },
+  ],
+
+  [
+    "free variants get a (free) suffix so paid and free models are distinguishable",
+    () => {
+      const config = {}
+      // Real snapshot: upstream names the paid and free MiniMax variants
+      // identically, so the display name must disambiguate the free ones.
+      autoRegister(config, MODEL_SNAPSHOT, OPTIONS)
+      const entry = config.provider.commandcode
+      assertEqual(entry.models["MiniMaxAI/MiniMax-M3"].name, "[CMD] MiniMax M3")
+      assertEqual(entry.models["MiniMaxAI/MiniMax-M2.7"].name, "[CMD] MiniMax M2.7")
+      assertEqual(
+        entry.models["minimax/minimax-m3-free"].name,
+        "[CMD] MiniMax M3 (free)",
+      )
+      assertEqual(
+        entry.models["minimax/minimax-m2.7-free"].name,
+        "[CMD] MiniMax M2.7 (free)",
+      )
     },
   ],
 

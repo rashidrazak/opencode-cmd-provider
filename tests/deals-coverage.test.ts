@@ -35,8 +35,16 @@ run([
         }
         // spot-check: the models that previously regressed are now covered
         assert(
-          [...extractModelRecords(html).values()].some((r) => r.name === "Ox Alpha"),
-          `${fixture}: Ox Alpha must be present`,
+          [...extractModelRecords(html).values()].some(
+            (r) => r.name === "GLM-5.3 Flash",
+          ),
+          `${fixture}: GLM-5.3 Flash must be present`,
+        )
+        assert(
+          [...extractModelRecords(html).values()].some(
+            (r) => r.name === "Qwen 3.8 Flash",
+          ),
+          `${fixture}: Qwen 3.8 Flash must be present`,
         )
         assert(
           [...extractModelRecords(html).values()].some(
@@ -55,7 +63,6 @@ run([
         provider: {
           commandcode: {
             models: {
-              "stealth/ox-alpha": { name: "Ox Alpha", limit: { context: 1048576, output: 65536 } },
               "deepseek/deepseek-v4-flash-vision-exp": {
                 name: "DeepSeek V4 Flash Vision (exp)",
                 limit: { context: 1000000, output: 65536 },
@@ -70,9 +77,6 @@ run([
           provider: { commandcode: { models: Record<string, Record<string, unknown>> } }
         }
       ).provider.commandcode.models
-      assertEqual(models["stealth/ox-alpha"].options, {
-        cmd: { tier: "opensource", free: true },
-      })
       const vision = models["deepseek/deepseek-v4-flash-vision-exp"].options
       assert(vision && typeof vision === "object" && "cmd" in vision, "vision must get cmd")
       const cmd = (vision as { cmd: Record<string, unknown> }).cmd

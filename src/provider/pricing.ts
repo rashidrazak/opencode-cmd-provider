@@ -23,3 +23,19 @@ export const ZERO_MODEL_COST: CommandCodeModelCost = {
   cacheRead: 0,
   cacheWrite: 0,
 }
+
+/**
+ * True when every rate is zero — the model is served free (e.g. the MiniMax
+ * M3 / M2.7 free variants). Used to disambiguate display names: the upstream
+ * catalog names the paid and free variants identically (`MiniMax M3`), so the
+ * auto-registered picker entry appends `(free)` when this matches.
+ */
+export function isFreeModelCost(cost: CommandCodeModelCost | undefined): boolean {
+  return (
+    cost !== undefined &&
+    cost.input === 0 &&
+    cost.output === 0 &&
+    cost.cacheRead === 0 &&
+    cost.cacheWrite === 0
+  )
+}

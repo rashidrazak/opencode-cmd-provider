@@ -173,21 +173,21 @@ run([
   [
     "missingDealsModels flags stale fixtures that lack new models",
     () => {
-      // A docs source missing Ox Alpha / DeepSeek V4 Flash Vision (exp) must
-      // be reported so refresh aborts instead of emitting a partial catalog.
+      // A docs source missing a snapshot model (e.g. GLM-5.3 Flash) must be
+      // reported so refresh aborts instead of emitting a partial catalog.
       const recs = extractModelRecords(GOAT_HTML)
       const without = new Map(
         [...recs].filter(
-          ([, r]) => r.name !== "Ox Alpha" && r.name !== "DeepSeek V4 Flash Vision (exp)",
+          ([, r]) => r.name !== "GLM-5.3 Flash" && r.name !== "DeepSeek V4 Flash Vision (exp)",
         ),
       )
       const { missing, covered } = missingDealsModels(without)
       assertEqual(
         missing.sort(),
-        ["deepseek/deepseek-v4-flash-vision-exp", "stealth/ox-alpha"],
+        ["deepseek/deepseek-v4-flash-vision-exp", "z-ai/glm-5.3-flash"],
         "must report the two models the docs source lacks",
       )
-      assertEqual(covered, 58)
+      assertEqual(covered, 57)
     },
   ],
   [

@@ -42,7 +42,6 @@ export const REASONING_MODELS: ReadonlySet<string> = new Set([
   "moonshotai/Kimi-K3",
   "nvidia/nemotron-3-ultra-550b-a55b",
   "poolside/laguna-s-2.1-free",
-  "stealth/ox-alpha",
   "stepfun/Step-3.7-Flash",
   "tencent/hy3-paid",
   "thinkingmachines/inkling",

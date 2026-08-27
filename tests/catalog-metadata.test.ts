@@ -21,7 +21,6 @@ const FREE_MODELS = new Set([
   "minimax/minimax-m2.7-free",
   "minimax/minimax-m3-free",
   "poolside/laguna-s-2.1-free",
-  "stealth/ox-alpha",
 ])
 
 // Models Command Code advertises as reasoning-capable but with no explicit
@@ -51,10 +50,12 @@ const EFFORTS_MODELS = new Set([
   "deepseek/deepseek-v4-pro",
   "deepseek/deepseek-v4-flash",
   "deepseek/deepseek-v4-flash-vision-exp",
+  "z-ai/glm-5.3-flash",
   "zai-org/GLM-5.3",
   "zai-org/GLM-5.2",
   "Qwen/Qwen3.8-Max",
   "Qwen/Qwen3.8-27B",
+  "Qwen/Qwen3.8-Flash",
   "claude-sonnet-5",
   "claude-sonnet-4-6",
   "claude-fable-5",
