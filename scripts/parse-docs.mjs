@@ -3,59 +3,33 @@
 // per-model records as escaped JSON in the Next.js flight payload; we decode
 // that instead of scraping HTML tables for the model-level data, and read the
 // rendered allowance tables for plan credits.
+//
+// The shared JSON depth-state-machine lives in json-stream.mjs; this module
+// is the HTML-allowance-table half of the legacy deals pipeline. The RSC
+// surface (pricing-limits availability + compact arrays, per-plan slug
+// records) lives in parse-rsc.mjs.
 import { extractTables, parseMoney } from "./html-tables.mjs"
+import { parseJsonValue } from "./json-stream.mjs"
 
 function decodeEscapedJson(html) {
   // The flight payload escapes quotes/newlines inside script text as \" and \n.
   return html.replaceAll('\\"', '"').replaceAll("\\n", "\n").replaceAll("\\u0026", "&")
 }
 
-function parseRecord(text, start) {
-  // Parse one JSON object starting at `start`. Assumes no nested braces in
-  // string values (true for these records).
-  let depth = 0
-  let inString = false
-  let escaped = false
-  for (let i = start; i < text.length; i++) {
-    const c = text[i]
-    if (escaped) {
-      escaped = false
-      continue
-    }
-    if (c === "\\") {
-      escaped = true
-      continue
-    }
-    if (c === '"') {
-      inString = !inString
-      continue
-    }
-    if (inString) continue
-    if (c === "{") depth++
-    else if (c === "}") {
-      depth--
-      if (depth === 0) {
-        try {
-          return { record: JSON.parse(text.slice(start, i + 1)), end: i + 1 }
-        } catch {
-          return undefined
-        }
-      }
-    }
-  }
-  return undefined
-}
-
 export function extractModelRecords(html) {
   const text = decodeEscapedJson(html)
   const records = new Map()
+  // The legacy HTML path scans the page for each `{"slug":...}` object
+  // separately — the flight payload embeds them as standalone objects
+  // rather than a single top-level array. The shared parseJsonValue helper
+  // from json-stream.mjs does the brace-balancing and JSON.parse once per
+  // match, so there's no duplicated state-machine here.
   for (let i = 0; i < text.length; i++) {
-    if (text.startsWith('{"slug":"', i)) {
-      const parsed = parseRecord(text, i)
-      if (!parsed || typeof parsed.record.id !== "string") continue
-      records.set(parsed.record.id, parsed.record)
-      i = parsed.end
-    }
+    if (!text.startsWith('{"slug":"', i)) continue
+    const parsed = parseJsonValue(text, i)
+    if (!parsed || typeof parsed.value.id !== "string") continue
+    records.set(parsed.value.id, parsed.value)
+    i = parsed.end - 1
   }
   // The docs `id` for Claude Haiku omits the snapshot's version suffix; callers
   // that need snapshot-keyed data should map names to snapshot ids separately.
