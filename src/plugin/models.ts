@@ -1,7 +1,12 @@
 // src/plugin/models.ts — snapshot → config auto-registration (issue #16)
 import type { Config, ProviderConfig } from "@opencode-ai/sdk/v2"
 import type { CatalogModel } from "../catalog/snapshot.js"
-import { MODEL_COSTS, ZERO_MODEL_COST, isFreeModelCost, type CommandCodeModelCost } from "../provider/pricing.js"
+import {
+  MODEL_COSTS,
+  ZERO_MODEL_COST,
+  isFreeModelCost,
+  type CommandCodeModelCost,
+} from "../provider/pricing.js"
 import { reasoningVariantsForModel, isReasoningModel } from "../provider/reasoning.js"
 import { inputModalitiesForModel } from "../provider/modalities.js"
 
