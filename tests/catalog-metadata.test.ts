@@ -17,7 +17,11 @@ import { MODEL_EFFORTS, REASONING_MODELS, isReasoningModel } from "../src/provid
 import { MODEL_COSTS } from "../src/provider/pricing.js"
 import { assert, assertEqual, run } from "./harness.js"
 
-const FREE_MODELS = new Set(["poolside/laguna-s-2.1-free", "stealth/ox-alpha"])
+const FREE_MODELS = new Set([
+  "minimax/minimax-m2.7-free",
+  "minimax/minimax-m3-free",
+  "poolside/laguna-s-2.1-free",
+])
 
 // Models Command Code advertises as reasoning-capable but with no explicit
 // effort levels (Command Code picks the depth). These must advertise
@@ -33,6 +37,7 @@ const NON_REASONING_MODELS = new Set([
   "zai-org/GLM-5.1",
   "zai-org/GLM-5",
   "MiniMaxAI/MiniMax-M2.7",
+  "minimax/minimax-m2.7-free",
   "MiniMaxAI/MiniMax-M2.5",
   "xiaomi/mimo-v2.5-pro",
   "xiaomi/mimo-v2.5",
@@ -45,10 +50,12 @@ const EFFORTS_MODELS = new Set([
   "deepseek/deepseek-v4-pro",
   "deepseek/deepseek-v4-flash",
   "deepseek/deepseek-v4-flash-vision-exp",
+  "z-ai/glm-5.3-flash",
   "zai-org/GLM-5.3",
   "zai-org/GLM-5.2",
   "Qwen/Qwen3.8-Max",
   "Qwen/Qwen3.8-27B",
+  "Qwen/Qwen3.8-Flash",
   "claude-sonnet-5",
   "claude-sonnet-4-6",
   "claude-fable-5",

@@ -23,27 +23,12 @@ import {
   ratesFor,
 } from "./parse-docs.mjs"
 import { readFileSync } from "node:fs"
+import { snapshotIndex } from "./snapshot-index.mjs"
 
 const DEFAULT_PRICING_URL = "https://commandcode.ai/docs/resources/pricing-limits"
 const DEFAULT_GOAT_URL = "https://commandcode.ai/docs/plans/goat"
 const DEFAULT_PRO_URL = "https://commandcode.ai/docs/plans/pro"
 const DEFAULT_OUT = resolve(import.meta.dirname, "..", "src", "deals", "catalog.ts")
-
-// Snapshot ids and names, as used by the opencode provider config. Deals keys
-// must match these ids; docs records carry ids with different slugs for some
-// models (e.g. claude-haiku-4-5 vs snapshot's claude-haiku-4-5-20251001), so we
-// map docs → snapshot by stable display name.
-function snapshotIdsByName() {
-  const text = readFileSync(
-    resolve(import.meta.dirname, "..", "src", "catalog", "snapshot.ts"),
-    "utf-8",
-  )
-  const map = new Map()
-  for (const m of text.matchAll(/\{ id: "([^"]+)", name: "([^"]+)",/g)) {
-    map.set(m[2], m[1])
-  }
-  return map
-}
 
 // Missing snapshot models in the chosen records source. Returns
 // `{ missing, covered }`: `missing` is the list of snapshot ids that have no
@@ -53,12 +38,20 @@ function snapshotIdsByName() {
 // instead of emitting a partial catalog (issue: Ox Alpha / DeepSeek V4 Flash
 // Vision (exp) showed no section because the fixtures predated them).
 export function missingDealsModels(records) {
-  const nameToSnapshotId = snapshotIdsByName()
+  const { byId, nameCounts } = snapshotIndex()
+  const ids = new Set([...records.values()].map((record) => record.id))
+  const names = new Set([...records.values()].map((record) => record.name))
   const missing = []
-  for (const [name, id] of nameToSnapshotId) {
-    if (![...records.values()].some((record) => record.name === name)) missing.push(id)
+  for (const [id, name] of byId) {
+    // Match by id first: free variants share display names with their paid
+    // siblings (MiniMax M3 / M2.7) but carry unique ids, so only an id match
+    // proves the right docs record exists. The name fallback applies only to
+    // unambiguous names (legacy id mismatches like claude-haiku-4-5 docs →
+    // claude-haiku-4-5-20251001 snapshot).
+    const covered = ids.has(id) || (nameCounts.get(name) === 1 && names.has(name))
+    if (!covered) missing.push(id)
   }
-  return { missing, covered: nameToSnapshotId.size - missing.length }
+  return { missing, covered: byId.size - missing.length }
 }
 
 function argValue(name) {
@@ -167,14 +160,24 @@ export function emitDealsModule({
   const pricingRecords = extractModelRecords(pricingLimitsHtml)
   const records = goatRecords.size >= pricingRecords.size ? goatRecords : pricingRecords
   // Map docs name → snapshot id (snapshot is the source of truth for model ids).
-  const nameToSnapshotId = snapshotIdsByName()
+  const { byName: nameToSnapshotId, byId: snapshotIds } = snapshotIndex()
+  // Some docs ids (e.g. claude-haiku-4-5) diverge from the snapshot id
+  // (claude-haiku-4-5-20251001), so the name-based map catches those. When
+  // multiple snapshot entries share a name (paid + free variants like
+  // MiniMaxAI/MiniMax-M3 + minimax/minimax-m3-free), the docs id resolves
+  // the ambiguity: each fixture record carries its own id, so we prefer it
+  // when it matches a known snapshot id, and fall back to the name map
+  // otherwise.
   const bySnapshotId = new Map()
   for (const record of records.values()) {
-    const sid = nameToSnapshotId.get(record.name) ?? record.id
-    bySnapshotId.set(sid, {
-      ...record,
-      name: nameToSnapshotId.has(record.name) ? record.name : record.name,
-    })
+    const sid =
+      (record.id && snapshotIds.has(record.id) ? record.id : undefined) ??
+      nameToSnapshotId.get(record.name) ??
+      record.id
+    // A record that resolves to no snapshot id cannot be keyed — skip it
+    // rather than collapsing every such record under `undefined`.
+    if (sid === undefined) continue
+    bySnapshotId.set(sid, { ...record, name: record.name })
   }
   // Allowances keyed by snapshot id.
   const goatAllowances = extractPlanAllowances(goatHtml)

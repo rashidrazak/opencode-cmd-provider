@@ -8,14 +8,13 @@
 import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
 import { extractModelRecords } from "./parse-docs.mjs"
+import { snapshotIndex } from "./snapshot-index.mjs"
 
 const root = resolve(import.meta.dirname, "..")
-const snap = readFileSync(resolve(root, "src/catalog/snapshot.ts"), "utf-8")
-const nameToId = new Map()
-for (const m of snap.matchAll(/\{ id: "([^"]+)", name: "([^"]+)",/g)) nameToId.set(m[2], m[1])
+const { byId, nameCounts } = snapshotIndex()
 
 const missing = []
-for (const [name, id] of nameToId) {
+for (const [id, name] of byId) {
   let covered = false
   for (const f of [
     "tests/fixtures/goat.html",
@@ -23,7 +22,16 @@ for (const [name, id] of nameToId) {
     "tests/fixtures/pricing-limits.html",
   ]) {
     const html = readFileSync(resolve(root, f), "utf-8")
-    if ([...extractModelRecords(html).values()].some((r) => r.name === name)) {
+    const records = [...extractModelRecords(html).values()]
+    // Match by id first: free variants share display names with their paid
+    // siblings (MiniMax M3 / M2.7) but carry unique ids, so only an id match
+    // proves the right docs record exists. The name fallback applies only to
+    // unambiguous names (legacy id mismatches like claude-haiku-4-5 docs →
+    // claude-haiku-4-5-20251001 snapshot).
+    if (
+      records.some((r) => r.id === id) ||
+      (nameCounts.get(name) === 1 && records.some((r) => r.name === name))
+    ) {
       covered = true
       break
     }

@@ -7,6 +7,7 @@ import {
   resolveDisplayPrefix,
 } from "../src/plugin/models.js"
 import type { CatalogModel } from "../src/catalog/snapshot.js"
+import { MODEL_SNAPSHOT } from "../src/catalog/snapshot.js"
 import { assert, assertEqual, run } from "./harness.js"
 
 const OPTIONS = {
@@ -253,6 +254,43 @@ run([
       for (const [id, model] of Object.entries(entry.models ?? {})) {
         assertEqual(model.tool_call, true, `${id} must set tool_call`)
       }
+    },
+  ],
+
+  [
+    "free variants get a (free) suffix so paid and free models are distinguishable",
+    () => {
+      const config = {}
+      // Real snapshot: upstream names the paid and free MiniMax variants
+      // identically, so the display name must disambiguate the free ones.
+      autoRegister(config, MODEL_SNAPSHOT, OPTIONS)
+      const entry = config.provider.commandcode
+      assertEqual(entry.models["MiniMaxAI/MiniMax-M3"].name, "[CMD] MiniMax M3")
+      assertEqual(entry.models["MiniMaxAI/MiniMax-M2.7"].name, "[CMD] MiniMax M2.7")
+      assertEqual(entry.models["minimax/minimax-m3-free"].name, "[CMD] MiniMax M3 (free)")
+      assertEqual(entry.models["minimax/minimax-m2.7-free"].name, "[CMD] MiniMax M2.7 (free)")
+    },
+  ],
+
+  [
+    "absent cost entries get no (free) suffix; zero-cost entries always do",
+    () => {
+      // A model missing from MODEL_COSTS falls back to ZERO_MODEL_COST but is
+      // deliberately NOT free — only an explicit zero-cost catalog entry earns
+      // the suffix. Laguna has one (its name does not collide with a paid
+      // sibling, but the suffix is still informative).
+      const config = {}
+      autoRegister(
+        config,
+        [
+          { id: "vendor/unknown-model", name: "Unknown Model", contextLength: 16000 },
+          { id: "poolside/laguna-s-2.1-free", name: "Laguna S 2.1", contextLength: 256000 },
+        ],
+        OPTIONS,
+      )
+      const entry = config.provider.commandcode
+      assertEqual(entry.models["vendor/unknown-model"].name, "[CMD] Unknown Model")
+      assertEqual(entry.models["poolside/laguna-s-2.1-free"].name, "[CMD] Laguna S 2.1 (free)")
     },
   ],
 

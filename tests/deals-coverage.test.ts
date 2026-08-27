@@ -4,8 +4,10 @@
 // the docs fixtures predated them).
 import { readFileSync } from "node:fs"
 import { MODEL_SNAPSHOT } from "../src/catalog/snapshot.js"
+import { MODEL_COSTS } from "../src/catalog/facts.js"
 import { MODEL_DEALS } from "../src/deals/catalog.js"
 import { enrichCommandCodeModels } from "../src/deals/enrichment.js"
+import { isFreeModelCost } from "../src/provider/pricing.js"
 import { extractModelRecords } from "../scripts/parse-docs.mjs"
 import { assert, assertEqual, run } from "./harness.js"
 
@@ -17,6 +19,22 @@ run([
         (model) => model.id,
       )
       assertEqual(missing, [], `models missing deals data: ${missing.join(", ")}`)
+    },
+  ],
+
+  [
+    "deals free flag and facts zero-cost table agree",
+    () => {
+      // The picker's "(free)" suffix derives from the facts zero-cost table
+      // (Core-side) while the TUI "FREE" row derives from MODEL_DEALS.free
+      // (docs-side) — the two must never drift apart.
+      for (const [id, deal] of Object.entries(MODEL_DEALS)) {
+        assertEqual(
+          deal.free,
+          isFreeModelCost(MODEL_COSTS[id]),
+          `${id}: deals free flag must match the facts zero-cost table`,
+        )
+      }
     },
   ],
 
@@ -35,8 +53,12 @@ run([
         }
         // spot-check: the models that previously regressed are now covered
         assert(
-          [...extractModelRecords(html).values()].some((r) => r.name === "Ox Alpha"),
-          `${fixture}: Ox Alpha must be present`,
+          [...extractModelRecords(html).values()].some((r) => r.name === "GLM-5.3 Flash"),
+          `${fixture}: GLM-5.3 Flash must be present`,
+        )
+        assert(
+          [...extractModelRecords(html).values()].some((r) => r.name === "Qwen 3.8 Flash"),
+          `${fixture}: Qwen 3.8 Flash must be present`,
         )
         assert(
           [...extractModelRecords(html).values()].some(
@@ -55,7 +77,6 @@ run([
         provider: {
           commandcode: {
             models: {
-              "stealth/ox-alpha": { name: "Ox Alpha", limit: { context: 1048576, output: 65536 } },
               "deepseek/deepseek-v4-flash-vision-exp": {
                 name: "DeepSeek V4 Flash Vision (exp)",
                 limit: { context: 1000000, output: 65536 },
@@ -70,9 +91,6 @@ run([
           provider: { commandcode: { models: Record<string, Record<string, unknown>> } }
         }
       ).provider.commandcode.models
-      assertEqual(models["stealth/ox-alpha"].options, {
-        cmd: { tier: "opensource", free: true },
-      })
       const vision = models["deepseek/deepseek-v4-flash-vision-exp"].options
       assert(vision && typeof vision === "object" && "cmd" in vision, "vision must get cmd")
       const cmd = (vision as { cmd: Record<string, unknown> }).cmd

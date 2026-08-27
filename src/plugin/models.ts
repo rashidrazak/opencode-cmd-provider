@@ -1,7 +1,12 @@
 // src/plugin/models.ts — snapshot → config auto-registration (issue #16)
 import type { Config, ProviderConfig } from "@opencode-ai/sdk/v2"
 import type { CatalogModel } from "../catalog/snapshot.js"
-import { MODEL_COSTS, ZERO_MODEL_COST, type CommandCodeModelCost } from "../provider/pricing.js"
+import {
+  MODEL_COSTS,
+  ZERO_MODEL_COST,
+  isFreeModelCost,
+  type CommandCodeModelCost,
+} from "../provider/pricing.js"
 import { reasoningVariantsForModel, isReasoningModel } from "../provider/reasoning.js"
 import { inputModalitiesForModel } from "../provider/modalities.js"
 
@@ -115,8 +120,14 @@ export function augmentConfigCommandCodeModels(config: Config): void {
 function configModelFor(model: CatalogModel, prefix = DEFAULT_DISPLAY_PREFIX): ConfigModel {
   const variants = reasoningVariantsForModel(model.id)
   const costs: CommandCodeModelCost = MODEL_COSTS[model.id] ?? ZERO_MODEL_COST
+  // Upstream names the paid and free MiniMax variants identically
+  // (`MiniMax M3` / `MiniMax M2.7`); append `(free)` to the picker entry so
+  // users can tell them apart. Data-driven from the zero cost table — a model
+  // is only "free" when the catalog has an actual zero-cost entry (an absent
+  // entry falls back to ZERO_MODEL_COST and is NOT free).
+  const freeSuffix = MODEL_COSTS[model.id] !== undefined && isFreeModelCost(costs) ? " (free)" : ""
   return {
-    name: `${prefix}${model.name}`,
+    name: `${prefix}${model.name}${freeSuffix}`,
     limit: {
       context: model.contextLength,
       output: Math.min(model.contextLength, DEFAULT_MAX_OUTPUT_TOKENS),

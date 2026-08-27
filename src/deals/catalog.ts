@@ -50,7 +50,7 @@ export const MODEL_DEALS: Readonly<Record<string, ModelDeals>> = {
   "claude-sonnet-4-6": { tier: "premium", benchmark: {"intelligence":48.4}, free: false, allowance: {"pro":20} },
   "claude-sonnet-5": { tier: "premium", benchmark: {"intelligence":55.3,"tokPerSec":81.9}, free: false, allowance: {"pro":20} },
   "deepseek/deepseek-v4-flash": { tier: "opensource", benchmark: {"intelligence":51.8,"tokPerSec":114.6}, peakOffPeak: {"peak":{"input":0.44,"output":1.32,"cacheRead":0.014,"cacheWrite":0},"offPeak":{"input":0.22,"output":0.66,"cacheRead":0.007,"cacheWrite":0},"windows":"01–04 & 06–10 UTC"}, free: false, allowance: {"goat":60,"pro":70} },
-  "deepseek/deepseek-v4-flash-vision-exp": { tier: "opensource", peakOffPeak: {"peak":{"input":0.44,"output":1.32,"cacheRead":0.02,"cacheWrite":0},"offPeak":{"input":0.22,"output":0.66,"cacheRead":0.01,"cacheWrite":0},"windows":"01–04 & 06–10 UTC"}, free: false, allowance: {"goat":20,"pro":30} },
+  "deepseek/deepseek-v4-flash-vision-exp": { tier: "opensource", peakOffPeak: {"peak":{"input":0.44,"output":1.32,"cacheRead":0.014,"cacheWrite":0},"offPeak":{"input":0.22,"output":0.66,"cacheRead":0.007,"cacheWrite":0},"windows":"01–04 & 06–10 UTC"}, free: false, allowance: {"goat":20,"pro":30} },
   "deepseek/deepseek-v4-pro": { tier: "opensource", benchmark: {"intelligence":53.2,"tokPerSec":75.3}, peakOffPeak: {"peak":{"input":1.32,"output":3.96,"cacheRead":0.044,"cacheWrite":0},"offPeak":{"input":0.66,"output":1.98,"cacheRead":0.022,"cacheWrite":0},"windows":"01–04 & 06–10 UTC"}, free: false, allowance: {"goat":20,"pro":30} },
   "google/gemini-3.1-flash-lite": { tier: "premium", benchmark: {"intelligence":25.6}, free: false, allowance: {"pro":20} },
   "google/gemini-3.5-flash": { tier: "premium", benchmark: {"intelligence":52}, free: false, allowance: {"pro":20} },
@@ -67,6 +67,8 @@ export const MODEL_DEALS: Readonly<Record<string, ModelDeals>> = {
   "meta/muse-spark-1.1": { tier: "premium", benchmark: {"intelligence":53.2}, free: false, allowance: {"pro":20} },
   "meta/muse-spark-1.2": { tier: "opensource", benchmark: {"intelligence":56.8}, free: false, allowance: {"goat":20,"pro":30} },
   "meta/muse-spark-1.2-contributor": { tier: "opensource", benchmark: {"intelligence":56.8}, free: false, allowance: {"goat":20,"pro":30} },
+  "minimax/minimax-m2.7-free": { tier: "opensource", free: true },
+  "minimax/minimax-m3-free": { tier: "opensource", free: true },
   "MiniMaxAI/MiniMax-M2.5": { tier: "opensource", benchmark: {"intelligence":34.5}, free: false },
   "MiniMaxAI/MiniMax-M2.7": { tier: "opensource", benchmark: {"intelligence":38.9}, free: false },
   "MiniMaxAI/MiniMax-M3": { tier: "opensource", discount: {"pct":50}, was: {"input":0.6,"output":2.4,"cacheRead":0.12}, now: {"input":0.3,"output":1.2,"cacheRead":0.06}, benchmark: {"intelligence":45.4,"tokPerSec":104.4}, free: false, allowance: {"goat":47,"pro":57} },
@@ -83,9 +85,9 @@ export const MODEL_DEALS: Readonly<Record<string, ModelDeals>> = {
   "Qwen/Qwen3.7-Max": { tier: "opensource", benchmark: {"intelligence":46.7}, free: false, allowance: {"goat":33,"pro":43} },
   "Qwen/Qwen3.7-Plus": { tier: "opensource", benchmark: {"intelligence":39.4,"tokPerSec":55.6}, overContext: {"input":1.2,"output":4.8,"cacheRead":0.24,"cacheWrite":1.5}, free: false, allowance: {"goat":33,"pro":43} },
   "Qwen/Qwen3.8-27B": { tier: "opensource", benchmark: {"intelligence":52}, free: false, allowance: {"goat":70,"pro":80} },
+  "Qwen/Qwen3.8-Flash": { tier: "opensource", free: false, allowance: {"goat":20,"pro":30} },
   "Qwen/Qwen3.8-Max": { tier: "opensource", benchmark: {"intelligence":58.1,"tokPerSec":46.7}, free: false, allowance: {"goat":20,"pro":30} },
   "sakana/fugu-ultra": { tier: "premium", free: false },
-  "stealth/ox-alpha": { tier: "opensource", free: true },
   "stepfun/Step-3.5-Flash": { tier: "opensource", benchmark: {"intelligence":26.5}, free: false, allowance: {"goat":20,"pro":30} },
   "stepfun/Step-3.7-Flash": { tier: "opensource", benchmark: {"intelligence":30.9,"tokPerSec":120.1}, free: false, allowance: {"goat":20,"pro":30} },
   "tencent/hy3-paid": { tier: "opensource", benchmark: {"intelligence":42.2,"tokPerSec":74.8}, free: false, allowance: {"goat":70,"pro":80} },
@@ -95,6 +97,7 @@ export const MODEL_DEALS: Readonly<Record<string, ModelDeals>> = {
   "xai/grok-4.6": { tier: "opensource", benchmark: {"intelligence":60.9,"tokPerSec":66}, overContext: {"input":4,"output":12,"cacheRead":1,"cacheWrite":0}, free: false, allowance: {"goat":20,"pro":30} },
   "xiaomi/mimo-v2.5": { tier: "opensource", discount: {"pct":98}, was: {"input":0.8,"output":4,"cacheRead":0.16}, now: {"input":0.14,"output":0.28,"cacheRead":0.0028}, benchmark: {"intelligence":38,"tokPerSec":61.8}, free: false, allowance: {"goat":30,"pro":40} },
   "xiaomi/mimo-v2.5-pro": { tier: "opensource", discount: {"pct":99}, was: {"input":2,"output":6,"cacheRead":0.4}, now: {"input":0.435,"output":0.87,"cacheRead":0.0036}, benchmark: {"intelligence":42.9,"tokPerSec":58.1}, free: false, allowance: {"goat":20,"pro":30} },
+  "z-ai/glm-5.3-flash": { tier: "opensource", free: false, allowance: {"goat":40,"pro":50} },
   "zai-org/GLM-5": { tier: "opensource", benchmark: {"intelligence":40.6}, free: false },
   "zai-org/GLM-5.1": { tier: "opensource", benchmark: {"intelligence":41,"tokPerSec":28.2}, free: false },
   "zai-org/GLM-5.2": { tier: "opensource", benchmark: {"intelligence":52.6,"tokPerSec":69}, free: false, allowance: {"goat":70,"pro":80} },
@@ -113,5 +116,5 @@ export const PLAN_CATALOG: Readonly<Record<PlanId, PlanInfo>> = {
 }
 
 export const DEAL_SOURCE_URL = "https://commandcode.ai/docs/resources/pricing-limits"
-export const DEAL_LAST_REFRESHED = "2026-08-24"
+export const DEAL_LAST_REFRESHED = "2026-08-27"
 export const DEAL_PACKAGE_VERSION = "docs"

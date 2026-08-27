@@ -112,7 +112,7 @@ run([
   [
     "modelDealEntry: MiniMax M3 has discount/was/now but no overContext (identical tier)",
     () => {
-      const rec = [...extractModelRecords(GOAT_HTML).values()].find((r) => r.name === "MiniMax M3")
+      const rec = extractModelRecords(GOAT_HTML).get("MiniMaxAI/MiniMax-M3")
       assert(rec, "MiniMax M3 must exist")
       assertEqual(modelDealEntry(rec), {
         tier: "opensource",
@@ -173,21 +173,40 @@ run([
   [
     "missingDealsModels flags stale fixtures that lack new models",
     () => {
-      // A docs source missing Ox Alpha / DeepSeek V4 Flash Vision (exp) must
-      // be reported so refresh aborts instead of emitting a partial catalog.
+      // A docs source missing a snapshot model (e.g. GLM-5.3 Flash) must be
+      // reported so refresh aborts instead of emitting a partial catalog.
       const recs = extractModelRecords(GOAT_HTML)
       const without = new Map(
         [...recs].filter(
-          ([, r]) => r.name !== "Ox Alpha" && r.name !== "DeepSeek V4 Flash Vision (exp)",
+          ([, r]) => r.name !== "GLM-5.3 Flash" && r.name !== "DeepSeek V4 Flash Vision (exp)",
         ),
       )
       const { missing, covered } = missingDealsModels(without)
       assertEqual(
         missing.sort(),
-        ["deepseek/deepseek-v4-flash-vision-exp", "stealth/ox-alpha"],
+        ["deepseek/deepseek-v4-flash-vision-exp", "z-ai/glm-5.3-flash"],
         "must report the two models the docs source lacks",
       )
-      assertEqual(covered, 56)
+      assertEqual(covered, 59)
+    },
+  ],
+  [
+    "missingDealsModels flags fixtures that drop a free variant (name collision must not mask it)",
+    () => {
+      // The free MiniMax variants share display names with their paid
+      // siblings, so only id matching can prove their docs records exist —
+      // removing them must fail the gate like any other missing model.
+      const recs = extractModelRecords(GOAT_HTML)
+      const withoutFree = new Map(
+        [...recs].filter(([, r]) => !(r.id.startsWith("minimax/") && r.id.endsWith("-free"))),
+      )
+      const { missing, covered } = missingDealsModels(withoutFree)
+      assertEqual(
+        missing.sort(),
+        ["minimax/minimax-m2.7-free", "minimax/minimax-m3-free"],
+        "must report the free variants the docs source lacks",
+      )
+      assertEqual(covered, 59)
     },
   ],
   [
