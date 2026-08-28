@@ -8,8 +8,11 @@ import { MODEL_COSTS } from "../src/catalog/facts.js"
 import { MODEL_DEALS } from "../src/deals/catalog.js"
 import { enrichCommandCodeModels } from "../src/deals/enrichment.js"
 import { isFreeModelCost } from "../src/provider/pricing.js"
-import { extractModelRecords } from "../scripts/parse-docs.mjs"
+import { extractPlanPageRsc } from "../scripts/parse-rsc.mjs"
 import { assert, assertEqual, run } from "./harness.js"
+
+const RSC_GOAT = readFileSync(new URL("./fixtures/rsc-goat.txt", import.meta.url), "utf-8")
+const RSC_PRO = readFileSync(new URL("./fixtures/rsc-pro.txt", import.meta.url), "utf-8")
 
 run([
   [
@@ -39,32 +42,34 @@ run([
   ],
 
   [
-    "every fixture record maps to a snapshot model (no drift)",
+    "every RSC fixture record maps to a snapshot model (no drift)",
     () => {
+      // The RSC's per-plan (goat, pro) slug records are the source of truth
+      // for the snapshot id (the alias is applied inside extractPlanPageRsc).
+      // Every record in the RSC must resolve to a snapshot id; otherwise
+      // the refresh script's RSC path drops it (per the missing-snapshot-id
+      // guard in #82) and the deals catalog silently loses the model.
       const snapshotIds = new Set(MODEL_SNAPSHOT.map((model) => model.id))
       const snapshotNames = new Set(MODEL_SNAPSHOT.map((model) => model.name))
-      for (const fixture of ["goat.html", "pro.html"]) {
-        const html = readFileSync(new URL(`./fixtures/${fixture}`, import.meta.url), "utf-8")
-        for (const record of extractModelRecords(html).values()) {
+      for (const [label, rscText] of [
+        ["rsc-goat", RSC_GOAT],
+        ["rsc-pro", RSC_PRO],
+      ]) {
+        const records = extractPlanPageRsc(rscText)
+        for (const [sid, record] of records) {
           assert(
-            snapshotNames.has(record.name),
-            `${fixture}: docs record "${record.name}" is not in the snapshot`,
+            snapshotIds.has(sid) || snapshotNames.has(record.name ?? ""),
+            `${label}: RSC record id=${sid} name=${record.name} is not in the snapshot`,
           )
         }
-        // spot-check: the models that previously regressed are now covered
+        // Spot-check: the models that previously regressed are still covered
+        // after the HTML → RSC switch.
+        const names = new Set([...records.values()].map((r) => r.name))
+        assert(names.has("GLM-5.3 Flash"), `${label}: GLM-5.3 Flash must be present`)
+        assert(names.has("Qwen 3.8 Flash"), `${label}: Qwen 3.8 Flash must be present`)
         assert(
-          [...extractModelRecords(html).values()].some((r) => r.name === "GLM-5.3 Flash"),
-          `${fixture}: GLM-5.3 Flash must be present`,
-        )
-        assert(
-          [...extractModelRecords(html).values()].some((r) => r.name === "Qwen 3.8 Flash"),
-          `${fixture}: Qwen 3.8 Flash must be present`,
-        )
-        assert(
-          [...extractModelRecords(html).values()].some(
-            (r) => r.name === "DeepSeek V4 Flash Vision (exp)",
-          ),
-          `${fixture}: DeepSeek V4 Flash Vision (exp) must be present`,
+          names.has("DeepSeek V4 Flash Vision (exp)"),
+          `${label}: DeepSeek V4 Flash Vision (exp) must be present`,
         )
       }
     },

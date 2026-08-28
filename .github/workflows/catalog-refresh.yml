@@ -1,0 +1,270 @@
+name: Catalog refresh
+
+# Daily cron that regenerates the model snapshot + deals catalogs and
+# opens a "catalog refresh" PR when the generated files drift from
+# `main`. The PR body is the Markdown summary produced by
+# `scripts/diff-catalog.mjs` (ticket #84), so a reviewer can tell at a
+# glance what changed and decide whether to merge in one click.
+#
+# Triggered by:
+#   - schedule: 06:00 UTC every day (the maintainer observes the first
+#     few scheduled runs manually before trusting auto-merge).
+#   - workflow_dispatch: manual run from the Actions tab, used to
+#     validate changes to this workflow and to refresh on demand.
+#
+# The workflow does not modify the release pipeline's stale-snapshot
+# gate (`.github/workflows/release.yml` / ADR 0003) — that gate is
+# unchanged. This workflow is a "best-effort freshness" mechanism per
+# the wayfinder spec at #77.
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+# `contents: write` is needed to push the catalog-refresh branch back
+# to the repo. `pull-requests: write` is needed to open the PR. The
+# GITHUB_TOKEN is scoped to this workflow — it can't touch anything
+# outside the repo.
+permissions:
+  contents: write
+  pull-requests: write
+
+# Serialise runs so a slow daily run can't be superseded by a manual
+# dispatch (or vice versa) and race the branch push. The
+# `cancel-in-progress: false` is intentional — overlapping runs would
+# only ever happen by accident, and cancelling a partially completed
+# refresh in favour of a new one is worse than letting the old one
+# finish (the old run already pushed nothing).
+concurrency:
+  group: catalog-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    name: Refresh catalog and open PR if drift detected
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # fetch-depth: 0 so `git diff` against main can resolve the
+          # merge-base (used for the file-level diff in the PR body)
+          # and so the branch we push carries the full history.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # bun is on PATH for consistency with CI/release — the TUI
+      # bundle (`scripts/build-tui.ts`) is bun-only (see AGENTS.md).
+      # The cron does not run `npm run build` today; bun is here so
+      # the workflow is self-contained when the maintainer chooses
+      # to add it later (e.g. once the pre-existing `dist/tui.js`
+      # test-isolation issue is resolved).
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - run: npm ci
+
+      # `npm run refresh` runs `refresh:snapshot` (live fetch) and
+      # `refresh:deals` (live RSC fetch of the three docs pages; the
+      # script falls back to the committed RSC fixtures on 5xx /
+      # network failure, and fails loudly on 4xx — a route change or
+      # a wrong COMMANDCODE_RSC_*_URL override). A network failure in
+      # the snapshot fetch, or a shape-pin failure in either script,
+      # surfaces as a non-zero exit — the workflow fails loudly
+      # (acceptance criterion: "parser error, network failure, schema
+      # mismatch → exit non-zero with a clearly-attributed error
+      # message").
+      - name: Regenerate catalogs
+        run: npm run refresh
+
+      # The test suite is the next gate. A `dist/tui.js`-shaped
+      # failure here is the pre-existing test-isolation issue tracked
+      # in the handoff; the schedule is observed manually before
+      # auto-merge is enabled, so a flaky-looking test will be caught
+      # and triaged before the cron can ship a bad PR.
+      - name: Run test suite
+        run: npm test
+
+      # Diff detection. The generated files live on the working tree
+      # after `npm run refresh`. If they match `main`, exit 0 and
+      # open no PR (acceptance criterion: "no PR opened when nothing
+      # drifted").
+      - name: Detect drift against main
+        id: drift
+        run: |
+          git fetch origin main
+          if git diff --quiet origin/main -- \
+              src/catalog/snapshot.ts \
+              src/catalog/facts.ts \
+              src/deals/catalog.ts; then
+            echo "drift=false" >> "$GITHUB_OUTPUT"
+            echo "No catalog drift detected against main — exiting without opening a PR."
+          else
+            echo "drift=true" >> "$GITHUB_OUTPUT"
+            echo "Catalog drift detected — will open a refresh PR."
+            git diff --stat origin/main -- \
+              src/catalog/snapshot.ts \
+              src/catalog/facts.ts \
+              src/deals/catalog.ts
+          fi
+
+      # Commit the regenerated files. Authored by the GitHub Actions
+      # bot so the commit trail is unambiguous.
+      - name: Commit regenerated catalog
+        if: steps.drift.outputs.drift == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add src/catalog/snapshot.ts src/catalog/facts.ts src/deals/catalog.ts
+          date="$(date -u +%Y-%m-%d)"
+          git commit -m "chore: catalog refresh — ${date}"
+
+      # Build the PR body. The snapshot and deals diffs are produced
+      # separately so each section's drift is its own Markdown
+      # block; the FACTS_LAST_REFRESHED and DEAL_LAST_REFRESHED
+      # dates are surfaced inline by `diff-catalog.mjs` (ticket
+      # #84).
+      #
+      # The data extraction uses `tsx` (already in devDependencies)
+      # to import the generated `.ts` files and `JSON.stringify`
+      # their data portion. The shape of each module's exports is
+      # stable: the generator only adds fields, never renames or
+      # removes them. The "before" data is captured from
+      # `origin/main` before any regeneration; the "after" data is
+      # captured from the working tree (post-refresh, post-commit).
+      - name: Build PR body from catalog diff
+        if: steps.drift.outputs.drift == 'true'
+        run: |
+          set -euo pipefail
+
+          # The capture step writes one JSON file per catalog
+          # (snapshot / facts / deals). The snapshot kind in
+          # `diff-catalog.mjs` only consumes `MODEL_SNAPSHOT`; the
+          # `date` for snapshot diffs comes from
+          # `FACTS_LAST_REFRESHED` (exported from `facts.ts`, not
+          # `snapshot.ts`). Same for deals: the data lives in
+          # `deals/catalog.ts`; the date in the same file.
+          extract() {
+            local ts_path="$1"
+            local out_path="$2"
+            if [ ! -f "${ts_path}" ]; then
+              printf '{"missing":true}\n' > "${out_path}"
+              return
+            fi
+            # `tsx` runs the .ts file as a script. The catalog
+            # modules have top-level `export const` declarations
+            # but no side effects, so we wrap with a dynamic
+            # import and JSON.stringify the relevant exports.
+            # The output always includes any *-LAST_REFRESHED
+            # date the module exports (so the snapshot's
+            # FACTS_LAST_REFRESHED, which lives in facts.ts, is
+            # captured here even when MODEL_SNAPSHOT is absent).
+            npx tsx --input-type=module -e "
+              const mod = await import(${ts_path@Q});
+              const out = {};
+              if (mod.MODEL_SNAPSHOT) out.MODEL_SNAPSHOT = mod.MODEL_SNAPSHOT;
+              if (mod.MODEL_DEALS)    out.MODEL_DEALS    = mod.MODEL_DEALS;
+              if (mod.FACTS_LAST_REFRESHED) out.FACTS_LAST_REFRESHED = mod.FACTS_LAST_REFRESHED;
+              if (mod.DEAL_LAST_REFRESHED)  out.DEAL_LAST_REFRESHED  = mod.DEAL_LAST_REFRESHED;
+              process.stdout.write(JSON.stringify(out));
+            " > "${out_path}" 2>extract-err.txt
+            if [ ! -s "${out_path}" ]; then
+              echo "::error::failed to extract ${ts_path} — see extract-err.txt"
+              cat extract-err.txt
+              exit 1
+            fi
+          }
+
+          # 1) Capture the "before" state from origin/main
+          #    (read-only checkout via `git show`).
+          mkdir -p /tmp/before
+          for f in src/catalog/snapshot.ts src/catalog/facts.ts src/deals/catalog.ts; do
+            base="$(basename "${f}" .ts)"
+            if git show "origin/main:${f}" > "/tmp/before/${base}.ts" 2>/dev/null; then
+              extract "/tmp/before/${base}.ts" "/tmp/before/${base}.json"
+            else
+              printf '{"missing":true}\n' > "/tmp/before/${base}.json"
+            fi
+          done
+
+          # 2) Capture the "after" state from the working tree
+          #    (post-refresh, post-commit).
+          mkdir -p /tmp/after
+          for f in src/catalog/snapshot.ts src/catalog/facts.ts src/deals/catalog.ts; do
+            base="$(basename "${f}" .ts)"
+            extract "${f}" "/tmp/after/${base}.json"
+          done
+
+          # 3) Compose the PR body. The "before" file may be
+          #    missing (the first run, or a brand-new generated
+          #    file); `diff-catalog.mjs` falls through to a
+          #    "no changes" / "first refresh" message in that
+          #    case.
+          date="$(date -u +%Y-%m-%d)"
+          {
+            echo "## Catalog refresh — ${date}"
+            echo ""
+            echo "Automated refresh of the generated catalog files. Review the file-level diff below before merging."
+            echo ""
+            echo "### Changed files"
+            echo ""
+            echo '```'
+            git diff --stat origin/main -- src/catalog/snapshot.ts src/catalog/facts.ts src/deals/catalog.ts
+            echo '```'
+            echo ""
+            echo "### Model catalog"
+            echo ""
+            before_date="$(node -p "JSON.parse(require('fs').readFileSync('/tmp/before/facts.json','utf-8')).FACTS_LAST_REFRESHED ?? ''" 2>/dev/null || true)"
+            after_date="$(node -p "JSON.parse(require('fs').readFileSync('/tmp/after/facts.json','utf-8')).FACTS_LAST_REFRESHED ?? ''" 2>/dev/null || true)"
+            node scripts/diff-catalog.mjs snapshot /tmp/before/snapshot.json /tmp/after/snapshot.json \
+              --before-date "${before_date}" --after-date "${after_date}" \
+              || echo "_snapshot diff unavailable_"
+            echo ""
+            echo "### Deals intelligence"
+            echo ""
+            before_date="$(node -p "JSON.parse(require('fs').readFileSync('/tmp/before/deals.json','utf-8')).DEAL_LAST_REFRESHED ?? ''" 2>/dev/null || true)"
+            after_date="$(node -p "JSON.parse(require('fs').readFileSync('/tmp/after/deals.json','utf-8')).DEAL_LAST_REFRESHED ?? ''" 2>/dev/null || true)"
+            node scripts/diff-catalog.mjs deals /tmp/before/deals.json /tmp/after/deals.json \
+              --before-date "${before_date}" --after-date "${after_date}" \
+              || echo "_deals diff unavailable_"
+            echo ""
+            echo "---"
+            echo ""
+            echo "_Auto-generated by the \`catalog-refresh\` workflow. Review and merge._"
+          } > pr-body.md
+          echo "----- pr-body.md -----"
+          cat pr-body.md
+
+      - name: Push branch
+        if: steps.drift.outputs.drift == 'true'
+        run: |
+          date="$(date -u +%Y-%m-%d)"
+          branch="catalog-refresh/${date}"
+          git checkout -b "${branch}"
+          git push -u origin "${branch}"
+
+      - name: Open PR
+        if: steps.drift.outputs.drift == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          date="$(date -u +%Y-%m-%d)"
+          branch="catalog-refresh/${date}"
+          # If a PR for this branch already exists (e.g. a
+          # re-run after a partial failure), update its body
+          # rather than opening a duplicate.
+          existing="$(gh pr list --head "${branch}" --json number --jq '.[0].number // empty')"
+          if [ -n "${existing}" ]; then
+            echo "PR #${existing} for ${branch} already exists; updating body."
+            gh pr edit "${existing}" --body-file pr-body.md
+            exit 0
+          fi
+          gh pr create \
+            --base main \
+            --head "${branch}" \
+            --title "chore: catalog refresh — ${date}" \
+            --body-file pr-body.md
