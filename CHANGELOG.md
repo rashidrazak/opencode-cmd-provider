@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.6.0 - 2026-08-28
 
 ### Deals pipeline: RSC-primary + daily catalog refresh cron
 
