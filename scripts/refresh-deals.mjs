@@ -388,7 +388,9 @@ async function fetchRscOrFail(url, label) {
     return ""
   }
   if (response.status >= 500) {
-    console.error(`refresh-deals: RSC ${label} returned ${response.status} — falling back to fixtures`)
+    console.error(
+      `refresh-deals: RSC ${label} returned ${response.status} — falling back to fixtures`,
+    )
     return ""
   }
   if (!response.ok) {
