@@ -216,6 +216,52 @@ run([
     },
   ],
   [
+    "snapshot: accepts the module-export wrapper shape { MODEL_SNAPSHOT: [...] } (cron input)",
+    () => {
+      // The catalog-refresh workflow (ticket #85) extracts the
+      // generated .ts files via `tsx` and writes
+      // `{ MODEL_SNAPSHOT: [...] }` to disk. The diff function
+      // must unwrap that envelope; this test guards against a
+      // future refactor that drops the unwrap and silently
+      // produces "No changes." for every cron run.
+      const before = {
+        MODEL_SNAPSHOT: [{ id: "gpt-5.5", name: "GPT-5.5", contextLength: 400000 }],
+      }
+      const after = {
+        MODEL_SNAPSHOT: [
+          { id: "gpt-5.5", name: "GPT-5.5", contextLength: 400000 },
+          { id: "gpt-5.6", name: "GPT-5.6", contextLength: 1000000 },
+        ],
+      }
+      const md = diffCatalogs({ kind: "snapshot", before, after })
+      assert(
+        md.includes("### Added models (1)"),
+        "must unwrap MODEL_SNAPSHOT and report the added model",
+      )
+      assert(md.includes("- `gpt-5.6`"), "must surface the unwrapped added model id")
+    },
+  ],
+  [
+    "deals: accepts the module-export wrapper shape { MODEL_DEALS: {...} } (cron input)",
+    () => {
+      const before = {
+        MODEL_DEALS: { "gpt-5.5": { tier: "premium" as const, free: false } },
+      }
+      const after = {
+        MODEL_DEALS: {
+          "gpt-5.5": { tier: "premium" as const, free: false },
+          "gpt-5.6": { tier: "opensource" as const, free: true },
+        },
+      }
+      const md = diffCatalogs({ kind: "deals", before, after })
+      assert(
+        md.includes("### Added models (1)"),
+        "must unwrap MODEL_DEALS and report the added model",
+      )
+      assert(md.includes("- `gpt-5.6`"), "must surface the unwrapped added model id")
+    },
+  ],
+  [
     "snapshot: output is byte-stable across calls (deterministic ordering)",
     () => {
       const before = [

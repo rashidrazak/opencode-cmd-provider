@@ -90,17 +90,29 @@ function asRecord(value) {
 }
 
 /**
- * Index a catalog into `Map<id, record>`. Accepts either the
- * `readonly CatalogModel[]` shape (snapshot) or the
- * `Readonly<Record<string, ModelDeals>>` shape (deals). The id-extraction
- * rule is the same for both — `id` for snapshot, map key for deals —
- * so callers pass the appropriate extractor.
+ * Index a catalog into `Map<id, record>`. Accepts three shapes:
+ *   1. The `readonly CatalogModel[]` shape (snapshot) — indexed by
+ *      each entry's `id` field.
+ *   2. The `Readonly<Record<string, ModelDeals>>` shape (deals) —
+ *      indexed by the record's key.
+ *   3. A wrapping module-export shape `{ MODEL_SNAPSHOT: [...] }` or
+ *      `{ MODEL_DEALS: {...} }` — the wrapper is unwrapped to the
+ *      underlying catalog. The cron (`.github/workflows/
+ *      catalog-refresh.yml`, ticket #85) extracts the generated .ts
+ *      files as `{MODEL_SNAPSHOT: [...]}` / `{MODEL_DEALS: {...}}`
+ *      via `tsx`, so the wrapping shape is the most common CLI input.
  *
  * @param {unknown} catalog
  * @param {(value: unknown, key: string) => string | undefined} idOf
  * @returns {Map<string, unknown>}
  */
 function indexCatalog(catalog, idOf) {
+  // Unwrap the module-export shape (the cron's `tsx` extract writes
+  // `{MODEL_SNAPSHOT: [...]}` / `{MODEL_DEALS: {...}}` to disk).
+  const record = asRecord(catalog)
+  if (record && (record.MODEL_SNAPSHOT !== undefined || record.MODEL_DEALS !== undefined)) {
+    catalog = record.MODEL_SNAPSHOT ?? record.MODEL_DEALS
+  }
   const index = new Map()
   if (Array.isArray(catalog)) {
     for (const entry of catalog) {
