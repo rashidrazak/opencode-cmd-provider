@@ -91,6 +91,7 @@ export const MODEL_DEALS: Readonly<Record<string, ModelDeals>> = {
   "stepfun/Step-3.5-Flash": { tier: "opensource", benchmark: {"intelligence":26.5}, free: false, allowance: {"goat":20,"pro":30} },
   "stepfun/Step-3.7-Flash": { tier: "opensource", benchmark: {"intelligence":30.9,"tokPerSec":120.1}, free: false, allowance: {"goat":20,"pro":30} },
   "tencent/hy3-paid": { tier: "opensource", benchmark: {"intelligence":42.2,"tokPerSec":74.8}, free: false, allowance: {"goat":70,"pro":80} },
+  "tencent/hy4-preview": { tier: "opensource", free: false, allowance: {"goat":20,"pro":30} },
   "thinkingmachines/inkling": { tier: "opensource", benchmark: {"intelligence":42.3,"tokPerSec":69.8}, free: false, allowance: {"goat":20,"pro":30} },
   "thinkingmachines/inkling-small": { tier: "opensource", benchmark: {"intelligence":41.2,"tokPerSec":61.3}, free: false, allowance: {"goat":20,"pro":30} },
   "xai/grok-4.5": { tier: "opensource", benchmark: {"intelligence":55.8,"tokPerSec":51}, free: false, allowance: {"goat":20,"pro":30} },

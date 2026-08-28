@@ -16,19 +16,20 @@ import { assert, assertEqual, run } from "./harness.js"
 // requiring the committed tests/fixtures/*.html files (deleted in ticket
 // #83).
 
-// Flight-payload fragment: three `{"slug":"..."}` records scattered
+// Flight-payload fragment: four `{"slug":"..."}` records scattered
 // through the page, with the same escape rules the live HTML uses
-// (\\" → ", \\n → newline, \\u0026 → &). The third record is malformed
-// and must be skipped without throwing.
+// (\\" → ", \\n → newline, \\u0026 → &).
 const GOAT_HTML = `<html><body><script>
 1:HL["x",[],null,{"slug":"x","id":"MiniMaxAI/MiniMax-M3","name":"MiniMax M3","category":"opensource","deal":{"discountPercent":50},"intelligenceIndex":45.4}]
 </script><script>
 1:HL["x",[],null,{"slug":"x","id":"x2","name":"Model Two","category":"premium"}]
 </script><script>
 1:HL["x",[],null,{"slug":"x","id":"x3","name":"Model Three","category":"opensource","deal":{"discountPercent":25}}
+</script><script>
+1:HL["x",[],null,{"slug":"hy4-preview","id":"tencent/hy4-preview","name":"Tencent Hy4 Preview","category":"opensource","tiers":[{"rates":{"input":0.834,"output":2.501,"cacheRead":0.042}}],"deal":"$undefined"}]
 </script></body></html>`
 
-// Rendered allowance table: 3 models with $70 GOAT allowances. extractTables
+// Rendered allowance table: 4 models with PRO allowances. extractTables
 // needs the table to have `<th>Model</th>` in the first cell and a header
 // containing "Monthly credits".
 const PRO_HTML = `<html><body>
@@ -38,6 +39,7 @@ const PRO_HTML = `<html><body>
 <tr><td>GPT-5.6 Sol</td><td>PRO</td><td>premium</td><td>200K</td><td>32K</td><td>$80</td></tr>
 <tr><td>GLM-5.2</td><td>PRO</td><td>opensource</td><td>128K</td><td>16K</td><td>$80</td></tr>
 <tr><td>Tencent Hy3</td><td>PRO</td><td>opensource</td><td>256K</td><td>32K</td><td>$20</td></tr>
+<tr><td>Tencent Hy4 Preview</td><td>PRO</td><td>opensource</td><td>1024K</td><td>64K</td><td>$30</td></tr>
 </tbody>
 </table>
 </body></html>`
@@ -50,13 +52,18 @@ run([
     "extractModelRecords parses records from inline goat fixture",
     () => {
       const recs = extractModelRecords(GOAT_HTML)
-      assertEqual(recs.size, 3)
+      assertEqual(recs.size, 4)
       const m = recs.get("MiniMaxAI/MiniMax-M3")
       assert(m, "MiniMax M3 must exist")
       assertEqual(m.name, "MiniMax M3")
       assertEqual(m.category, "opensource")
       assertEqual(m.deal.discountPercent, 50)
       assertEqual(m.intelligenceIndex, 45.4)
+      const hy4 = recs.get("tencent/hy4-preview")
+      assert(hy4, "Tencent Hy4 Preview must exist")
+      assertEqual(hy4.name, "Tencent Hy4 Preview")
+      assertEqual(hy4.category, "opensource")
+      assertEqual(hy4.tiers[0].rates, { input: 0.834, output: 2.501, cacheRead: 0.042 })
     },
   ],
   [
@@ -73,7 +80,8 @@ run([
       assertEqual(map.get("GPT-5.6 Sol"), 80)
       assertEqual(map.get("GLM-5.2"), 80)
       assertEqual(map.get("Tencent Hy3"), 20)
-      assertEqual(map.size, 3)
+      assertEqual(map.get("Tencent Hy4 Preview"), 30)
+      assertEqual(map.size, 4)
     },
   ],
   [

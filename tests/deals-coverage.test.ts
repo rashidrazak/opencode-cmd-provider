@@ -42,6 +42,17 @@ run([
   ],
 
   [
+    "Tencent Hy4 Preview has the published deal metadata",
+    () => {
+      assertEqual(MODEL_DEALS["tencent/hy4-preview"], {
+        tier: "opensource",
+        allowance: { goat: 20, pro: 30 },
+        free: false,
+      })
+    },
+  ],
+
+  [
     "every RSC fixture record maps to a snapshot model (no drift)",
     () => {
       // The RSC's per-plan (goat, pro) slug records are the source of truth

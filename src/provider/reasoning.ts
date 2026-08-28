@@ -5,6 +5,15 @@
 
 import { MODEL_EFFORTS as GENERATED_MODEL_EFFORTS } from "../catalog/facts.js"
 
+export type PiThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
+type CommandCodeReasoningEffort = Exclude<PiThinkingLevel, "off">
+
+// The published CLI catalog has not added Hy4's effort column yet, but the
+// Provider API validates and accepts these five values (verified 2026-08-28).
+const PROVIDER_MODEL_EFFORTS: Readonly<Record<string, readonly CommandCodeReasoningEffort[]>> = {
+  "tencent/hy4-preview": ["low", "medium", "high", "xhigh", "max"],
+}
+
 /**
  * Models omitted here let Command Code choose their reasoning depth.
  */
@@ -15,11 +24,14 @@ import { MODEL_EFFORTS as GENERATED_MODEL_EFFORTS } from "../catalog/facts.js"
 // generated catalog emits is a valid `PiThinkingLevel` (the models.md Efforts
 // column is constrained to those levels; the release gate catches drift). Do
 // NOT "simplify" this back to a direct re-export — it breaks the build.
-export const MODEL_EFFORTS: Readonly<Record<string, readonly CommandCodeReasoningEffort[]>> =
-  GENERATED_MODEL_EFFORTS as Readonly<Record<string, readonly CommandCodeReasoningEffort[]>>
+const TYPED_GENERATED_MODEL_EFFORTS = GENERATED_MODEL_EFFORTS as Readonly<
+  Record<string, readonly CommandCodeReasoningEffort[]>
+>
 
-export type PiThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
-type CommandCodeReasoningEffort = Exclude<PiThinkingLevel, "off">
+export const MODEL_EFFORTS: Readonly<Record<string, readonly CommandCodeReasoningEffort[]>> = {
+  ...TYPED_GENERATED_MODEL_EFFORTS,
+  ...PROVIDER_MODEL_EFFORTS,
+}
 
 /**
  * Models Command Code advertises as reasoning-capable without exposing

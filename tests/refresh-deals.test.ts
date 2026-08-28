@@ -205,6 +205,12 @@ run([
         kimiLine.includes('"goat":20') && kimiLine.includes('"pro":30'),
         `Kimi K3 must carry RSC allowances (got: ${kimiLine})`,
       )
+      const hy4Line = out.split("\n").find((l) => l.includes('"tencent/hy4-preview"'))
+      assert(hy4Line, "must have a Tencent Hy4 Preview entry")
+      assert(
+        hy4Line.includes('"goat":20') && hy4Line.includes('"pro":30'),
+        `Tencent Hy4 Preview must carry RSC allowances (got: ${hy4Line})`,
+      )
     },
   ],
   [

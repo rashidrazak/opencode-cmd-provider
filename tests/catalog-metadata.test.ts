@@ -45,7 +45,8 @@ const NON_REASONING_MODELS = new Set([
   "claude-haiku-4-5-20251001",
 ])
 
-// Models Command Code advertises with explicit reasoning efforts.
+// Models with explicit efforts in the generated catalog or a tested provider
+// endpoint override.
 const EFFORTS_MODELS = new Set([
   "deepseek/deepseek-v4-pro",
   "deepseek/deepseek-v4-flash",
@@ -77,6 +78,7 @@ const EFFORTS_MODELS = new Set([
   "sakana/fugu-ultra",
   "xai/grok-4.5",
   "xai/grok-4.6",
+  "tencent/hy4-preview",
 ])
 
 run([
@@ -166,7 +168,7 @@ run([
   ],
 
   [
-    "reasoning classification matches the published catalog",
+    "reasoning classification matches catalog and provider overrides",
     () => {
       for (const model of MODEL_SNAPSHOT) {
         const hasEfforts = EFFORTS_MODELS.has(model.id)
@@ -209,6 +211,25 @@ run([
       for (const id of EFFORTS_MODELS) {
         assert(snapshotIds.has(id), `${id} is not in the snapshot`)
       }
+    },
+  ],
+
+  [
+    "Tencent Hy4 Preview metadata matches the published catalog",
+    () => {
+      const model = MODEL_SNAPSHOT.find((entry) => entry.id === "tencent/hy4-preview")
+      assert(model, "Tencent Hy4 Preview must exist in the snapshot")
+      assertEqual(model.contextLength, 1048576)
+      assertEqual(MODEL_COSTS[model.id], {
+        input: 0.834,
+        output: 2.501,
+        cacheRead: 0.042,
+        cacheWrite: 0,
+      })
+      assertEqual(isReasoningModel(model.id), true)
+      assertEqual(MODEL_EFFORTS[model.id], ["low", "medium", "high", "xhigh", "max"])
+      assertEqual(REASONING_MODELS.has(model.id), false)
+      assertEqual(inputModalitiesForModel(model.id), ["text"])
     },
   ],
 ])

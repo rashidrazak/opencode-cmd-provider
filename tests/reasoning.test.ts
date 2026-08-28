@@ -112,6 +112,17 @@ run([
   ],
 
   [
+    "Hy4 exposes the five effort values accepted by the Provider API",
+    () => {
+      const variants = reasoningVariantsForModel("tencent/hy4-preview")
+      assert(variants, "expected Hy4 variants")
+      assertEqual(Object.keys(variants), ["low", "medium", "high", "xhigh", "max"])
+      assertEqual(variants.low, { reasoningEffort: "low" })
+      assertEqual(variants.max, { reasoningEffort: "max" })
+    },
+  ],
+
+  [
     "reasoningVariantsForModel is empty for non-reasoning models",
     () => {
       assertEqual(reasoningVariantsForModel("brand-new/model"), undefined)
