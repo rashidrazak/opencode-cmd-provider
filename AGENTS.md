@@ -25,10 +25,14 @@ decisions in `docs/adr/`.
 
 `src/catalog/snapshot.ts`, `src/catalog/facts.ts`, and `src/deals/catalog.ts`
 are generated (`scripts/refresh-snapshot.mjs`, `scripts/refresh-deals.mjs`).
-Regenerate with `npm run refresh` — snapshot from the live models API, deals
-from the live RSC payloads (the docs pages with an `rsc: 1` header); the deals
-script falls back to the committed `tests/fixtures/rsc-*.txt` on 5xx/network
-failure and fails loudly on 4xx. Offline-only regeneration:
+Regenerate with `npm run refresh` — snapshot from the live models API; the
+RSC fixtures (`tests/fixtures/rsc-*.txt`) are re-captured from the live docs
+pages (`scripts/capture-rsc-fixtures.mjs`, all-or-nothing, loud on any
+failure); the deals catalog is regenerated from the freshly captured
+fixtures, so fixtures, catalog, and the fixture-based unit tests stay in
+lockstep. The cron commits the fixtures alongside the catalog when upstream
+moved. Standalone live regeneration: `npm run refresh:deals` (5xx/network →
+fixture fallback, 4xx fails loudly); offline-only:
 `npm run refresh:deals -- --fixtures`.
 `refresh:deals` **fails loudly (exit 1) when the scraped/fixture records lack a
 snapshot model** — a partial deals catalog silently hides the TUI sidebar

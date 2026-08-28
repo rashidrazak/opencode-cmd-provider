@@ -68,12 +68,14 @@ jobs:
 
       - run: npm ci
 
-      # `npm run refresh` runs `refresh:snapshot` (live fetch) and
-      # `refresh:deals` (live RSC fetch of the three docs pages; the
-      # script falls back to the committed RSC fixtures on 5xx /
-      # network failure, and fails loudly on 4xx — a route change or
-      # a wrong COMMANDCODE_RSC_*_URL override). A network failure in
-      # the snapshot fetch, or a shape-pin failure in either script,
+      # `npm run refresh` runs `refresh:snapshot` (live fetch),
+      # `refresh:fixtures` (re-captures the committed RSC fixtures from
+      # the live docs pages — all-or-nothing, loud on any failure), then
+      # `refresh:deals -- --fixtures` (regenerates the catalog from the
+      # freshly captured fixtures, so fixtures, catalog, and the unit
+      # tests stay in lockstep — the coverage gate can never report a
+      # snapshot model the fixtures don't carry). A network failure in
+      # the snapshot fetch, or a shape-pin failure in any script,
       # surfaces as a non-zero exit — the workflow fails loudly
       # (acceptance criterion: "parser error, network failure, schema
       # mismatch → exit non-zero with a clearly-attributed error
@@ -100,7 +102,10 @@ jobs:
           if git diff --quiet origin/main -- \
               src/catalog/snapshot.ts \
               src/catalog/facts.ts \
-              src/deals/catalog.ts; then
+              src/deals/catalog.ts \
+              tests/fixtures/rsc-pricing-limits.txt \
+              tests/fixtures/rsc-goat.txt \
+              tests/fixtures/rsc-pro.txt; then
             echo "drift=false" >> "$GITHUB_OUTPUT"
             echo "No catalog drift detected against main — exiting without opening a PR."
           else
@@ -109,7 +114,10 @@ jobs:
             git diff --stat origin/main -- \
               src/catalog/snapshot.ts \
               src/catalog/facts.ts \
-              src/deals/catalog.ts
+              src/deals/catalog.ts \
+              tests/fixtures/rsc-pricing-limits.txt \
+              tests/fixtures/rsc-goat.txt \
+              tests/fixtures/rsc-pro.txt
           fi
 
       # Commit the regenerated files. Authored by the GitHub Actions
@@ -119,7 +127,9 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add src/catalog/snapshot.ts src/catalog/facts.ts src/deals/catalog.ts
+          git add src/catalog/snapshot.ts src/catalog/facts.ts src/deals/catalog.ts \
+              tests/fixtures/rsc-pricing-limits.txt tests/fixtures/rsc-goat.txt \
+              tests/fixtures/rsc-pro.txt
           date="$(date -u +%Y-%m-%d)"
           git commit -m "chore: catalog refresh — ${date}"
 

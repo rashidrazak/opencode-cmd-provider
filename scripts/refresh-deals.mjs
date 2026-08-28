@@ -38,9 +38,9 @@ import { snapshotIndex } from "./snapshot-index.mjs"
 // The RSC flight payload rides the docs pages themselves: the live site
 // serves `text/x-component` for `rsc: 1` requests to the same URLs the
 // HTML pipeline fetched (verified 2026-08-28).
-const DEFAULT_RSC_PRICING_URL = "https://commandcode.ai/docs/resources/pricing-limits"
-const DEFAULT_RSC_GOAT_URL = "https://commandcode.ai/docs/plans/goat"
-const DEFAULT_RSC_PRO_URL = "https://commandcode.ai/docs/plans/pro"
+export const DEFAULT_RSC_PRICING_URL = "https://commandcode.ai/docs/resources/pricing-limits"
+export const DEFAULT_RSC_GOAT_URL = "https://commandcode.ai/docs/plans/goat"
+export const DEFAULT_RSC_PRO_URL = "https://commandcode.ai/docs/plans/pro"
 const DEFAULT_OUT = resolve(import.meta.dirname, "..", "src", "deals", "catalog.ts")
 
 // Coverage gate for the RSC path. `bySnapshotId` is the Map built by
