@@ -16,6 +16,13 @@
 //   env COMMANDCODE_RSC_GOAT_URL      overrides the RSC goat plan URL
 //   env COMMANDCODE_RSC_PRO_URL       overrides the RSC pro plan URL
 //
+// Live fetch semantics: the docs site serves the RSC flight payload on
+// the same URLs as the HTML pages when the request carries the `rsc: 1`
+// header (verified 2026-08-28 — `/docs/rsc/*` is not a route). A 5xx or
+// network failure falls back to the committed fixtures (transient —
+// per the wayfinder spec at #77); a 4xx fails loudly (the route moved
+// or the env override is wrong — a config error, not a transient).
+//
 // The HTML parsers in scripts/parse-docs.mjs (extractModelRecords,
 // extractPlanAllowances) are kept as a documented fallback for
 // air-gapped environments per the wayfinder spec at #77; this script
@@ -28,9 +35,12 @@ import { applySlugIdAlias, extractPlanPageRsc, extractPricingLimitsRsc } from ".
 import { applyTierOverride } from "./tier-overrides.mjs"
 import { snapshotIndex } from "./snapshot-index.mjs"
 
-const DEFAULT_RSC_PRICING_URL = "https://commandcode.ai/docs/rsc/pricing-limits"
-const DEFAULT_RSC_GOAT_URL = "https://commandcode.ai/docs/rsc/plans/goat"
-const DEFAULT_RSC_PRO_URL = "https://commandcode.ai/docs/rsc/plans/pro"
+// The RSC flight payload rides the docs pages themselves: the live site
+// serves `text/x-component` for `rsc: 1` requests to the same URLs the
+// HTML pipeline fetched (verified 2026-08-28).
+const DEFAULT_RSC_PRICING_URL = "https://commandcode.ai/docs/resources/pricing-limits"
+const DEFAULT_RSC_GOAT_URL = "https://commandcode.ai/docs/plans/goat"
+const DEFAULT_RSC_PRO_URL = "https://commandcode.ai/docs/plans/pro"
 const DEFAULT_OUT = resolve(import.meta.dirname, "..", "src", "deals", "catalog.ts")
 
 // Coverage gate for the RSC path. `bySnapshotId` is the Map built by
@@ -352,6 +362,23 @@ async function readRscFixtures() {
   return { pricingRsc, goatRsc, proRsc }
 }
 
+// A 4xx from an RSC endpoint is a configuration error (route moved, or
+// COMMANDCODE_RSC_*_URL overridden wrongly) — it must surface loudly,
+// never silently fall back to the fixtures. 5xx and network failures are
+// transient and fall back per the spec (the fixtures are the offline
+// source of truth for air-gapped runs).
+class RscHttpError extends Error {
+  constructor(status, label, url) {
+    super(
+      `refresh-deals: RSC ${label} returned HTTP ${status} (${url}) — the docs ` +
+        `route moved or a COMMANDCODE_RSC_*_URL override is wrong; fix the URL, ` +
+        `do not ship fixture data as if it were live`,
+    )
+    this.name = "RscHttpError"
+    this.status = status
+  }
+}
+
 async function fetchRscOrFail(url, label) {
   let response
   try {
@@ -360,9 +387,12 @@ async function fetchRscOrFail(url, label) {
     console.error(`refresh-deals: could not fetch RSC ${label} (${url}): ${error.message}`)
     return ""
   }
-  if (!response.ok) {
-    console.error(`refresh-deals: RSC ${label} returned ${response.status} — skipping`)
+  if (response.status >= 500) {
+    console.error(`refresh-deals: RSC ${label} returned ${response.status} — falling back to fixtures`)
     return ""
+  }
+  if (!response.ok) {
+    throw new RscHttpError(response.status, label, url)
   }
   return response.text()
 }
@@ -396,6 +426,10 @@ async function main() {
         fetchRscOrFail(proUrl, "plans/pro"),
       ])
     } catch (error) {
+      // A 4xx is a config error — fail loudly instead of silently
+      // shipping fixture data. Only transient failures (5xx/network,
+      // already converted to "") fall back.
+      if (error instanceof RscHttpError) throw error
       console.warn(
         `refresh-deals: warning — RSC live fetch threw (${error instanceof Error ? error.message : String(error)}) — falling back to RSC fixtures`,
       )

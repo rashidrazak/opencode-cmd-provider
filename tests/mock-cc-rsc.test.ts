@@ -22,9 +22,9 @@ run([
       const mock = await startMockCc()
       try {
         for (const path of [
-          "/docs/rsc/pricing-limits",
-          "/docs/rsc/plans/goat",
-          "/docs/rsc/plans/pro",
+          "/docs/resources/pricing-limits",
+          "/docs/plans/goat",
+          "/docs/plans/pro",
         ]) {
           const res = await fetch(`${mock.url}${path}`)
           assertEqual(res.status, 404, `${path} must be 404 when option unset`)
@@ -53,9 +53,9 @@ run([
       })
       try {
         for (const [path, expected] of [
-          ["/docs/rsc/pricing-limits", RSC_PRICING],
-          ["/docs/rsc/plans/goat", RSC_GOAT],
-          ["/docs/rsc/plans/pro", RSC_PRO],
+          ["/docs/resources/pricing-limits", RSC_PRICING],
+          ["/docs/plans/goat", RSC_GOAT],
+          ["/docs/plans/pro", RSC_PRO],
         ] as const) {
           const res = await fetch(`${mock.url}${path}`, {
             headers: { rsc: "1" },
@@ -85,9 +85,9 @@ run([
         rscPro: RSC_PRO,
       })
       try {
-        await fetch(`${mock.url}/docs/rsc/pricing-limits`)
-        await fetch(`${mock.url}/docs/rsc/plans/goat`)
-        await fetch(`${mock.url}/docs/rsc/plans/pro`)
+        await fetch(`${mock.url}/docs/resources/pricing-limits`)
+        await fetch(`${mock.url}/docs/plans/goat`)
+        await fetch(`${mock.url}/docs/plans/pro`)
         assertEqual(mock.hits.rscPricing, 1)
         assertEqual(mock.hits.rscGoat, 1)
         assertEqual(mock.hits.rscPro, 1)
@@ -111,9 +111,9 @@ run([
         onRscPro: (h) => seenPro.push(h),
       })
       try {
-        await fetch(`${mock.url}/docs/rsc/pricing-limits`, { headers: { rsc: "1" } })
-        await fetch(`${mock.url}/docs/rsc/plans/goat`, { headers: { rsc: "1" } })
-        await fetch(`${mock.url}/docs/rsc/plans/pro`, { headers: { rsc: "1" } })
+        await fetch(`${mock.url}/docs/resources/pricing-limits`, { headers: { rsc: "1" } })
+        await fetch(`${mock.url}/docs/plans/goat`, { headers: { rsc: "1" } })
+        await fetch(`${mock.url}/docs/plans/pro`, { headers: { rsc: "1" } })
         assertEqual(seenPricing.length, 1)
         assertEqual(seenGoat.length, 1)
         assertEqual(seenPro.length, 1)
@@ -135,9 +135,9 @@ run([
         rscPro: RSC_PRO,
       })
       try {
-        await fetch(`${mock.url}/docs/rsc/pricing-limits`)
-        await fetch(`${mock.url}/docs/rsc/plans/goat`)
-        await fetch(`${mock.url}/docs/rsc/plans/pro`)
+        await fetch(`${mock.url}/docs/resources/pricing-limits`)
+        await fetch(`${mock.url}/docs/plans/goat`)
+        await fetch(`${mock.url}/docs/plans/pro`)
         // Other endpoints were not touched.
         assertEqual(mock.hits.generate, 0)
         assertEqual(mock.hits.models, 0)

@@ -93,9 +93,9 @@ run([
           ["scripts/refresh-deals.mjs", "--out", out, "--allow-partial"],
           {
             ...process.env,
-            COMMANDCODE_RSC_PRICING_URL: `${mock.url}/docs/rsc/pricing-limits`,
-            COMMANDCODE_RSC_GOAT_URL: `${mock.url}/docs/rsc/plans/goat`,
-            COMMANDCODE_RSC_PRO_URL: `${mock.url}/docs/rsc/plans/pro`,
+            COMMANDCODE_RSC_PRICING_URL: `${mock.url}/docs/resources/pricing-limits`,
+            COMMANDCODE_RSC_GOAT_URL: `${mock.url}/docs/plans/goat`,
+            COMMANDCODE_RSC_PRO_URL: `${mock.url}/docs/plans/pro`,
           },
         )
         assertEqual(result.status, 0, result.stderr || result.stdout)
@@ -126,23 +126,22 @@ run([
     async () => {
       const dir = await mkdtemp(join(tmpdir(), "cc-refresh-rsc-5xx-"))
       const out = join(dir, "catalog.ts")
-      // Don't serve the RSC endpoints — the mock returns 404 for them
-      // when the option is unset, which the script treats as a fetch
-      // failure. The fall-back path then reads the committed RSC text
-      // fixtures (tests/fixtures/rsc-*.txt), the same source the unit
-      // tests use.
-      const mock = await startMockCc({})
+      // Serve a genuine 5xx from every RSC endpoint — a transient
+      // upstream failure. The script falls back to the committed RSC
+      // text fixtures (tests/fixtures/rsc-*.txt), the same source the
+      // unit tests use.
+      const mock = await startMockCc({ rscStatus: 500 })
       try {
         const result = await runScript(
           ["scripts/refresh-deals.mjs", "--out", out, "--allow-partial"],
           {
             ...process.env,
-            COMMANDCODE_RSC_PRICING_URL: `${mock.url}/docs/rsc/pricing-limits`,
-            COMMANDCODE_RSC_GOAT_URL: `${mock.url}/docs/rsc/plans/goat`,
-            COMMANDCODE_RSC_PRO_URL: `${mock.url}/docs/rsc/plans/pro`,
+            COMMANDCODE_RSC_PRICING_URL: `${mock.url}/docs/resources/pricing-limits`,
+            COMMANDCODE_RSC_GOAT_URL: `${mock.url}/docs/plans/goat`,
+            COMMANDCODE_RSC_PRO_URL: `${mock.url}/docs/plans/pro`,
           },
         )
-        // 404 from the mock → empty body → fallback to fixtures →
+        // 5xx from the mock → empty body → fallback to fixtures →
         // exit 0 with the fixture-based catalog.
         assertEqual(result.status, 0, result.stderr || result.stdout)
         const contents = await readFile(out, "utf-8")
@@ -154,6 +153,49 @@ run([
           packageVersion: "docs",
         })
         assertEqual(contents, expected, "fallback must regenerate the same catalog as the fixtures")
+      } finally {
+        await mock.close()
+        await rm(dir, { recursive: true, force: true })
+      }
+    },
+  ],
+  [
+    "refresh-deals: 4xx from an RSC endpoint fails loudly (no silent fixture fallback)",
+    async () => {
+      const dir = await mkdtemp(join(tmpdir(), "cc-refresh-rsc-404-"))
+      const out = join(dir, "catalog.ts")
+      // The mock returns 404 for an RSC endpoint when its body option
+      // is unset. A 404 is a config error (route moved / wrong
+      // COMMANDCODE_RSC_*_URL) — the script must exit non-zero and
+      // must NOT write a fixture-based catalog as if it were live.
+      const mock = await startMockCc({})
+      try {
+        const result = await runScript(
+          ["scripts/refresh-deals.mjs", "--out", out, "--allow-partial"],
+          {
+            ...process.env,
+            COMMANDCODE_RSC_PRICING_URL: `${mock.url}/docs/resources/pricing-limits`,
+            COMMANDCODE_RSC_GOAT_URL: `${mock.url}/docs/plans/goat`,
+            COMMANDCODE_RSC_PRO_URL: `${mock.url}/docs/plans/pro`,
+          },
+        )
+        assert(
+          result.status !== 0,
+          `4xx must fail loudly, got status ${result.status}: ${result.stdout} ${result.stderr}`,
+        )
+        assert(
+          result.stderr.includes("HTTP 404") || result.stderr.includes("returned HTTP"),
+          `stderr must attribute the 4xx, got: ${result.stderr}`,
+        )
+        // The write must not happen — a partial/live-stamped fixture
+        // catalog would silently ship as fresh data.
+        let wrote = true
+        try {
+          await readFile(out, "utf-8")
+        } catch {
+          wrote = false
+        }
+        assert(!wrote, "no catalog must be written on a 4xx")
       } finally {
         await mock.close()
         await rm(dir, { recursive: true, force: true })

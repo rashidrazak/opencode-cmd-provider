@@ -25,7 +25,11 @@ decisions in `docs/adr/`.
 
 `src/catalog/snapshot.ts`, `src/catalog/facts.ts`, and `src/deals/catalog.ts`
 are generated (`scripts/refresh-snapshot.mjs`, `scripts/refresh-deals.mjs`).
-Regenerate with `npm run refresh` (offline from `tests/fixtures/*.html`).
+Regenerate with `npm run refresh` — snapshot from the live models API, deals
+from the live RSC payloads (the docs pages with an `rsc: 1` header); the deals
+script falls back to the committed `tests/fixtures/rsc-*.txt` on 5xx/network
+failure and fails loudly on 4xx. Offline-only regeneration:
+`npm run refresh:deals -- --fixtures`.
 `refresh:deals` **fails loudly (exit 1) when the scraped/fixture records lack a
 snapshot model** — a partial deals catalog silently hides the TUI sidebar
 "Command Code" section for the missing models. This gate is why the fixtures

@@ -69,12 +69,15 @@ jobs:
       - run: npm ci
 
       # `npm run refresh` runs `refresh:snapshot` (live fetch) and
-      # `refresh:deals -- --fixtures` (offline RSC fixtures). A
-      # network failure in the snapshot fetch, or a shape-pin failure
-      # in either script, surfaces as a non-zero exit — the workflow
-      # fails loudly (acceptance criterion: "parser error, network
-      # failure, schema mismatch → exit non-zero with a clearly-
-      # attributed error message").
+      # `refresh:deals` (live RSC fetch of the three docs pages; the
+      # script falls back to the committed RSC fixtures on 5xx /
+      # network failure, and fails loudly on 4xx — a route change or
+      # a wrong COMMANDCODE_RSC_*_URL override). A network failure in
+      # the snapshot fetch, or a shape-pin failure in either script,
+      # surfaces as a non-zero exit — the workflow fails loudly
+      # (acceptance criterion: "parser error, network failure, schema
+      # mismatch → exit non-zero with a clearly-attributed error
+      # message").
       - name: Regenerate catalogs
         run: npm run refresh
 
