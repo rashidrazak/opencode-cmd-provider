@@ -29,14 +29,18 @@ _Avoid_: model sync, catalog update, live refresh
 _Avoid_: base provider, essential plugin
 
 **Deals catalog**:
-Per-model pricing intelligence scraped from the Command Code docs
-(`pricing-limits`, `plans/goat`, `plans/pro`): tier (`Open Source`/`Premium`),
+Per-model pricing intelligence extracted from the Command Code docs' React
+Server Components (RSC) stream (`pricing-limits`, `plans/goat`, `plans/pro`
+pages with an `rsc: 1` header): tier (`Open Source`/`Premium`),
 benchmarks (intelligence, tok/s), deal discounts (`was`/`now` rates), peak/off-peak
 windows, and GOAT/Pro monthly allowances. Bundled in `src/deals/catalog.ts`
-and regenerated via `npm run refresh:deals` (or offline from `tests/fixtures/*.html`).
-The refresh **fails loudly (exit 1) when the scraped/fixture records lack a
+and regenerated via `npm run refresh:deals` (live, with 5xx/network fallback
+to the committed `tests/fixtures/rsc-*.txt` fixtures and loud 4xx failure;
+offline via `-- --fixtures`).
+The refresh **fails loudly (exit 1) when the RSC/fixture records lack a
 snapshot model**, so a partial catalog can never be emitted silently — the
-fixtures must stay in sync with the snapshot.
+fixtures are re-captured from the live docs pages on every `npm run refresh`
+and by the daily catalog-refresh cron, so they stay in sync with the snapshot.
 _Avoid_: pricing table, deal feed
 
 **Deals intelligence**:
