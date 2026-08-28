@@ -194,6 +194,18 @@ run([
   ],
 
   [
+    "tencent/hy4-preview is reasoning-capable without variants",
+    () => {
+      // New upstream model (added 2026-08-28): live RSC caps.reasoning is
+      // true and models.md lists no Efforts entry, so it belongs in
+      // REASONING_MODELS with no MODEL_EFFORTS — mirrors the muse-spark
+      // classification above.
+      assertEqual(isReasoningModel("tencent/hy4-preview"), true)
+      assertEqual(MODEL_EFFORTS["tencent/hy4-preview"], undefined)
+    },
+  ],
+
+  [
     "no reasoning entry references a model outside the snapshot",
     () => {
       const snapshotIds = new Set(MODEL_SNAPSHOT.map((model) => model.id))

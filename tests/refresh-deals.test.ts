@@ -96,7 +96,7 @@ run([
         discount: { pct: 50, endsAt: "2026-12-31" },
         was: { input: 1.5, output: 7.5, cacheRead: 0.15 },
         now: { input: 0.75, output: 3.75, cacheRead: 0.075 },
-        benchmark: { intelligence: 56, tokPerSec: 339.4 },
+        benchmark: { intelligence: 56, tokPerSec: 365.9 },
         free: false,
       })
     },
@@ -126,7 +126,7 @@ run([
         discount: { pct: 50 },
         was: { input: 0.6, output: 2.4, cacheRead: 0.12 },
         now: { input: 0.3, output: 1.2, cacheRead: 0.06 },
-        benchmark: { intelligence: 45.4, tokPerSec: 104.4 },
+        benchmark: { intelligence: 45.4, tokPerSec: 111.3 },
         free: false,
       })
     },

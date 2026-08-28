@@ -57,6 +57,7 @@ export const MODEL_SNAPSHOT: readonly CatalogModel[] = [
   { id: "stepfun/Step-3.7-Flash", name: "Step 3.7 Flash", contextLength: 256000 },
   { id: "stepfun/Step-3.5-Flash", name: "Step 3.5 Flash", contextLength: 1000000 },
   { id: "tencent/hy3-paid", name: "Tencent Hy3", contextLength: 262144 },
+  { id: "tencent/hy4-preview", name: "Tencent Hy4 Preview", contextLength: 1048576 },
   { id: "google/gemini-3.7-flash", name: "Gemini 3.7 Flash", contextLength: 1048576 },
   { id: "google/gemini-3.6-flash", name: "Gemini 3.6 Flash", contextLength: 1000000 },
   { id: "google/gemini-3.5-flash", name: "Gemini 3.5 Flash", contextLength: 1000000 },
