@@ -42,9 +42,7 @@ async function fetchOrThrow(url, label) {
   try {
     response = await fetch(url, { headers: { rsc: "1" } })
   } catch (error) {
-    throw new Error(
-      `capture-rsc-fixtures: could not fetch RSC ${label} (${url}): ${error.message}`,
-    )
+    throw new Error(`capture-rsc-fixtures: could not fetch RSC ${label} (${url}): ${error.message}`)
   }
   if (!response.ok) {
     throw new Error(
