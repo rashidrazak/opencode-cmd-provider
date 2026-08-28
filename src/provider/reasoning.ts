@@ -44,6 +44,8 @@ export const REASONING_MODELS: ReadonlySet<string> = new Set([
   "poolside/laguna-s-2.1-free",
   "stepfun/Step-3.7-Flash",
   "tencent/hy3-paid",
+  // Live RSC caps.reasoning=true, models.md has no Efforts entry (2026-08-28).
+  "tencent/hy4-preview",
   "thinkingmachines/inkling",
   "thinkingmachines/inkling-small",
 ])
