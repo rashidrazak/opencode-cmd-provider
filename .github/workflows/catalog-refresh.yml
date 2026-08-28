@@ -56,12 +56,13 @@ jobs:
           node-version: 22
           cache: npm
 
-      # bun is on PATH for consistency with CI/release — the TUI
-      # bundle (`scripts/build-tui.ts`) is bun-only (see AGENTS.md).
-      # The cron does not run `npm run build` today; bun is here so
-      # the workflow is self-contained when the maintainer chooses
-      # to add it later (e.g. once the pre-existing `dist/tui.js`
-      # test-isolation issue is resolved).
+      # bun is on PATH because the TUI bundle (`scripts/build-tui.ts`)
+      # is bun-only (see AGENTS.md). The cron builds before testing:
+      # `npm test` includes a contract test that asserts `npm pack`
+      # contains `dist/tui.js`, and a fresh checkout has no `dist/`
+      # (it is gitignored) — the "pre-existing dist/tui.js
+      # test-isolation failure" was exactly that: the cron never ran
+      # the build. Building also typechecks the regenerated catalogs.
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
@@ -83,11 +84,15 @@ jobs:
       - name: Regenerate catalogs
         run: npm run refresh
 
-      # The test suite is the next gate. A `dist/tui.js`-shaped
-      # failure here is the pre-existing test-isolation issue tracked
-      # in the handoff; the schedule is observed manually before
-      # auto-merge is enabled, so a flaky-looking test will be caught
-      # and triaged before the cron can ship a bad PR.
+      # Build (tsc + bun TUI bundle) before testing: the pack contract
+      # test needs dist/tui.js present, and typechecking the regenerated
+      # catalogs is a free extra gate.
+      - name: Build
+        run: npm run build
+
+      # The test suite is the next gate. The schedule is observed
+      # manually before auto-merge is enabled, so a flaky-looking test
+      # will be caught and triaged before the cron can ship a bad PR.
       - name: Run test suite
         run: npm test
 
