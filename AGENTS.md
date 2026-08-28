@@ -34,7 +34,7 @@ lockstep. The cron commits the fixtures alongside the catalog when upstream
 moved. Standalone live regeneration: `npm run refresh:deals` (5xx/network →
 fixture fallback, 4xx fails loudly); offline-only:
 `npm run refresh:deals -- --fixtures`.
-`refresh:deals` **fails loudly (exit 1) when the scraped/fixture records lack a
+`refresh:deals` **fails loudly (exit 1) when the RSC/fixture records lack a
 snapshot model** — a partial deals catalog silently hides the TUI sidebar
 "Command Code" section for the missing models. This gate is why the fixtures
 must be refreshed alongside the snapshot (see `scripts/check-deals-coverage.mjs`

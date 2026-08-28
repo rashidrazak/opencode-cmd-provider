@@ -1,5 +1,43 @@
 # Changelog
 
+## Unreleased
+
+### Deals pipeline: RSC-primary + daily catalog refresh cron
+
+The deals catalog is no longer scraped from HTML tables — it is generated from
+the Command Code docs site's React Server Components (RSC) stream (the docs
+pages fetched with an `rsc: 1` header; see ADR-0005). The HTML live fetch and
+HTML fixtures are gone; `scripts/parse-docs.mjs` keeps its parsers as a
+documented air-gapped fallback.
+
+- **RSC parser** — `scripts/parse-rsc.mjs` with committed fixtures
+  (`tests/fixtures/rsc-{pricing-limits,goat,pro}.txt`), shape-pinning unit
+  tests, a slug-id→snapshot-id alias map, and the shared depth-state-machine
+  extracted to `scripts/json-stream.mjs`.
+- **Tier overrides** — `scripts/tier-overrides.mjs` pins the 7 known Command
+  Code tier-categorization disagreements to `opensource` so TUI badges stay
+  stable.
+- **Daily cron** — `.github/workflows/catalog-refresh.yml` (06:00 UTC +
+  `workflow_dispatch`) regenerates snapshot/facts/fixtures/deals, builds,
+  tests, and opens a `chore: catalog refresh` PR (body via
+  `scripts/diff-catalog.mjs`) only when upstream moved; silent exit when
+  nothing drifted.
+- **Fixture lockstep** — `npm run refresh` now re-captures the RSC fixtures
+  from the live docs pages (`scripts/capture-rsc-fixtures.mjs`) before
+  regenerating the deals catalog, so fixtures, catalog, and tests stay
+  consistent. Standalone `refresh:deals` falls back to fixtures on 5xx/network
+  and fails loudly on 4xx.
+- **Catalog refresh** — deals/snapshot/facts refreshed to
+  `command-code@1.37.0` (new: `tencent/hy4-preview`, classified
+  reasoning-capable without explicit efforts); benchmark pins updated to
+  upstream's new values (Gemini 3.7 Flash, MiniMax M3).
+- **Fixes** — live RSC URLs corrected (the `/docs/rsc/*` draft routes 404 on
+  the real site); the cron now builds before testing (the pack contract test
+  needs `dist/` in a fresh checkout); 4xx RSC responses fail loudly instead of
+  silently falling back to fixtures.
+- **Follow-ups** — open decisions tracked in issues #89 (shape-pinning value
+  pins) and #90 (expired-deal filtering).
+
 ## 1.5.2 - 2026-08-28
 
 Chore: catalog refresh to `command-code@1.36.0`, with a deals-coverage gate

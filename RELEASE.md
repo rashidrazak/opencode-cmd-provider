@@ -16,7 +16,7 @@ Recommended flow:
 Use `next` for beta/alpha/manual validation builds.
 
 ```sh
-npm run refresh:snapshot
+npm run refresh
 npm version prepatch --preid next --no-git-tag-version
 npm test
 npm run format:check
@@ -24,13 +24,18 @@ npm pack --dry-run
 npm publish --tag next --access public
 ```
 
-`npm run refresh:snapshot` regenerates `src/catalog/snapshot.ts` from the live
-Command Code catalog and `src/catalog/facts.ts` from the CLI package's
-`models.md` plus `dist/cli.mjs` input-modality fields. The release therefore
-ships the current model list, reasoning/cost facts, and vision metadata;
-commit the updated generated files with the release. The refresh fails if an
-API model is missing from the CLI modality catalog or if the bundle structure
-changes in a way the parser cannot verify.
+`npm run refresh` regenerates everything at once: `src/catalog/snapshot.ts`
+from the live Command Code catalog and `src/catalog/facts.ts` from the CLI
+package's `models.md` plus `dist/cli.mjs` input-modality fields, then
+re-captures the RSC fixtures (`tests/fixtures/rsc-*.txt`) from the live docs
+pages and regenerates `src/deals/catalog.ts` from them (see ADR-0005). The
+release therefore ships the current model list, reasoning/cost facts, vision
+metadata, and deal/allowance/benchmark intelligence; commit the updated
+generated files and fixtures with the release. The refresh fails if an API
+model is missing from the CLI modality catalog, if the bundle structure
+changes in a way the parser cannot verify, or if the deals coverage gate finds
+a snapshot model with no RSC record (a 4xx from the docs site also fails
+loudly; 5xx/network falls back to the committed fixtures).
 
 If npm asks for browser or OTP auth, run the publish command manually and complete the npm prompt.
 

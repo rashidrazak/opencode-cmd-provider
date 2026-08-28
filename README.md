@@ -101,8 +101,9 @@ opencode run --model commandcode/claude-sonnet-5 "hello"
 ## Deals intelligence
 
 Every Command Code model ships with deal/allowance/benchmark intelligence
-(bundled in `src/deals/catalog.ts`), scraped from the Command Code docs. It
-surfaces in two places:
+(bundled in `src/deals/catalog.ts`), extracted from the Command Code docs'
+React Server Components (RSC) stream — the structured payload the docs site
+serves for `rsc: 1` requests (see ADR-0005). It surfaces in two places:
 
 - **Sidebar** — in a session, the OpenCode sidebar (`ctrl+x b`) shows a
   `Command Code` section for the selected model: tier, GOAT/Pro allowance,
@@ -118,10 +119,11 @@ spec. The sidebar is a TUI plugin loaded from `tui.json` — which is why
 installs made before the `./tui` export only wrote the server target and never
 showed a sidebar. Re-run with `--force` to add `tui.json`.
 
-When the Deals catalog is empty (scraping mitigated), the feature degrades
-visibly rather than silently: the sidebar shows a `Deals unavailable` banner
-with placeholder rows, and `cmd_plan_summary` reports that no deal data is
-bundled. Core (models, auth, streaming) is unaffected.
+When the Deals catalog is empty (the upstream fetch failed or the RSC shape
+changed), the feature degrades visibly rather than silently: the sidebar shows
+a `Deals unavailable` banner with placeholder rows, and `cmd_plan_summary`
+reports that no deal data is bundled. Core (models, auth, streaming) is
+unaffected.
 
 ## Model discovery and offline behavior
 
@@ -161,12 +163,22 @@ auto-registered models only.
   modalities). Regenerated from the live catalog via `npm run refresh:snapshot`.
 - Deals — `src/deals/catalog.ts` (per-model tier, benchmarks, deal
   discounts, `was`/`now` rates, peak/off-peak windows, and GOAT/Pro monthly
-  allowances for every model). Scraped from the Command Code docs
-  (`pricing-limits`, `plans/goat`, `plans/pro`; fixtures in
-  `tests/fixtures/*.html`) via `npm run refresh:deals` (add `-- --fixtures` to
-  regenerate offline from fixtures; without it, fetches live pages).
+  allowances for every model). Extracted from the Command Code docs' RSC
+  stream (the `pricing-limits`, `plans/goat`, `plans/pro` pages fetched with
+  an `rsc: 1` header; fixtures in `tests/fixtures/rsc-*.txt`) via
+  `npm run refresh:deals`. Standalone live runs fall back to the committed
+  fixtures on 5xx/network failure and fail loudly on 4xx; add
+  `-- --fixtures` to regenerate offline from the committed fixtures.
 
-Run `npm run refresh` to regenerate both catalogs at once (offline from fixtures).
+Run `npm run refresh` to regenerate everything at once: the snapshot and
+facts come from the live Command Code catalog, the RSC fixtures are
+re-captured from the live docs pages (`npm run refresh:fixtures`), and the
+deals catalog is regenerated from the fresh fixtures — so fixtures, catalog,
+and tests stay in lockstep. A daily GitHub Actions cron
+(`.github/workflows/catalog-refresh.yml`, 06:00 UTC, also manually
+triggerable via `workflow_dispatch`) runs the same pipeline: when upstream
+moved it opens a `chore: catalog refresh` PR whose body is the human-readable
+diff from `scripts/diff-catalog.mjs`; when nothing drifted it exits silently.
 
 Auto-registration adds no network latency to OpenCode startup — the snapshot is
 bundled, and the plugin never contacts the Command Code API to list models. The
@@ -176,14 +188,14 @@ endpoint being reachable.
 The following environment variables are intended for tests, local mocks, and
 compatible API endpoints:
 
-| Variable                        | Purpose                                |
-| ------------------------------- | -------------------------------------- |
-| `COMMANDCODE_API_BASE`          | Override the Command Code API base URL |
-| `COMMANDCODE_FACTS_URL`         | Override the bundled `models.md` URL   |
-| `COMMANDCODE_MODALITIES_URL`    | Override the CLI bundle URL            |
-| `COMMANDCODE_DEALS_PRICING_URL` | Override the `pricing-limits` docs URL |
-| `COMMANDCODE_DEALS_GOAT_URL`    | Override the `plans/goat` docs URL     |
-| `COMMANDCODE_DEALS_PRO_URL`     | Override the `plans/pro` docs URL      |
+| Variable                      | Purpose                                    |
+| ----------------------------- | ------------------------------------------ |
+| `COMMANDCODE_API_BASE`        | Override the Command Code API base URL     |
+| `COMMANDCODE_FACTS_URL`       | Override the bundled `models.md` URL       |
+| `COMMANDCODE_MODALITIES_URL`  | Override the CLI bundle URL                |
+| `COMMANDCODE_RSC_PRICING_URL` | Override the `pricing-limits` RSC page URL |
+| `COMMANDCODE_RSC_GOAT_URL`    | Override the `plans/goat` RSC page URL     |
+| `COMMANDCODE_RSC_PRO_URL`     | Override the `plans/pro` RSC page URL      |
 
 ### Reasoning support
 
