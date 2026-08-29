@@ -1,5 +1,40 @@
 # Changelog
 
+## 1.6.1 - 2026-08-29
+
+Patch release. Catalog refresh to `command-code@1.38.1`, one catalog
+classification re-pin, and two CI fixes for the daily catalog-refresh cron.
+
+- **Catalog refresh** — snapshot + capability facts + RSC fixtures refreshed
+  to `command-code@1.38.1` (was 1.37.0). Net: 30 → 31 effort entries;
+  `tencent/hy4-preview` is the new row (Efforts column now lists
+  `low, medium, high`, was empty in 1.37.0). The 62 cost rows are unchanged.
+  The deals catalog is unaffected (the new model already had its RSC
+  availability + deal info in 1.37.0 fixtures). A follow-up 2026-08-29 cron
+  re-captured the RSC fixtures and refreshed `src/catalog/facts.ts` to
+  upstream's new values.
+- **Catalog classification** — `tencent/hy4-preview` re-pinned to
+  `EFFORTS_MODELS` in `src/catalog/facts.ts`; the prior
+  `REASONING_MODELS` classification was a labelling error in 1.6.0 (upstream
+  advertises it as an effort-controlled model, not a reasoning model). The
+  matching unit-test pin was updated in lockstep.
+- **CI: catalog-refresh heredoc** — `realpath` the relative `.ts` path
+  before the `npx tsx -e` heredoc in `.github/workflows/catalog-refresh.yml`.
+  The `after` loop passed a bare-relative path (e.g. `src/catalog/snapshot.ts`)
+  to the heredoc, which Node's ESM resolver parsed as a package name and
+  rejected with `ERR_MODULE_NOT_FOUND`. The `before` loop was unaffected
+  because it used `/tmp/...` absolute paths. Locked down with
+  `tests/catalog-refresh-extract.test.ts`.
+- **CI: catalog-refresh push** — force-push the `catalog-refresh/${date}`
+  branch in `.github/workflows/catalog-refresh.yml`. Two consecutive cron
+  runs on the same day land sibling commits on `main`'s HEAD; `git push -u`
+  then rejects as non-fast-forward, leaving the cron stuck. `-fu` handles
+  both the partial-failure rerun and the fresh-branch case; the branch is
+  owned only by this workflow, so there's no clobber risk. The
+  `Open PR` step's `gh pr list --head X` already copes correctly with a
+  force-pushed tip. Locked down with
+  `tests/catalog-refresh-push.test.ts`.
+
 ## 1.6.0 - 2026-08-28
 
 ### Deals pipeline: RSC-primary + daily catalog refresh cron
