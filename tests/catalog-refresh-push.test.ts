@@ -112,8 +112,15 @@ run([
           true,
         )
         // The remote tip should now be the second commit, not the
-        // first. Verify by listing the remote ref.
+        // first. Verify by listing the remote ref. Pass `-C
+        // repo.work` so `origin` resolves to the test's local bare
+        // remote, not the outer project checkout's `origin` (which
+        // is GitHub) — without it, the test passed only on the day
+        // the matching `catalog-refresh/${date}` branch happened to
+        // exist on GitHub.
         const { stdout } = await exec("git", [
+          "-C",
+          repo.work,
           "ls-remote",
           "origin",
           "refs/heads/catalog-refresh/2026-08-29",
