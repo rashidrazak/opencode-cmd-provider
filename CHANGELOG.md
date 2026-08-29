@@ -34,6 +34,13 @@ classification re-pin, and two CI fixes for the daily catalog-refresh cron.
   `Open PR` step's `gh pr list --head X` already copes correctly with a
   force-pushed tip. Locked down with
   `tests/catalog-refresh-push.test.ts`.
+- **Test fix for the push test** — `tests/catalog-refresh-push.test.ts`'s
+  verification `git ls-remote` previously ran from the outer project
+  CWD, so it resolved `origin` to GitHub rather than the test's local
+  bare remote. It passed only on the day the matching
+  `catalog-refresh/${date}` branch happened to exist on GitHub. Now
+  passes `-C repo.work` so the `origin` resolution is scoped to the
+  test fixture.
 
 ## 1.6.0 - 2026-08-28
 
