@@ -274,7 +274,20 @@ jobs:
           date="$(date -u +%Y-%m-%d)"
           branch="catalog-refresh/${date}"
           git checkout -b "${branch}"
-          git push -u origin "${branch}"
+          # Force-push so a re-run after a partial failure (e.g.
+          # a previous run that pushed the branch but failed at
+          # `Open PR`) doesn't reject this push as non-fast-forward
+          # — both runs sit on the same `main` HEAD, so the local
+          # commit is a sibling of the previous tip, not a
+          # descendant. `-u` is preserved for the first push so
+          # the upstream tracking is set; on a re-run `-f` wins
+          # and overwrites the existing tip. The branch is
+          # `catalog-refresh/${date}` and only this workflow
+          # creates it, so there's no risk of clobbering a
+          # maintainer's work. (Run 33245295616 hit this when the
+          # previous run's `1d1e96c` was already on the remote
+          # and the new local commit could not fast-forward it.)
+          git push -fu origin "${branch}"
 
       - name: Open PR
         if: steps.drift.outputs.drift == 'true'
