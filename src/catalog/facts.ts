@@ -5,9 +5,9 @@
 // modalities parsed from its CLI bundle (dist/cli.mjs). Regenerate
 // with `npm run refresh:snapshot`.
 
-export const FACTS_SOURCE_URL = "https://unpkg.com/command-code@1.37.0/dist/bundled/command-code-knowledge/reference/models.md"
-export const MODALITIES_SOURCE_URL = "https://unpkg.com/command-code@1.37.0/dist/cli.mjs"
-export const FACTS_PACKAGE_VERSION = "1.37.0"
+export const FACTS_SOURCE_URL = "https://unpkg.com/command-code@1.38.1/dist/bundled/command-code-knowledge/reference/models.md"
+export const MODALITIES_SOURCE_URL = "https://unpkg.com/command-code@1.38.1/dist/cli.mjs"
+export const FACTS_PACKAGE_VERSION = "1.38.1"
 export const FACTS_LAST_REFRESHED = "2026-08-28"
 
 export const MODEL_EFFORTS: Readonly<Record<string, readonly string[]>> = {
@@ -20,6 +20,7 @@ export const MODEL_EFFORTS: Readonly<Record<string, readonly string[]>> = {
   "Qwen/Qwen3.8-Max": ["low","medium","xhigh"],
   "Qwen/Qwen3.8-27B": ["low","medium","xhigh"],
   "Qwen/Qwen3.8-Flash": ["low","medium","xhigh"],
+  "tencent/hy4-preview": ["low","medium","high"],
   "claude-sonnet-5": ["low","medium","high","xhigh","max"],
   "claude-sonnet-4-6": ["low","medium","high","xhigh","max"],
   "claude-fable-5": ["low","medium","high","xhigh","max"],
