@@ -178,8 +178,22 @@ jobs:
             # date the module exports (so the snapshot's
             # FACTS_LAST_REFRESHED, which lives in facts.ts, is
             # captured here even when MODEL_SNAPSHOT is absent).
+            #
+            # The path must be absolute (or a `file://` URL): a
+            # bare-relative `src/catalog/snapshot.ts` is parsed
+            # by Node's ESM resolver as a package name, so the
+            # import fails with `ERR_MODULE_NOT_FOUND: Cannot
+            # find package 'src'` (this bit the workflow on
+            # run 33241830819 — the "after" loop was the first
+            # to reach this branch, because earlier failures
+            # in `npm test` short-circuited before it). The
+            # seam is locked down by
+            # `tests/catalog-refresh-extract.test.ts`, which
+            # spawns this exact heredoc against a bare-relative
+            # fixture.
+            abs_ts_path="$(realpath "${ts_path}")"
             npx tsx --input-type=module -e "
-              const mod = await import(${ts_path@Q});
+              const mod = await import(${abs_ts_path@Q});
               const out = {};
               if (mod.MODEL_SNAPSHOT) out.MODEL_SNAPSHOT = mod.MODEL_SNAPSHOT;
               if (mod.MODEL_DEALS)    out.MODEL_DEALS    = mod.MODEL_DEALS;
