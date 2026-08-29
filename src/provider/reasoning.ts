@@ -44,8 +44,13 @@ export const REASONING_MODELS: ReadonlySet<string> = new Set([
   "poolside/laguna-s-2.1-free",
   "stepfun/Step-3.7-Flash",
   "tencent/hy3-paid",
-  // Live RSC caps.reasoning=true, models.md has no Efforts entry (2026-08-28).
-  "tencent/hy4-preview",
+  // tencent/hy4-preview is reasoning-capable with explicit efforts
+  // (models.md lists `low, medium, high` since command-code@1.38.0,
+  // 2026-08-28) — it belongs in MODEL_EFFORTS, not here. Keeping it here
+  // would leave a snapshot model classified in both REASONING_MODELS and
+  // MODEL_EFFORTS, which breaks the dedicated
+  // `tencent/hy4-preview is an efforts model` pin in
+  // tests/catalog-metadata.test.ts.
   "thinkingmachines/inkling",
   "thinkingmachines/inkling-small",
 ])
