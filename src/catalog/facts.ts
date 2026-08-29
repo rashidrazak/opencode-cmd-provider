@@ -5,10 +5,10 @@
 // modalities parsed from its CLI bundle (dist/cli.mjs). Regenerate
 // with `npm run refresh:snapshot`.
 
-export const FACTS_SOURCE_URL = "https://unpkg.com/command-code@1.38.1/dist/bundled/command-code-knowledge/reference/models.md"
-export const MODALITIES_SOURCE_URL = "https://unpkg.com/command-code@1.38.1/dist/cli.mjs"
-export const FACTS_PACKAGE_VERSION = "1.38.1"
-export const FACTS_LAST_REFRESHED = "2026-08-28"
+export const FACTS_SOURCE_URL = "https://unpkg.com/command-code@1.38.2/dist/bundled/command-code-knowledge/reference/models.md"
+export const MODALITIES_SOURCE_URL = "https://unpkg.com/command-code@1.38.2/dist/cli.mjs"
+export const FACTS_PACKAGE_VERSION = "1.38.2"
+export const FACTS_LAST_REFRESHED = "2026-08-29"
 
 export const MODEL_EFFORTS: Readonly<Record<string, readonly string[]>> = {
   "deepseek/deepseek-v4-pro": ["high","max"],
@@ -98,7 +98,7 @@ export const MODEL_COSTS: Readonly<
   "gpt-5.4": { input: 2.5, output: 15, cacheRead: 0.25, cacheWrite: 0 },
   "gpt-5.3-codex": { input: 2, output: 8, cacheRead: 0.5, cacheWrite: 0 },
   "gpt-5.4-mini": { input: 0.75, output: 4.5, cacheRead: 0.075, cacheWrite: 0 },
-  "google/gemini-3.7-flash": { input: 0.75, output: 3.75, cacheRead: 0.075, cacheWrite: 0.04167 },
+  "google/gemini-3.7-flash": { input: 1.5, output: 7.5, cacheRead: 0.15, cacheWrite: 0.08334 },
   "google/gemini-3.6-flash": { input: 1.5, output: 7.5, cacheRead: 0.15, cacheWrite: 0 },
   "google/gemini-3.5-flash": { input: 1.5, output: 9, cacheRead: 0.15, cacheWrite: 0 },
   "google/gemini-3.5-flash-lite": { input: 0.3, output: 2.5, cacheRead: 0.03, cacheWrite: 0 },
