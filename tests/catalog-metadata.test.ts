@@ -75,6 +75,7 @@ const EFFORTS_MODELS = new Set([
   "google/gemini-3.5-flash-lite",
   "google/gemini-3.1-flash-lite",
   "sakana/fugu-ultra",
+  "tencent/hy4-preview",
   "xai/grok-4.5",
   "xai/grok-4.6",
 ])
@@ -194,14 +195,16 @@ run([
   ],
 
   [
-    "tencent/hy4-preview is reasoning-capable without variants",
+    "tencent/hy4-preview is an efforts model",
     () => {
-      // New upstream model (added 2026-08-28): live RSC caps.reasoning is
-      // true and models.md lists no Efforts entry, so it belongs in
-      // REASONING_MODELS with no MODEL_EFFORTS — mirrors the muse-spark
-      // classification above.
+      // Added 2026-08-28 (command-code@1.37.0): live RSC caps.reasoning=true
+      // with no explicit Efforts entry, classified as REASONING_MODELS.
+      // command-code@1.38.0 (same day) added `low, medium, high` to the
+      // Efforts column, so the model now belongs in MODEL_EFFORTS and must
+      // be removed from REASONING_MODELS. The "classified exactly once"
+      // gate above will fail if a model is in both.
       assertEqual(isReasoningModel("tencent/hy4-preview"), true)
-      assertEqual(MODEL_EFFORTS["tencent/hy4-preview"], undefined)
+      assertEqual(MODEL_EFFORTS["tencent/hy4-preview"], ["low", "medium", "high"])
     },
   ],
 
