@@ -11,12 +11,33 @@ import { run, assert, assertEqual } from "./harness.js"
 
 const hasOpenCode = spawnSync("which", ["opencode"]).status === 0
 
+/** The `opencode plugin <file://spec>` installer contract is a v1 (1.x)
+ * behavior. The v2 beta binary does not implement this subcommand form, and
+ * machines may have either generation on PATH — probe the version and skip
+ * the v1-only assertion on v2 runtimes (the same graceful-skip pattern as
+ * the missing-binary case). */
+function isOpenCodeV1(): boolean {
+  const probe = spawnSync("opencode", ["--version"], {
+    encoding: "utf-8",
+    timeout: 15_000,
+  })
+  const out = `${probe.stdout || ""}${probe.stderr || ""}`
+  // v1 prints its semver (e.g. "1.18.25"); v2 betas print "opencode2
+  // v0.0.0-beta-..." or a 0.0.0- prerelease version.
+  const v2Marker = /opencode2|v0\.0\.0-/.test(out)
+  return !v2Marker && /1\.\d+\.\d+/.test(out)
+}
+
+const isV1 = hasOpenCode && isOpenCodeV1()
+
 run([
   [
     "opencode plugin file://<pkg> creates both opencode.json and tui.json with same spec",
     () => {
-      if (!hasOpenCode) {
-        console.log("skip - opencode not on PATH")
+      if (!isV1) {
+        console.log(
+          "skip - opencode on PATH is not a v1 runtime (v2 betas do not implement the file:// plugin installer)",
+        )
         return
       }
       const home = mkdtempSync(join(tmpdir(), "oc-install-home-"))
@@ -84,7 +105,7 @@ run([
       // Server plugin enriches the selected model with options.cmd via snapshot+deals;
       // TUI plugin's dealsRows then renders Tier/allowance etc. without any hand-written tui.json.
       const { MODEL_SNAPSHOT } = await import("../src/catalog/snapshot.js")
-      const { autoRegister } = await import("../src/plugin/models.js")
+      const { autoRegister } = await import("../src/plugin/core.js")
       const { enrichCommandCodeModels } = await import("../src/deals/index.js")
       const { dealsRows } = await import("../src/deals/tui.js")
       // Simulate the config hook's auto-registration + enrichment pipeline

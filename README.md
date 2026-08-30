@@ -43,6 +43,19 @@ Then authenticate:
 
 Select **Command Code**, complete the browser flow, and pick a model with `/models`.
 
+### OpenCode v2 (beta)
+
+The plugin supports both generations from one package. On v2 the default
+export's `setup(context)` registers the provider through
+`catalog.transform`, auth through an integration (env var `COMMANDCODE_API_KEY`
+or the studio OAuth method), reasoning-effort variants as real `Model.Info`
+variants, and inference through the bundled transport via
+`aisdk.hook("language")`. Install/config works the same way (`plugin` array
+or `opencode plugin <pkg>` on v1; on v2 betas add the package specifier to
+the `plugin` array). See `docs/adr/0006-dual-shape-v1-v2-plugin.md` for the
+verified contract details and the known beta limitation around the
+`aisdk.hook` seam on beta-18684.
+
 ## Authentication
 
 ### Browser login

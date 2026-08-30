@@ -371,46 +371,9 @@ export function anthropicEventToStreamPart(event: unknown): LanguageModelV3Strea
   // Content delta: { type: "content_block_delta", delta: { type: "text_delta", text: "..." } }
   if (type === "content_block_delta") {
     const delta = asRecord(event.delta)
-    const text = stringValue(delta?.text)
-    if (typeof text === "string" && text.length > 0) {
-      const index = numberValue(event.index) ?? 0
-      const id = `text-${index}`
-      return [{ type: "text-delta", id, delta: text }]
-    }
-    // Tool input delta: { type: "input_json_delta", partial_json: "..." }
-    const partial = stringValue(delta?.partial_json)
-    if (typeof partial === "string" && partial.length > 0) {
-      const index = numberValue(event.index) ?? 0
-      const id = `tool-${index}`
-      // Emit as tool-input-delta; caller may have started tool
-      return [{ type: "tool-input-delta", id, delta: partial }]
-    }
-    return []
-  }
-
-  if (type === "content_block_start") {
-    const block = asRecord(event.content_block)
-    const blockType = stringValue(block?.type)
     const index = numberValue(event.index) ?? 0
-    if (blockType === "text") {
-      const id = `text-${index}`
-      return [{ type: "text-start", id }]
-    }
-    if (blockType === "thinking") {
-      const id = stringValue(block?.id) ?? `thinking-${index}`
-      return [{ type: "reasoning-start", id }]
-    }
-    if (blockType === "tool_use") {
-      const id = stringValue(block?.id) ?? `tool-${index}`
-      const name = stringValue(block?.name) ?? ""
-      return [{ type: "tool-input-start", id, toolName: name }]
-    }
-    return []
-  }
-
-  if (type === "content_block_delta") {
-    const delta = asRecord(event.delta)
-    const index = numberValue(event.index) ?? 0
+    // A single tri-branch handles the three delta shapes: `text` (regular
+    // text), `thinking` (reasoning text), and `partial_json` (tool args).
     const text = stringValue(delta?.text)
     if (typeof text === "string" && text.length > 0) {
       const id = `text-${index}`
@@ -432,16 +395,39 @@ export function anthropicEventToStreamPart(event: unknown): LanguageModelV3Strea
   }
 
   if (type === "content_block_stop") {
-    // Stateless codec: the STOP event carries only `index`, not the block type.
-    // Anthropic streams either `text`, `thinking` or `tool_use` blocks; the AI SDK expects
-    // `text-end` for text, `reasoning-end` for thinking, and `tool-input-end` for tool_use.
+    // Stateless codec: the STOP event carries only `index`, not the block
+    // type, so the matching end part is emitted for every block family the
+    // protocol defines (issue #71: thinking blocks previously never received
+    // a `reasoning-end` here). Emitting the full set is safe for stateless
+    // consumers: each family's ids are index-disjoint (`text-<i>`,
+    // `thinking-<i>`, `tool-<i>`), and the AI SDK ignores end parts for ids
+    // that never started.
     const index = numberValue(event.index) ?? 0
-    const idText = `text-${index}`
-    const idTool = `tool-${index}`
     return [
-      { type: "text-end", id: idText },
-      { type: "tool-input-end", id: idTool },
+      { type: "text-end", id: `text-${index}` },
+      { type: "reasoning-end", id: `thinking-${index}` },
+      { type: "tool-input-end", id: `tool-${index}` },
     ]
+  }
+
+  if (type === "content_block_start") {
+    const block = asRecord(event.content_block)
+    const blockType = stringValue(block?.type)
+    const index = numberValue(event.index) ?? 0
+    if (blockType === "text") {
+      const id = `text-${index}`
+      return [{ type: "text-start", id }]
+    }
+    if (blockType === "thinking") {
+      const id = stringValue(block?.id) ?? `thinking-${index}`
+      return [{ type: "reasoning-start", id }]
+    }
+    if (blockType === "tool_use") {
+      const id = stringValue(block?.id) ?? `tool-${index}`
+      const name = stringValue(block?.name) ?? ""
+      return [{ type: "tool-input-start", id, toolName: name }]
+    }
+    return []
   }
 
   // Terminal message_delta: { type: "message_delta", delta: { stop_reason }, usage: { ... } }
@@ -531,9 +517,21 @@ export function createOpenAIStreamParser(): (event: unknown) => LanguageModelV3S
 
   return (event) => {
     if (!isRecord(event)) return []
-    // Error events flow through the stateless mapper (redacted throw).
+    // Error events flow through the stateless mapper (redacted throw). Issue
+    // #72: a terminal error mid-stream must not strand open reasoning/text
+    // parts — "failed mid-generation" is exactly the lifecycle gap reported
+    // there — so the close helpers run first and the mapper's throw is
+    // captured into an error part (the transport and doGenerate already
+    // treat `{type: "error"}` parts as terminal).
     if (event.error !== undefined || stringValue(event.type) === "error") {
-      return openAIEventToStreamPart(event)
+      const closing: LanguageModelV3StreamPart[] = [...closeReasoning(), ...closeText()]
+      let errorParts: LanguageModelV3StreamPart[]
+      try {
+        errorParts = openAIEventToStreamPart(event)
+      } catch (error) {
+        errorParts = [{ type: "error", error }]
+      }
+      return [...closing, ...errorParts]
     }
     const parts: LanguageModelV3StreamPart[] = []
     const choice = firstChoice(event)
@@ -663,6 +661,11 @@ export function createOpenAIStreamParser(): (event: unknown) => LanguageModelV3S
 export function createAnthropicStreamParser(): (event: unknown) => LanguageModelV3StreamPart[] {
   const toolBlocks = new Map<number, ToolCallBuffer>()
   const blockTypes = new Map<number, "text" | "tool_use" | "thinking">()
+  // Start-id per block index (issue #72): content_block_start may carry a real
+  // block id (thinking blocks), and the matching content_block_stop must close
+  // the SAME id — the bare `thinking-<index>` fallback is only correct when no
+  // id was provided.
+  const blockIds = new Map<number, string>()
   return (event) => {
     if (!isRecord(event)) return []
     const type = stringValue(event.type)
@@ -673,6 +676,7 @@ export function createAnthropicStreamParser(): (event: unknown) => LanguageModel
       if (blockType === "tool_use") {
         blockTypes.set(index, "tool_use")
         const id = stringValue(block?.id) ?? `tool-${index}`
+        blockIds.set(index, id)
         const name = stringValue(block?.name) ?? ""
         toolBlocks.set(index, { id, name, input: "", started: true, emitted: false })
         return [{ type: "tool-input-start", id, toolName: name }]
@@ -680,11 +684,14 @@ export function createAnthropicStreamParser(): (event: unknown) => LanguageModel
       if (blockType === "thinking") {
         blockTypes.set(index, "thinking")
         const id = stringValue(block?.id) ?? `thinking-${index}`
+        blockIds.set(index, id)
         return [{ type: "reasoning-start", id }]
       }
       if (blockType === "text") {
         blockTypes.set(index, "text")
-        return [{ type: "text-start", id: `text-${index}` }]
+        const id = `text-${index}`
+        blockIds.set(index, id)
+        return [{ type: "text-start", id }]
       }
       return []
     }
@@ -733,6 +740,8 @@ export function createAnthropicStreamParser(): (event: unknown) => LanguageModel
       const index = numberValue(event.index) ?? 0
       const bType = blockTypes.get(index)
       blockTypes.delete(index)
+      const startedId = blockIds.get(index) ?? `thinking-${index}`
+      blockIds.delete(index)
       if (bType === "tool_use") {
         const block = toolBlocks.get(index)
         if (block) {
@@ -749,7 +758,7 @@ export function createAnthropicStreamParser(): (event: unknown) => LanguageModel
           ]
         }
       } else if (bType === "thinking") {
-        return [{ type: "reasoning-end", id: `thinking-${index}` }]
+        return [{ type: "reasoning-end", id: startedId }]
       }
       const block = toolBlocks.get(index)
       if (block) {
@@ -765,7 +774,10 @@ export function createAnthropicStreamParser(): (event: unknown) => LanguageModel
           },
         ]
       }
-      return [{ type: "text-end", id: `text-${index}` }]
+      // Text blocks are the only remaining family: close with the start id
+      // recorded for this index (falls back to the index-derived id for
+      // streams whose start event never arrived).
+      return [{ type: "text-end", id: bType === "text" ? startedId : `text-${index}` }]
     }
     // Everything else (message_delta, message_stop, ping, error, …) shares the
     // stateless mapper's handling.

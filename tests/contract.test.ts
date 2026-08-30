@@ -86,13 +86,18 @@ run([
     },
   ],
   [
-    "default export is a V1 plugin module { id, server }",
+    "default export is a dual-shape plugin module { id, server, setup }",
     async () => {
+      // v1 (1.x) calls `server` (config-hook auto-registration, /connect);
+      // v2 (beta) validates and calls `setup`. Verified against a real
+      // 1.18.25 binary that v1 tolerates the extra `setup` key, and against
+      // beta-18684 that v2 accepts `{ id, server, setup }` and invokes setup.
       const mod = await load()
-      const def = mod.default as { id?: unknown; server?: unknown }
+      const def = mod.default as { id?: unknown; server?: unknown; setup?: unknown }
       assert(typeof def === "object" && def !== null)
       assertEqual(def.id, "commandcode")
-      assert(typeof def.server === "function")
+      assert(typeof def.server === "function", "v1 server surface missing")
+      assert(typeof def.setup === "function", "v2 setup surface missing")
     },
   ],
   [

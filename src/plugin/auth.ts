@@ -25,7 +25,13 @@ export interface RunAuthFlowOptions {
   mirror?: MirrorOptions | false
 }
 
-export async function runAuthFlow(options: RunAuthFlowOptions = {}): Promise<AuthOAuthResult> {
+/** The flow always returns the `method: "auto"` variant of the opencode auth
+ * result; the narrowed alias lets callers invoke `callback()` without
+ * discriminating the union (the `method: "code"` variant requires an
+ * argument). */
+export type AutoAuthFlowResult = Extract<AuthOAuthResult, { method: "auto" }>
+
+export async function runAuthFlow(options: RunAuthFlowOptions = {}): Promise<AutoAuthFlowResult> {
   const authServer = await startAuthServer({ startPort: options.startPort })
   const stateToken = generateStateToken()
   const callbackUrl = `http://localhost:${authServer.port}/callback`
