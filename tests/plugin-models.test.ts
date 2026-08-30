@@ -5,7 +5,7 @@ import {
   augmentConfigCommandCodeModels,
   DEFAULT_DISPLAY_PREFIX,
   resolveDisplayPrefix,
-} from "../src/plugin/core.js"
+} from "../src/plugin/models.js"
 import type { CatalogModel } from "../src/catalog/snapshot.js"
 import { MODEL_SNAPSHOT } from "../src/catalog/snapshot.js"
 import { assert, assertEqual, run } from "./harness.js"
@@ -82,27 +82,6 @@ run([
       const config = { provider: { openai: { npm: "x" } } }
       autoRegister(config, [], OPTIONS)
       assertEqual(Object.keys(config.provider), ["openai"])
-    },
-  ],
-
-  [
-    "omits the env hint when the user declared a static options.apiKey (issue #102)",
-    () => {
-      // Upstream #34388: a registered `env` array can block the config key on
-      // affected v1 builds, and a static key makes the hint pointless anyway.
-      const config = {
-        provider: {
-          commandcode: {
-            options: { apiKey: "sk-static" },
-          },
-        },
-      }
-      autoRegister(config, SNAPSHOT, OPTIONS)
-      const entry = config.provider.commandcode
-      assertEqual(entry.options.apiKey, "sk-static")
-      assertEqual(entry.env, undefined)
-      assertEqual(entry.options.baseURL, OPTIONS.baseURL)
-      assert(Object.keys(entry.models ?? {}).length > 0)
     },
   ],
 

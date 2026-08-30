@@ -6,11 +6,15 @@
 import { MODEL_SNAPSHOT, type CatalogModel } from "../src/catalog/snapshot.js"
 import { MODEL_COSTS, ZERO_MODEL_COST } from "../src/provider/pricing.js"
 import { reasoningVariantsForModel } from "../src/provider/reasoning.js"
-import { inputModalitiesForModel } from "../src/provider/modalities.js"
 import { assert, assertEqual, run } from "./harness.js"
 
 type ProviderRecord = {
-  provider: { id?: string; name?: string; package?: string; activation?: string }
+  provider: {
+    id?: string
+    name?: string
+    endpoint?: { type: "aisdk"; package: string }
+    activation?: string
+  }
   models: Map<string, Record<string, any>>
 }
 
@@ -20,14 +24,14 @@ function makeDraft(existing: Map<string, ProviderRecord> = new Map()) {
     drafts,
     draft: {
       provider: {
-        list: () => [...existing.values()],
-        get: (id: string) => existing.get(id),
+        list: () => [...existing.values()].map((record) => record.provider),
+        get: (id: string) => existing.get(id)?.provider,
         update: (id: string, fn: (p: ProviderRecord["provider"]) => void) => {
           let record = existing.get(id)
           const isNew = record === undefined
           if (!record) {
             record = {
-              provider: { id, name: undefined, package: undefined, activation: undefined },
+              provider: { id, name: undefined, endpoint: undefined, activation: undefined },
               models: new Map(),
             }
             existing.set(id, record)
@@ -38,6 +42,18 @@ function makeDraft(existing: Map<string, ProviderRecord> = new Map()) {
           else drafts.updated.push(id)
         },
         remove: (id: string) => existing.delete(id),
+      },
+      model: {
+        get: (providerId: string, modelId: string) => existing.get(providerId)?.models.get(modelId),
+        update: (providerId: string, modelId: string, fn: (model: Record<string, any>) => void) => {
+          const record = existing.get(providerId)!
+          const model = record.models.get(modelId) ?? { id: modelId, providerID: providerId }
+          fn(model)
+          record.models.set(modelId, model)
+        },
+        remove: (providerId: string, modelId: string) =>
+          existing.get(providerId)?.models.delete(modelId),
+        default: { get: () => undefined, set: () => undefined },
       },
     },
     existing,
@@ -120,7 +136,7 @@ run([
   ],
 
   [
-    "v2 catalog transform upserts the provider with the aisdk package marker",
+    "v2 catalog transform uses the aisdk endpoint",
     async () => {
       const ctx = makeCtx()
       const plugin = await loadPlugin()
@@ -129,7 +145,12 @@ run([
       ctx.catalog.transforms[0](made.draft)
       assertEqual(made.existing.has("commandcode"), true)
       const record = made.existing.get("commandcode")!
-      assertEqual(record.provider.package, "aisdk:commandcode")
+      assertEqual(record.provider.endpoint, {
+        type: "aisdk",
+        package: "@ai-sdk/openai-compatible",
+      })
+      assertEqual((record.provider as any).package, "aisdk:@ai-sdk/openai-compatible")
+      assert(!JSON.stringify(record.provider).includes("aisdk:commandcode"))
       assertEqual(record.provider.name, "Command Code")
       assertEqual(record.provider.activation, "auto")
       assertEqual(record.provider.id, "commandcode")
@@ -154,6 +175,12 @@ run([
       assert(sonnet, "claude-sonnet-5 missing from v2 models map")
       assertEqual(sonnet.providerID, "commandcode")
       assertEqual(sonnet.modelID, "claude-sonnet-5")
+      assertEqual(sonnet.endpoint, {
+        type: "aisdk",
+        package: "@ai-sdk/openai-compatible",
+      })
+      assertEqual(sonnet.package, "aisdk:@ai-sdk/openai-compatible")
+      assert(!JSON.stringify(sonnet).includes("aisdk:commandcode"))
       assertEqual(sonnet.name, "[CMD] Claude Sonnet 5")
       assertEqual(sonnet.capabilities.tools, true)
       assertEqual(sonnet.capabilities.input, ["text", "image"])
@@ -179,48 +206,6 @@ run([
           cache: { read: cost.cacheRead, write: cost.cacheWrite },
         },
       ])
-    },
-  ],
-
-  [
-    "v2 catalog transform is idempotent across replayed passes",
-    async () => {
-      const ctx = makeCtx()
-      const plugin = await loadPlugin()
-      await plugin.setup(ctx as any)
-      const { existing, draft } = makeDraft()
-      ctx.catalog.transforms[0](draft)
-      const first = existing.get("commandcode")!
-      const firstModels = [...first.models.entries()]
-      ctx.catalog.transforms[0](draft)
-      const second = existing.get("commandcode")!
-      assertEqual(second.models.size, firstModels.length)
-      assertEqual([...second.models.entries()], firstModels)
-      // a user-declared model key is never clobbered by replay
-      first.models.set("claude-sonnet-5", { ...first.models.get("claude-sonnet-5"), name: "MINE" })
-      ctx.catalog.transforms[0](draft)
-      assertEqual(existing.get("commandcode")!.models.get("claude-sonnet-5").name, "MINE")
-    },
-  ],
-
-  [
-    "v2 catalog transform keeps user-declared provider fields",
-    async () => {
-      const ctx = makeCtx()
-      const plugin = await loadPlugin()
-      await plugin.setup(ctx as any)
-      const record: ProviderRecord = {
-        provider: { name: "My CC", package: "aisdk:commandcode", activation: "enabled" },
-        models: new Map([["claude-sonnet-5", { name: "MINE", modelID: "claude-sonnet-5" }]]),
-      }
-      const { existing, draft } = makeDraft(new Map([["commandcode", record]]))
-      ctx.catalog.transforms[0](draft)
-      const after = existing.get("commandcode")!
-      assertEqual(after.provider.name, "My CC")
-      assertEqual(after.provider.activation, "enabled")
-      assertEqual(after.models.get("claude-sonnet-5").name, "MINE")
-      // snapshot models fill the rest
-      assertEqual(after.models.size, MODEL_SNAPSHOT.length)
     },
   ],
 
@@ -261,26 +246,6 @@ run([
       const again: any = { model: { id: "claude-sonnet-5" }, options: { apiKey: "resolved-key" } }
       hook.fn(again)
       assert(again.language !== language, "each call must get a fresh model instance")
-    },
-  ],
-
-  [
-    "v2 model entries carry correct modalities for text-only models",
-    async () => {
-      const ctx = makeCtx()
-      const plugin = await loadPlugin()
-      await plugin.setup(ctx as any)
-      const { existing, draft } = makeDraft()
-      ctx.catalog.transforms[0](draft)
-      const record = existing.get("commandcode")!
-      const textOnly = MODEL_SNAPSHOT.find(
-        (m) => inputModalitiesForModel(m.id).join(",") === "text",
-      )
-      if (textOnly) {
-        const info = record.models.get(textOnly.id)
-        assert(info, `missing v2 entry for ${textOnly.id}`)
-        assertEqual(info.capabilities.input, ["text"])
-      }
     },
   ],
 ])

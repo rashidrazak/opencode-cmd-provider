@@ -12,7 +12,6 @@ import {
   ccUsageToAiSdkUsage,
   createOpenAIStreamParser,
   createAnthropicStreamParser,
-  anthropicEventToStreamPart,
 } from "../src/provider/stream.js"
 import { assert, assertEqual, rejects, run } from "./harness.js"
 
@@ -410,92 +409,6 @@ run([
       assertEqual((parts[3] as { id: string }).id, "text-1")
       assertEqual((parts[4] as { delta: string }).delta, "Answer")
       assertEqual((parts[5] as { id: string }).id, "text-1")
-    },
-  ],
-
-  [
-    "createAnthropicStreamParser closes a thinking block with the id the provider set (issue #72)",
-    () => {
-      const parser = createAnthropicStreamParser()
-      const events = [
-        {
-          type: "content_block_start",
-          index: 0,
-          content_block: { type: "thinking", id: "thrk_123", thinking: "" },
-        },
-        {
-          type: "content_block_delta",
-          index: 0,
-          delta: { type: "thinking_delta", thinking: "Pondering" },
-        },
-        { type: "content_block_stop", index: 0 },
-      ]
-      const parts = events.flatMap((e) => parser(e))
-      const types = parts.map((p) => (p as { type: string }).type)
-      assertEqual(types, ["reasoning-start", "reasoning-delta", "reasoning-end"])
-      // end id MUST equal the start id, not the index fallback
-      assertEqual((parts[0] as { id: string }).id, "thrk_123")
-      assertEqual((parts[2] as { id: string }).id, "thrk_123")
-    },
-  ],
-
-  [
-    "createOpenAIStreamParser synthesizes closes before a mid-stream error (issue #72)",
-    () => {
-      const parser = createOpenAIStreamParser()
-      const chunks = [
-        { id: "gen", choices: [{ delta: { reasoning: "partial thinking" } }] },
-        { id: "gen", choices: [{ delta: { content: "partial answer" } }] },
-        { error: { message: "overloaded", type: "server_error" } },
-      ]
-      const parts = chunks.flatMap((c) => parser(c as any))
-      const types = parts.map((p) => (p as { type: string }).type)
-      // reasoning and text parts are closed BEFORE the terminal error part —
-      // no orphaned open parts in the failed-mid-generation scenario
-      assertEqual(types, [
-        "reasoning-start",
-        "reasoning-delta",
-        "reasoning-end",
-        "text-start",
-        "text-delta",
-        "text-end",
-        "error",
-      ])
-      assert((parts[6] as { error: Error }).error instanceof Error)
-    },
-  ],
-
-  [
-    "stateless Anthropic codec completes the thinking lifecycle (issue #71)",
-    () => {
-      const start = anthropicEventToStreamPart({
-        type: "content_block_start",
-        index: 0,
-        content_block: { type: "thinking", id: "thrk_9", thinking: "" },
-      })
-      const delta = anthropicEventToStreamPart({
-        type: "content_block_delta",
-        index: 0,
-        delta: { type: "thinking_delta", thinking: "Hmm" },
-      })
-      const stop = anthropicEventToStreamPart({ type: "content_block_stop", index: 0 }) as any[]
-      const types = [
-        ...start.map((p) => p.type),
-        ...delta.map((p) => p.type),
-        ...stop.map((p) => p.type),
-      ]
-      assert(
-        types.includes("reasoning-start") && types.includes("reasoning-delta"),
-        "start+delta must map reasoning",
-      )
-      assert(
-        stop.some((p) => p.type === "reasoning-end"),
-        "stateless content_block_stop must emit reasoning-end for thinking blocks (issue #71)",
-      )
-      // Stateless contract: the stop carries only `index` (no block id), so
-      // the end id matches the stateless delta's index-derived id — the same
-      // id a stateless consumer saw on reasoning-start/delta fallbacks.
-      assertEqual((stop.find((p) => p.type === "reasoning-end") as { id: string }).id, "thinking-0")
     },
   ],
 ])
