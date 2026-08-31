@@ -11,12 +11,19 @@ import { run, assert, assertEqual } from "./harness.js"
 
 const hasOpenCode = spawnSync("which", ["opencode"]).status === 0
 
+function isOpenCodeV1(): boolean {
+  if (!hasOpenCode) return false
+  const probe = spawnSync("opencode", ["--version"], { encoding: "utf-8" })
+  const out = `${probe.stdout || ""}${probe.stderr || ""}`
+  return !/opencode2|v0\.0\.0-/.test(out) && /1\.\d+\.\d+/.test(out)
+}
+
 run([
   [
     "opencode plugin file://<pkg> creates both opencode.json and tui.json with same spec",
     () => {
-      if (!hasOpenCode) {
-        console.log("skip - opencode not on PATH")
+      if (!isOpenCodeV1()) {
+        console.log("skip - opencode v1 installer is not available")
         return
       }
       const home = mkdtempSync(join(tmpdir(), "oc-install-home-"))

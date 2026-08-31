@@ -82,7 +82,7 @@ export const MODEL_DEALS: Readonly<Record<string, ModelDeals>> = {
   "Qwen/Qwen3.6-Max-Preview": { tier: "opensource", benchmark: {"intelligence":41.1}, free: false, allowance: {"goat":20,"pro":30} },
   "Qwen/Qwen3.6-Plus": { tier: "opensource", benchmark: {"intelligence":40.5}, overContext: {"input":2,"output":6,"cacheRead":0.2,"cacheWrite":0}, free: false, allowance: {"goat":33,"pro":43} },
   "Qwen/Qwen3.7-Flash": { tier: "opensource", overContext: {"input":0.2,"output":0.8,"cacheRead":0.04,"cacheWrite":0.25}, free: false, allowance: {"goat":20,"pro":30} },
-  "Qwen/Qwen3.7-Max": { tier: "opensource", discount: {"pct":50,"endsAt":"2026-06-22"}, was: {"input":5,"output":15,"cacheRead":1}, now: {"input":2.5,"output":7.5,"cacheRead":0.5}, benchmark: {"intelligence":46.7}, free: false, allowance: {"goat":33,"pro":43} },
+  "Qwen/Qwen3.7-Max": { tier: "opensource", benchmark: {"intelligence":46.7}, free: false, allowance: {"goat":33,"pro":43} },
   "Qwen/Qwen3.7-Plus": { tier: "opensource", benchmark: {"intelligence":39.4,"tokPerSec":55.5}, overContext: {"input":1.2,"output":4.8,"cacheRead":0.24,"cacheWrite":1.5}, free: false, allowance: {"goat":33,"pro":43} },
   "Qwen/Qwen3.8-27B": { tier: "opensource", benchmark: {"intelligence":52,"tokPerSec":50.5}, free: false, allowance: {"goat":70,"pro":80} },
   "Qwen/Qwen3.8-Flash": { tier: "opensource", free: false, allowance: {"goat":20,"pro":30} },
@@ -117,5 +117,5 @@ export const PLAN_CATALOG: Readonly<Record<PlanId, PlanInfo>> = {
 }
 
 export const DEAL_SOURCE_URL = "https://commandcode.ai/docs/resources/pricing-limits"
-export const DEAL_LAST_REFRESHED = "2026-08-29"
+export const DEAL_LAST_REFRESHED = "2026-08-31"
 export const DEAL_PACKAGE_VERSION = "docs"

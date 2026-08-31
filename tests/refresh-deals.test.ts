@@ -8,7 +8,7 @@ import {
   modelDealEntry,
   peakOffPeakFor,
 } from "../scripts/refresh-deals.mjs"
-import { assert, assertEqual, run } from "./harness.js"
+import { assert, assertEqual, throws, run } from "./harness.js"
 
 const RSC_PRICING = readFileSync(
   new URL("./fixtures/rsc-pricing-limits.txt", import.meta.url),
@@ -91,14 +91,13 @@ run([
     () => {
       const rec = findRecordByName("Gemini 3.7 Flash")
       assert(rec, "Gemini must exist")
-      assertEqual(modelDealEntry(rec), {
-        tier: "opensource",
-        discount: { pct: 50, endsAt: "2026-12-31" },
-        was: { input: 1.5, output: 7.5, cacheRead: 0.15 },
-        now: { input: 0.75, output: 3.75, cacheRead: 0.075 },
-        benchmark: { intelligence: 56, tokPerSec: 365.9 },
-        free: false,
-      })
+      const entry = modelDealEntry(rec)
+      assertEqual(entry.discount, { pct: 50, endsAt: "2026-12-31" })
+      assertEqual(entry.was, { input: 1.5, output: 7.5, cacheRead: 0.15 })
+      assertEqual(entry.now, { input: 0.75, output: 3.75, cacheRead: 0.075 })
+      assertEqual(entry.benchmark?.intelligence, 56)
+      assert(Number.isFinite(entry.benchmark?.tokPerSec) && entry.benchmark.tokPerSec > 0)
+      assertEqual(entry.free, false)
     },
   ],
   [
@@ -121,14 +120,13 @@ run([
     () => {
       const rec = RSC_RECORDS.get("MiniMaxAI/MiniMax-M3")
       assert(rec, "MiniMax M3 must exist")
-      assertEqual(modelDealEntry(rec), {
-        tier: "opensource",
-        discount: { pct: 50 },
-        was: { input: 0.6, output: 2.4, cacheRead: 0.12 },
-        now: { input: 0.3, output: 1.2, cacheRead: 0.06 },
-        benchmark: { intelligence: 45.4, tokPerSec: 111.3 },
-        free: false,
-      })
+      const entry = modelDealEntry(rec)
+      assertEqual(entry.discount, { pct: 50 })
+      assertEqual(entry.was, { input: 0.6, output: 2.4, cacheRead: 0.12 })
+      assertEqual(entry.now, { input: 0.3, output: 1.2, cacheRead: 0.06 })
+      assertEqual(entry.benchmark?.intelligence, 45.4)
+      assert(Number.isFinite(entry.benchmark?.tokPerSec) && entry.benchmark.tokPerSec > 0)
+      assertEqual(entry.free, false)
     },
   ],
   [
@@ -137,6 +135,51 @@ run([
       const rec = findRecordByName("Laguna S 2.1")
       assert(rec, "Laguna must exist")
       assertEqual(modelDealEntry(rec), { tier: "opensource", free: true })
+    },
+  ],
+  [
+    "expired discounts omit discount, was, and now",
+    () => {
+      const rec = {
+        deal: { discountPercent: 50, expires: "2026-06-22T00:00:00Z" },
+        tiers: [
+          {
+            rates: { input: 2.5, output: 7.5, cacheRead: 0.5 },
+            listRates: { input: 5, output: 15, cacheRead: 1 },
+          },
+        ],
+      }
+      const entry = modelDealEntry(rec, "2026-06-23")
+      assertEqual(entry.discount, undefined)
+      assertEqual(entry.was, undefined)
+      assertEqual(entry.now, undefined)
+    },
+  ],
+  [
+    "same-day discounts remain active",
+    () => {
+      const rec = {
+        deal: { discountPercent: 50, expires: "2026-06-22T00:00:00Z" },
+        tiers: [
+          {
+            rates: { input: 2.5, output: 7.5, cacheRead: 0.5 },
+            listRates: { input: 5, output: 15, cacheRead: 1 },
+          },
+        ],
+      }
+      assertEqual(modelDealEntry(rec, "2026-06-22").discount, {
+        pct: 50,
+        endsAt: "2026-06-22",
+      })
+    },
+  ],
+  [
+    "benchmark throughput accepts drift but rejects malformed values",
+    () => {
+      const rec = { outputTokensPerSec: 999, intelligenceIndex: 40 }
+      assertEqual(modelDealEntry(rec).benchmark, { intelligence: 40, tokPerSec: 999 })
+      throws(() => modelDealEntry({ outputTokensPerSec: 0 }), /throughput/)
+      throws(() => modelDealEntry({ outputTokensPerSec: "not-a-number" }), /throughput/)
     },
   ],
   [

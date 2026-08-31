@@ -69,14 +69,42 @@ function argValue(name) {
 
 // Deal-term → discount endsAt. The RSC uses free-form terms; keep the ISO date
 // when present, otherwise drop endsAt (permanent).
-export function discountFor(record) {
+export function discountFor(record, today = new Date().toISOString().slice(0, 10)) {
   const deal = record.deal
   if (!deal || typeof deal !== "object" || deal === null) return undefined
   if (deal.free === true) return undefined
   const pct = num(deal.discountPercent)
   if (pct === undefined) return undefined
   const endsAt = endsAtFor(deal)
+  if (isExpiredDate(endsAt, today)) return undefined
   return { pct, ...(endsAt !== undefined ? { endsAt } : {}) }
+}
+
+function isExpiredDate(endsAt, today) {
+  return typeof endsAt === "string" && /^\d{4}-\d{2}-\d{2}$/.test(endsAt) && endsAt < today
+}
+
+function hasExpiredDiscount(record, today) {
+  const deal = record.deal
+  if (!deal || typeof deal !== "object" || deal === null || deal.free === true) return false
+  const pct = num(deal.discountPercent)
+  return pct !== undefined && isExpiredDate(endsAtFor(deal), today)
+}
+
+function benchmarkForModel(record) {
+  const rawThroughput = record.outputTokensPerSec
+  const hasThroughput =
+    Object.prototype.hasOwnProperty.call(record, "outputTokensPerSec") &&
+    rawThroughput !== undefined &&
+    rawThroughput !== null &&
+    rawThroughput !== "$undefined"
+  const tokPerSec = num(rawThroughput)
+  if (hasThroughput && (tokPerSec === undefined || !Number.isFinite(tokPerSec) || tokPerSec <= 0)) {
+    throw new Error("benchmark throughput must be a finite number greater than zero")
+  }
+  const benchmark = benchmarkFor(record)
+  if (!benchmark) return undefined
+  return { ...benchmark, ...(hasThroughput ? { tokPerSec } : {}) }
 }
 
 export function peakOffPeakFor(record) {
@@ -93,7 +121,7 @@ export function peakOffPeakFor(record) {
   }
 }
 
-export function modelDealEntry(record) {
+export function modelDealEntry(record, today = new Date().toISOString().slice(0, 10)) {
   const tier =
     record.category === "premium"
       ? "premium"
@@ -104,16 +132,20 @@ export function modelDealEntry(record) {
   const tiers = Array.isArray(record.tiers) ? record.tiers : []
   const first = tiers[0]
   const now = ratesFor(first)
+  const expiredDiscount = hasExpiredDiscount(record, today)
   const was =
-    first && typeof first.listRates === "object" ? ratesFor({ rates: first.listRates }) : undefined
-  const discount = discountFor(record)
+    !expiredDiscount && first && typeof first.listRates === "object"
+      ? ratesFor({ rates: first.listRates })
+      : undefined
+  const discount = discountFor(record, today)
+  const benchmark = benchmarkForModel(record)
   const entry = {
     ...(tier !== undefined ? { tier } : {}),
     ...(discount ? { discount } : {}),
     ...(was ? { was } : {}),
     ...(now && (discount || was) ? { now } : {}),
     ...(free ? { free: true } : {}),
-    ...(benchmarkFor(record) ? { benchmark: benchmarkFor(record) } : {}),
+    ...(benchmark ? { benchmark } : {}),
     ...(peakOffPeakFor(record) ? { peakOffPeak: peakOffPeakFor(record) } : {}),
   }
   if (tiers.length > 1) {

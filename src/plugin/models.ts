@@ -9,6 +9,7 @@ import {
 } from "../provider/pricing.js"
 import { reasoningVariantsForModel, isReasoningModel } from "../provider/reasoning.js"
 import { inputModalitiesForModel } from "../provider/modalities.js"
+import { getApiBase } from "../env.js"
 
 const DEFAULT_MAX_OUTPUT_TOKENS = 65_536
 export const DEFAULT_DISPLAY_PREFIX = "[CMD] "
@@ -151,4 +152,63 @@ function configModelFor(model: CatalogModel, prefix = DEFAULT_DISPLAY_PREFIX): C
     },
     status: "active",
   }
+}
+
+export const DISPLAY_PREFIX_OPTION = "display_prefix"
+export const AISDK_ENDPOINT_PACKAGE = "@ai-sdk/openai-compatible"
+export const AISDK_PACKAGE = `aisdk:${AISDK_ENDPOINT_PACKAGE}`
+
+export function autoRegisterOptions(): AutoRegisterOptions {
+  return {
+    npm: "opencode-cmd-provider",
+    name: "Command Code",
+    baseURL: getApiBase(),
+  }
+}
+
+export function v2ModelInfoFor(
+  model: CatalogModel,
+  providerId: string,
+  prefix = DEFAULT_DISPLAY_PREFIX,
+): Record<string, unknown> | undefined {
+  const costs: CommandCodeModelCost = MODEL_COSTS[model.id] ?? ZERO_MODEL_COST
+  const freeSuffix = MODEL_COSTS[model.id] !== undefined && isFreeModelCost(costs) ? " (free)" : ""
+  const variants = reasoningVariantsForModel(model.id)
+  return {
+    id: model.id,
+    modelID: model.id,
+    providerID: providerId,
+    endpoint: { type: "aisdk", package: AISDK_ENDPOINT_PACKAGE },
+    package: AISDK_PACKAGE,
+    name: `${prefix}${model.name}${freeSuffix}`,
+    capabilities: {
+      tools: true,
+      input: [...inputModalitiesForModel(model.id)],
+      output: ["text", "reasoning"],
+    },
+    variants: variants
+      ? Object.keys(variants).map((effort) => ({
+          id: effort,
+          settings: { reasoningEffort: effort },
+        }))
+      : [],
+    time: { released: 0 },
+    cost: [
+      {
+        input: costs.input,
+        output: costs.output,
+        cache: { read: costs.cacheRead, write: costs.cacheWrite },
+      },
+    ],
+    status: "active",
+    enabled: true,
+    limit: {
+      context: model.contextLength,
+      output: Math.min(model.contextLength, DEFAULT_MAX_OUTPUT_TOKENS),
+    },
+  }
+}
+
+export function v2ProviderPatch(_provider: unknown): { name: string } {
+  return { name: "Command Code" }
 }
