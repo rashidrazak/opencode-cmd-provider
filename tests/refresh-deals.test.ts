@@ -1,4 +1,23 @@
 // tests/refresh-deals.test.ts — seam: record → ModelDeals + RSC → deals.ts
+//
+// The modelDealEntry tests below use **synthetic** RSC records (hand-built
+// objects with the same shape the live docs page emits). This keeps the
+// tests independent of upstream data changes: when Command Code ends a
+// deal, adjusts a benchmark number, or re-categorises a model, the
+// committed fixtures move but the test pins don't break. The
+// "real RSC" tests below (emitDealsModuleFromRsc, missingDealsModelsFromRsc)
+// exercise the end-to-end pipeline against the committed fixtures as
+// shape/contract smoke tests — they assert on the parser's behavior, not
+// on specific upstream values.
+//
+// Why this matters for the cron (issue #89 + the catalog-refresh.yml
+// "without breaking" criterion): when upstream changes a transient
+// value (a deal's pct, a benchmark's tokPerSec, a tier reclassification),
+// the catalog-refresh cron must still be able to ship a PR. Pinning
+// upstream data in tests made the cron fail on every legitimate value
+// change and required a human to update the pins before the cron could
+// proceed. The synthetic-record approach below keeps the parser's
+// behavior pinned while the values stay fluid.
 import { readFileSync } from "node:fs"
 import { extractPlanPageRsc, extractPricingLimitsRsc } from "../scripts/parse-rsc.mjs"
 import {
@@ -17,18 +36,12 @@ const RSC_PRICING = readFileSync(
 const RSC_GOAT = readFileSync(new URL("./fixtures/rsc-goat.txt", import.meta.url), "utf-8")
 const RSC_PRO = readFileSync(new URL("./fixtures/rsc-pro.txt", import.meta.url), "utf-8")
 
-// The per-plan RSC slug records are the source of truth for the snapshot
-// id and per-model data. The records carry the same `tiers`, `deal`,
-// `caps`, `intelligenceIndex`, and `outputTokensPerSec` fields the old
-// HTML path extracted — modelDealEntry is happy to consume either.
+// The per-plan RSC slug records (used by the smoke tests below) are the
+// source of truth for the snapshot id and per-model data. The records
+// carry the same `tiers`, `deal`, `caps`, `intelligenceIndex`, and
+// `outputTokensPerSec` fields the old HTML path extracted —
+// modelDealEntry is happy to consume either.
 const RSC_RECORDS = extractPlanPageRsc(RSC_GOAT)
-
-function findRecordByName(name) {
-  for (const record of RSC_RECORDS.values()) {
-    if (record.name === name) return record
-  }
-  return undefined
-}
 
 run([
   [
@@ -74,23 +87,35 @@ run([
     },
   ],
   [
-    "modelDealEntry: Qwen 3.6 Plus has overContext (long-context tier)",
+    "modelDealEntry: a record with deal+listRates+benchmark produces discount/was/now/benchmark (synthetic)",
     () => {
-      const rec = findRecordByName("Qwen 3.6 Plus")
-      assert(rec, "Qwen 3.6 Plus must exist")
-      assertEqual(modelDealEntry(rec), {
-        tier: "opensource",
-        benchmark: { intelligence: 40.5 },
-        overContext: { input: 2, output: 6, cacheRead: 0.2, cacheWrite: 0 },
-        free: false,
-      })
-    },
-  ],
-  [
-    "modelDealEntry: Gemini 3.7 Flash has discount/was/now/benchmark",
-    () => {
-      const rec = findRecordByName("Gemini 3.7 Flash")
-      assert(rec, "Gemini must exist")
+      // Synthetic record with an active deal (50% off, expires),
+      // `listRates` (the pre-deal price), and benchmark data. This
+      // exercises the same code path the Gemini 3.7 Flash test used
+      // to pin against the live RSC, but the values are owned by the
+      // test — upstream data changes can't break the pin.
+      //
+      // The `id` here is *not* in TIER_OVERRIDES (the override is
+      // applied by buildRscInputs before the entry reaches
+      // modelDealEntry in the real pipeline — modelDealEntry itself
+      // is a pure pass-through of `record.category` to `tier`).
+      const rec = {
+        id: "vendor/example-model",
+        category: "opensource",
+        deal: {
+          discountPercent: 50,
+          free: false,
+          expires: "2026-12-31T23:59:59Z",
+        },
+        tiers: [
+          {
+            rates: { input: 0.75, output: 3.75, cacheRead: 0.075 },
+            listRates: { input: 1.5, output: 7.5, cacheRead: 0.15 },
+          },
+        ],
+        intelligenceIndex: 56,
+        outputTokensPerSec: 365.9,
+      }
       assertEqual(modelDealEntry(rec), {
         tier: "opensource",
         discount: { pct: 50, endsAt: "2026-12-31" },
@@ -102,25 +127,25 @@ run([
     },
   ],
   [
-    "modelDealEntry: DeepSeek V4 Flash has peakOffPeak",
+    "modelDealEntry: a record with deal+listRates but no benchmark keeps the discount shape (synthetic)",
     () => {
-      const rec = findRecordByName("DeepSeek V4 Flash (latest)")
-      assert(rec, "DeepSeek must exist")
-      const entry = modelDealEntry(rec)
-      assertEqual(entry.tier, "opensource")
-      assertEqual(entry.peakOffPeak, {
-        peak: { input: 0.44, output: 1.32, cacheRead: 0.014, cacheWrite: 0 },
-        offPeak: { input: 0.22, output: 0.66, cacheRead: 0.007, cacheWrite: 0 },
-        windows: "01–04 & 06–10 UTC",
-      })
-      assertEqual(entry.free, false)
-    },
-  ],
-  [
-    "modelDealEntry: MiniMax M3 has discount/was/now but no overContext (identical tier)",
-    () => {
-      const rec = RSC_RECORDS.get("MiniMaxAI/MiniMax-M3")
-      assert(rec, "MiniMax M3 must exist")
+      // The discount/was/now branch must still fire when benchmark
+      // data is missing — the deal metadata is independent of
+      // intelligence/tokPerSec. The MiniMax M3 test used to cover
+      // this; the synthetic version below owns the values.
+      const rec = {
+        id: "MiniMaxAI/MiniMax-M3",
+        category: "opensource",
+        deal: { discountPercent: 50, free: false, term: "" },
+        tiers: [
+          {
+            rates: { input: 0.3, output: 1.2, cacheRead: 0.06 },
+            listRates: { input: 0.6, output: 2.4, cacheRead: 0.12 },
+          },
+        ],
+        intelligenceIndex: 45.4,
+        outputTokensPerSec: 111.3,
+      }
       assertEqual(modelDealEntry(rec), {
         tier: "opensource",
         discount: { pct: 50 },
@@ -132,11 +157,186 @@ run([
     },
   ],
   [
-    "modelDealEntry: Laguna free model has only tier+free",
+    "modelDealEntry: a record without a deal produces no discount (synthetic)",
     () => {
-      const rec = findRecordByName("Laguna S 2.1")
-      assert(rec, "Laguna must exist")
+      // The no-deal branch (the case the cron hit on 2026-08-31 when
+      // the Gemini 3.7 Flash deal ended): no `was` (no listRates),
+      // no `discount`, no `now` (now only surfaces alongside a deal
+      // or listRates). The benchmark still surfaces if present. This
+      // is the path every paid model that's never had a deal takes.
+      const rec = {
+        id: "vendor/example-model",
+        category: "opensource",
+        tiers: [{ rates: { input: 1.5, output: 7.5, cacheRead: 0.15 } }],
+        intelligenceIndex: 56,
+        outputTokensPerSec: 365.9,
+      }
+      const entry = modelDealEntry(rec)
+      assertEqual(entry.tier, "opensource")
+      assertEqual(entry.discount, undefined)
+      assertEqual(entry.was, undefined)
+      assertEqual(entry.now, undefined)
+      assertEqual(entry.benchmark, { intelligence: 56, tokPerSec: 365.9 })
+      assertEqual(entry.free, false)
+    },
+  ],
+  [
+    "modelDealEntry: a record with deal=undefined sentinel (RSC per-plan shape) still treats it as no deal (synthetic)",
+    () => {
+      // The per-plan RSC slug records carry `deal: "$undefined"` (a
+      // string sentinel) when the deal has ended, rather than
+      // omitting the field. discountFor already handles this — the
+      // modelDealEntry smoke test pins the same behavior here.
+      const rec = {
+        id: "vendor/example-model",
+        category: "opensource",
+        deal: "$undefined",
+        tiers: [{ rates: { input: 1.5, output: 7.5, cacheRead: 0.15 } }],
+        intelligenceIndex: 56,
+        outputTokensPerSec: 365.9,
+      }
+      const entry = modelDealEntry(rec)
+      assertEqual(entry.tier, "opensource")
+      assertEqual(entry.discount, undefined)
+      assertEqual(entry.was, undefined)
+      assertEqual(entry.free, false)
+    },
+  ],
+  [
+    "modelDealEntry: a record with two tiers of different rates emits overContext (synthetic)",
+    () => {
+      // The Qwen 3.6 Plus test used to cover this against the live
+      // RSC. The synthetic version below owns the values: a
+      // short-context tier at the regular rate plus a long-context
+      // tier with different rates triggers `overContext`.
+      const rec = {
+        id: "Qwen/Qwen3.6-Plus",
+        category: "opensource",
+        tiers: [
+          { rates: { input: 0.5, output: 3, cacheRead: 0.1 } },
+          { rates: { input: 2, output: 6, cacheRead: 0.2, cacheWrite: 0 } },
+        ],
+        intelligenceIndex: 40.5,
+      }
+      assertEqual(modelDealEntry(rec), {
+        tier: "opensource",
+        benchmark: { intelligence: 40.5 },
+        overContext: { input: 2, output: 6, cacheRead: 0.2, cacheWrite: 0 },
+        free: false,
+      })
+    },
+  ],
+  [
+    "modelDealEntry: a record with two identical tiers suppresses overContext (synthetic)",
+    () => {
+      // The cron hit this case on 2026-08-29 (MiniMax M3): the
+      // long-context tier is byte-identical to the short-context
+      // tier, so overContext is dropped (no useful information).
+      const rec = {
+        id: "MiniMaxAI/MiniMax-M3",
+        category: "opensource",
+        deal: { discountPercent: 50, free: false, term: "" },
+        tiers: [
+          { rates: { input: 0.3, output: 1.2, cacheRead: 0.06 } },
+          { rates: { input: 0.3, output: 1.2, cacheRead: 0.06 } },
+        ],
+      }
+      const entry = modelDealEntry(rec)
+      assertEqual(entry.overContext, undefined, "identical tier must suppress overContext")
+      assertEqual(entry.discount, { pct: 50 })
+    },
+  ],
+  [
+    "modelDealEntry: a record with timeOfDay emits peakOffPeak (synthetic)",
+    () => {
+      // The DeepSeek V4 Flash test used to cover this against the
+      // live RSC. The synthetic version owns the rates: peak and
+      // off-peak are surfaced with `cacheWrite: 0` and the
+      // `windows` string carries through.
+      const rec = {
+        id: "deepseek/deepseek-v4-flash",
+        category: "opensource",
+        timeOfDay: {
+          peak: { input: 0.44, output: 1.32, cacheRead: 0.014 },
+          offPeak: { input: 0.22, output: 0.66, cacheRead: 0.007 },
+          windows: "01–04 & 06–10 UTC",
+        },
+        tiers: [{ rates: { input: 0.22, output: 0.66, cacheRead: 0.007 } }],
+      }
+      const entry = modelDealEntry(rec)
+      assertEqual(entry.tier, "opensource")
+      assertEqual(entry.peakOffPeak, {
+        peak: { input: 0.44, output: 1.32, cacheRead: 0.014, cacheWrite: 0 },
+        offPeak: { input: 0.22, output: 0.66, cacheRead: 0.007, cacheWrite: 0 },
+        windows: "01–04 & 06–10 UTC",
+      })
+      assertEqual(entry.free, false)
+    },
+  ],
+  [
+    "modelDealEntry: a free record emits only tier+free (synthetic)",
+    () => {
+      // The Laguna free-variant test used to cover this against the
+      // live RSC. The synthetic version owns the shape: zero rates
+      // + `free: true` short-circuits the deal/benchmark branches.
+      const rec = {
+        id: "poolside/laguna-s-2.1-free",
+        category: "opensource",
+        deal: { free: true, discountPercent: 100 },
+        tiers: [{ rates: { input: 0, output: 0, cacheRead: 0 } }],
+      }
       assertEqual(modelDealEntry(rec), { tier: "opensource", free: true })
+    },
+  ],
+  [
+    "modelDealEntry: a premium record passes through without an override (synthetic)",
+    () => {
+      // claude-fable-5 is a real premium model — the TIER_OVERRIDES
+      // map must not pin it. The category pass-through covers any
+      // premium model not in the override list.
+      const rec = {
+        id: "claude-fable-5",
+        category: "premium",
+        tiers: [{ rates: { input: 1, output: 2, cacheRead: 0.1 } }],
+      }
+      const entry = modelDealEntry(rec)
+      assertEqual(entry.tier, "premium")
+      assertEqual(entry.free, false)
+    },
+  ],
+  [
+    "modelDealEntry: an empty record emits free:false with no other fields (synthetic)",
+    () => {
+      // Defensive: a record that lacks every optional field must
+      // not throw and must emit the minimum shape (free: false
+      // always surfaces so downstream consumers see a stable flag).
+      const entry = modelDealEntry({ id: "x" })
+      assertEqual(entry.free, false)
+      assertEqual(entry.discount, undefined)
+      assertEqual(entry.was, undefined)
+      assertEqual(entry.now, undefined)
+      assertEqual(entry.benchmark, undefined)
+      assertEqual(entry.peakOffPeak, undefined)
+      assertEqual(entry.overContext, undefined)
+      assertEqual(entry.tier, undefined)
+    },
+  ],
+  [
+    "modelDealEntry: the RSC fixtures parse cleanly (smoke test against the real RSC)",
+    () => {
+      // End-to-end smoke test: every per-plan slug record the live
+      // RSC emits must produce a `modelDealEntry` without throwing.
+      // We don't pin values here — the synthetic-record tests above
+      // own the value semantics. This is a structural check that the
+      // parser handles the full real RSC: the cron relies on it.
+      for (const [id, record] of RSC_RECORDS) {
+        const entry = modelDealEntry(record)
+        assertEqual(
+          typeof entry.free,
+          "boolean",
+          `${id}: modelDealEntry must always emit a boolean free flag`,
+        )
+      }
     },
   ],
   [

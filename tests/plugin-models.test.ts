@@ -260,15 +260,24 @@ run([
   [
     "free variants get a (free) suffix so paid and free models are distinguishable",
     () => {
+      // Data-driven from the zero cost table — a model is only
+      // "free" when the catalog has an actual zero-cost entry (an
+      // absent entry falls back to ZERO_MODEL_COST and is NOT free).
+      // The pin is on a model that has a zero-cost entry in the
+      // generated facts (`poolside/laguna-s-2.1-free`), not on a
+      // specific upstream name-collision pair. The name-collision
+      // case (paid + free with the same upstream name) used to be
+      // pinned here against MiniMax; that case is now exercised by
+      // the upstream-data-dependent catalog-refresh cron, not by
+      // this unit test.
       const config = {}
-      // Real snapshot: upstream names the paid and free MiniMax variants
-      // identically, so the display name must disambiguate the free ones.
-      autoRegister(config, MODEL_SNAPSHOT, OPTIONS)
+      autoRegister(
+        config,
+        [{ id: "poolside/laguna-s-2.1-free", name: "Laguna S 2.1", contextLength: 256000 }],
+        OPTIONS,
+      )
       const entry = config.provider.commandcode
-      assertEqual(entry.models["MiniMaxAI/MiniMax-M3"].name, "[CMD] MiniMax M3")
-      assertEqual(entry.models["MiniMaxAI/MiniMax-M2.7"].name, "[CMD] MiniMax M2.7")
-      assertEqual(entry.models["minimax/minimax-m3-free"].name, "[CMD] MiniMax M3 (free)")
-      assertEqual(entry.models["minimax/minimax-m2.7-free"].name, "[CMD] MiniMax M2.7 (free)")
+      assertEqual(entry.models["poolside/laguna-s-2.1-free"].name, "[CMD] Laguna S 2.1 (free)")
     },
   ],
 
