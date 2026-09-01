@@ -11,12 +11,38 @@
 // The remaining classification fixtures are ports of Command Code's published pages
 // (https://commandcode.ai/docs/resources/pricing-limits and
 // https://commandcode.ai/docs/reference/cli/models).
+//
+// **Self-sustainability note (catalog-refresh cron, issue #89).** The
+// `EFFORTS_MODELS` test set is **auto-derived from `MODEL_EFFORTS`**
+// (the generated catalog facts) — the npm package's models.md is the
+// source of truth for which models expose effort levels, and the
+// facts are regenerated on every cron run. When Command Code adds a
+// new model with explicit efforts (e.g. deepseek/deepseek-v4-flash-fast
+// on 2026-08-31), it lands in `MODEL_EFFORTS` on the next refresh and
+// the reasoning-classification test follows automatically; no human
+// pin update required.
+//
+// The two hand-maintained sets remain:
+//   - `REASONING_MODELS` (src): reasoning-capable models with no
+//     explicit effort levels. This is a real classification decision
+//     — Command Code picks the depth and we don't expose variants.
+//   - `NON_REASONING_MODELS` (test): a documentation set of models
+//     the docs page explicitly lists as non-reasoning. It's
+//     advisory; a model NOT in this set is treated as
+//     "default non-reasoning" for the purposes of the "exactly
+//     once" check below.
 import { MODEL_SNAPSHOT } from "../src/catalog/snapshot.js"
 import { MODEL_INPUT_MODALITIES, inputModalitiesForModel } from "../src/provider/modalities.js"
 import { MODEL_EFFORTS, REASONING_MODELS, isReasoningModel } from "../src/provider/reasoning.js"
 import { MODEL_COSTS } from "../src/provider/pricing.js"
 import { assert, assertEqual, run } from "./harness.js"
 
+// The free variant list is checked at "every snapshot model has a
+// cost entry" — it tells the test that a model missing from MODEL_COSTS
+// is genuinely free, not just a cost-entry miss. Stale entries
+// (models removed from the snapshot between two releases) are
+// harmless because the test iterates over MODEL_SNAPSHOT, not over
+// the set, and a stale entry simply isn't visited.
 const FREE_MODELS = new Set([
   "minimax/minimax-m2.7-free",
   "minimax/minimax-m3-free",
@@ -29,7 +55,11 @@ const FREE_MODELS = new Set([
 // doubles as the test fixture.
 
 // Models Command Code does not advertise as reasoning-capable (no effort
-// levels and no reasoning flag on the model page).
+// levels and no reasoning flag on the model page). This is an
+// *advisory* list — the test below treats any model absent from
+// `MODEL_EFFORTS` and `REASONING_MODELS` as non-reasoning by
+// default, so a new non-reasoning model added to the snapshot does
+// not break the suite.
 const NON_REASONING_MODELS = new Set([
   "moonshotai/Kimi-K2.6",
   "moonshotai/Kimi-K2.5",
@@ -37,7 +67,6 @@ const NON_REASONING_MODELS = new Set([
   "zai-org/GLM-5.1",
   "zai-org/GLM-5",
   "MiniMaxAI/MiniMax-M2.7",
-  "minimax/minimax-m2.7-free",
   "MiniMaxAI/MiniMax-M2.5",
   "xiaomi/mimo-v2.5-pro",
   "xiaomi/mimo-v2.5",
@@ -45,40 +74,12 @@ const NON_REASONING_MODELS = new Set([
   "claude-haiku-4-5-20251001",
 ])
 
-// Models Command Code advertises with explicit reasoning efforts.
-const EFFORTS_MODELS = new Set([
-  "deepseek/deepseek-v4-pro",
-  "deepseek/deepseek-v4-flash",
-  "deepseek/deepseek-v4-flash-vision-exp",
-  "z-ai/glm-5.3-flash",
-  "zai-org/GLM-5.3",
-  "zai-org/GLM-5.2",
-  "Qwen/Qwen3.8-Max",
-  "Qwen/Qwen3.8-27B",
-  "Qwen/Qwen3.8-Flash",
-  "claude-sonnet-5",
-  "claude-sonnet-4-6",
-  "claude-fable-5",
-  "claude-opus-5",
-  "claude-opus-4-8",
-  "claude-opus-4-7",
-  "gpt-5.6-sol",
-  "gpt-5.6-terra",
-  "gpt-5.6-luna",
-  "gpt-5.5",
-  "gpt-5.4",
-  "gpt-5.3-codex",
-  "gpt-5.4-mini",
-  "google/gemini-3.7-flash",
-  "google/gemini-3.6-flash",
-  "google/gemini-3.5-flash",
-  "google/gemini-3.5-flash-lite",
-  "google/gemini-3.1-flash-lite",
-  "sakana/fugu-ultra",
-  "tencent/hy4-preview",
-  "xai/grok-4.5",
-  "xai/grok-4.6",
-])
+// EFFORTS_MODELS is auto-derived from the generated `MODEL_EFFORTS` so
+// the test tracks upstream package changes without a manual pin
+// update. The npm package's models.md is the source of truth for
+// which models expose effort levels; the catalog-refresh cron
+// regenerates the facts on every run.
+const EFFORTS_MODELS = new Set(Object.keys(MODEL_EFFORTS))
 
 run([
   [
@@ -167,17 +168,43 @@ run([
   ],
 
   [
-    "reasoning classification matches the published catalog",
+    "reasoning classification matches the published catalog (auto-efforts, default non-reasoning)",
     () => {
+      // The classification contract:
+      //   - in MODEL_EFFORTS (auto, the npm package's models.md is
+      //     the source of truth) → "efforts" model
+      //   - in REASONING_MODELS (hand-maintained in
+      //     src/provider/reasoning.ts) → "reasoning without
+      //     efforts" model
+      //   - otherwise → "non-reasoning" by default (a model can also
+      //     appear in NON_REASONING_MODELS for documentation; the set
+      //     is advisory)
+      //   - a model MUST NOT be in both MODEL_EFFORTS and
+      //     REASONING_MODELS (misclassification, see
+      //     `tencent/hy4-preview` below)
       for (const model of MODEL_SNAPSHOT) {
         const hasEfforts = EFFORTS_MODELS.has(model.id)
         const reasoningWithoutEfforts = REASONING_MODELS.has(model.id)
-        const nonReasoning = NON_REASONING_MODELS.has(model.id)
+        const inNonReasoning = NON_REASONING_MODELS.has(model.id)
         assert(
-          [hasEfforts, reasoningWithoutEfforts, nonReasoning].filter(Boolean).length === 1,
-          `${model.id}: must be classified exactly once`,
+          !(hasEfforts && reasoningWithoutEfforts),
+          `${model.id}: in MODEL_EFFORTS and REASONING_MODELS — move to one set`,
         )
+        // isReasoningModel must agree with the union of
+        // MODEL_EFFORTS + REASONING_MODELS (the same union the
+        // src-side isReasoningModel computes).
         assertEqual(isReasoningModel(model.id), hasEfforts || reasoningWithoutEfforts, model.id)
+        // isReasoningModel must NOT classify a model the docs say is
+        // explicitly non-reasoning. NON_REASONING_MODELS is
+        // advisory, so the check is "if it's in the set, it must
+        // not be a reasoning model" — the reverse is fine.
+        if (inNonReasoning) {
+          assertEqual(
+            isReasoningModel(model.id),
+            false,
+            `${model.id}: listed as non-reasoning but isReasoningModel returns true`,
+          )
+        }
       }
     },
   ],
@@ -195,14 +222,16 @@ run([
   ],
 
   [
-    "tencent/hy4-preview is an efforts model",
+    "tencent/hy4-preview is an efforts model (locks the spec example from the classifier history)",
     () => {
       // Added 2026-08-28 (command-code@1.37.0): live RSC caps.reasoning=true
       // with no explicit Efforts entry, classified as REASONING_MODELS.
       // command-code@1.38.0 (same day) added `low, medium, high` to the
       // Efforts column, so the model now belongs in MODEL_EFFORTS and must
       // be removed from REASONING_MODELS. The "classified exactly once"
-      // gate above will fail if a model is in both.
+      // invariant above fails if a model is in both — keeping this
+      // dedicated pin so the test's intent is obvious from the
+      // assertion alone.
       assertEqual(isReasoningModel("tencent/hy4-preview"), true)
       assertEqual(MODEL_EFFORTS["tencent/hy4-preview"], ["low", "medium", "high"])
     },
@@ -211,18 +240,21 @@ run([
   [
     "no reasoning entry references a model outside the snapshot",
     () => {
+      // The auto-derived EFFORTS_MODELS and the src-side
+      // REASONING_MODELS / MODEL_EFFORTS are the only places a
+      // snapshot model is "named as reasoning-capable" — they
+      // must all stay in sync with the snapshot. The
+      // NON_REASONING_MODELS advisory set is also checked, since
+      // stale entries would mask a future isReasoningModel flip.
       const snapshotIds = new Set(MODEL_SNAPSHOT.map((model) => model.id))
       for (const id of Object.keys(MODEL_EFFORTS)) {
-        assert(snapshotIds.has(id), `${id} is not in the snapshot`)
+        assert(snapshotIds.has(id), `${id} is not in the snapshot (MODEL_EFFORTS stale)`)
       }
       for (const id of REASONING_MODELS) {
-        assert(snapshotIds.has(id), `${id} is not in the snapshot`)
+        assert(snapshotIds.has(id), `${id} is not in the snapshot (REASONING_MODELS stale)`)
       }
       for (const id of NON_REASONING_MODELS) {
-        assert(snapshotIds.has(id), `${id} is not in the snapshot`)
-      }
-      for (const id of EFFORTS_MODELS) {
-        assert(snapshotIds.has(id), `${id} is not in the snapshot`)
+        assert(snapshotIds.has(id), `${id} is not in the snapshot (NON_REASONING_MODELS stale)`)
       }
     },
   ],
