@@ -20,14 +20,27 @@ pre-tag ritual and post-push verification.
 ## Pre-tag steps (all manual, in order)
 
 1. **Bump** `package.json` — it is the single source of truth for the version.
-2. **CHANGELOG.md** — add a `## X.Y.Z - YYYY-MM-DD` section (promote
+2. **Sync `package-lock.json`** — `package-lock.json` mirrors `package.json`'s
+   `version` field at the top of the file and inside the root `packages.""`
+   entry. A pure version bump in `package.json` does **not** touch the
+   lockfile on its own. Run `npm install --package-lock-only --no-audit --no-fund`
+   to refresh the lockfile's `version` lines to match (no dependency
+   resolution, no `node_modules` changes). **Never hand-edit `package-lock.json`** —
+   let npm write it. Include the regenerated lockfile in the release commit
+   alongside the `package.json` bump so the two stay in lockstep (this is
+   how the 1.6.0 release commit looked).
+3. **CHANGELOG.md** — add a `## X.Y.Z - YYYY-MM-DD` section (promote
    `## Unreleased` when it exists). This exact section becomes the GitHub
    Release body; without it the pipeline falls back to generated notes.
-3. **Commit** — conventional style: `chore(release): X.Y.Z`.
-4. **Land on main** — main is protected (required `test` check, PR review), so
+4. **Commit** — conventional style: `chore(release): X.Y.Z`. The commit
+   should include `package.json`, `package-lock.json`, and `CHANGELOG.md`.
+   If the lockfile sync was missed, amend the commit (force-push the
+   release branch) before the PR merges — once the PR lands, the tag
+   has to be moved instead.
+5. **Land on main** — main is protected (required `test` check, PR review), so
    open a PR and merge it. The pipeline refuses tags whose commit is not on
    main; the tag must point at a commit that contains the bump.
-5. **Tag**: `git tag vX.Y.Z && git push origin vX.Y.Z` — the tag push triggers
+6. **Tag**: `git tag vX.Y.Z && git push origin vX.Y.Z` — the tag push triggers
    `release.yml`. Push the tag only; main is already up to date.
 
 Catalog freshness (`snapshot.ts` / `facts.ts` / `deals.ts`) is a **gate, not an auto-fix**:
