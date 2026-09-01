@@ -1,5 +1,54 @@
 # Changelog
 
+## 1.6.2 - 2026-09-01
+
+Patch release. Make the daily catalog-refresh cron self-sustainable against
+upstream data changes (refs issue #89) and ship the 2026-09-01 catalog
+refresh.
+
+- **Self-sustainable cron tests** — the daily catalog-refresh cron has been
+  failing every day since 2026-08-28 because its shape-pinning tests pinned
+  upstream-managed data (deal pcts, benchmark throughput, plan allowances,
+  effort-classification lists). Any legitimate upstream change — a deal
+  expiring, a benchmark value moving, a free variant being retired — failed
+  `npm test` and blocked the refresh PR until a human updated the pins.
+  This release separates **shape** from **value** in those tests, so the
+  cron can land upstream changes without manual intervention:
+  - `tests/refresh-deals.test.ts`: the five real-RSC `modelDealEntry`
+    value pins (Gemini 3.7 Flash, Qwen 3.6 Plus, MiniMax M3, DeepSeek V4
+    Flash, Laguna) are replaced with nine synthetic-record tests that own
+    every value they assert. A companion test exercises the "deal ended"
+    case the cron hit on 2026-08-31. The end-to-end real-RSC smoke test
+    still runs the parser over every per-plan slug record to catch
+    shape/contract regressions, but no longer pins values.
+  - `tests/refresh-deals-rsc.test.ts`: the "emitted catalog has parity
+    with the shipped catalog" test asserts structural fields (discount
+    exists, benchmark exists, allowance has both goat/pro keys,
+    peakOffPeak exists) instead of exact MiniMax / Kimi values. Value
+    semantics now live in the synthetic `modelDealEntry` tests.
+  - `tests/catalog-metadata.test.ts`: `EFFORTS_MODELS` is now derived
+    from the auto-generated `MODEL_EFFORTS` (the npm package's
+    `models.md` is the source of truth for which models expose effort
+    levels), so a new efforts model — like `deepseek/deepseek-v4-flash-fast`
+    added 2026-08-31 — lands in `MODEL_EFFORTS` on the next refresh and
+    the reasoning-classification test follows automatically. The
+    "exactly once" gate becomes a "no model is in both `MODEL_EFFORTS`
+    and `REASONING_MODELS`" invariant (a real misclassification signal)
+    plus an advisory check that `isReasoningModel` agrees with the
+    union and respects `NON_REASONING_MODELS`.
+  - `tests/plugin-models.test.ts`: the "free variants get a `(free)`
+    suffix" test pins on `poolside/laguna-s-2.1-free` (still in the
+    snapshot) instead of the MiniMax name-collision pair retired
+    from upstream.
+  - `src/provider/reasoning.ts`: drop `minimax/minimax-m3-free` from
+    `REASONING_MODELS` — the variant was retired from upstream's
+    `models.md` alongside the free model itself, so the entry was stale.
+- **Catalog refresh — 2026-09-01** — snapshot + capability facts +
+  RSC fixtures refreshed to current upstream values (see PR #105).
+- **Issue #89** — the broader question of how to lock down shape-pinning
+  value pins remains open; this release is the cron-side half of that
+  fix. The deals-value-pin half is still tracked in #89.
+
 ## 1.6.1 - 2026-08-29
 
 Patch release. Catalog refresh to `command-code@1.38.1`, one catalog
