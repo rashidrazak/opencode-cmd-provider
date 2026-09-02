@@ -73,7 +73,7 @@ are judged against them rather than rediscovered.
 ## Repo-settings prerequisite
 
 `main` is protected by two **rulesets** (note: classic branch protection is
-*not* configured — the legacy "branch protection" API reports "Branch not
+_not_ configured — the legacy "branch protection" API reports "Branch not
 protected"; rulesets are the active mechanism, verified 2026-09-02):
 
 - **`main-review`** — requires a pull request with 1 approving review and
