@@ -52,6 +52,14 @@ jobs:
           # on-main assertion passes unchanged.
           ref: main
           fetch-depth: 0
+          # Do NOT persist the default token's credential. checkout writes
+          # an `http.https://github.com/.extraheader` for github.com that
+          # OVERRIDES the URL-embedded RELEASE_PUSH_TOKEN in the push step
+          # below — the push then runs as github-actions[bot], which no
+          # ruleset bypass-lists (run 33683416448 failed exactly this way:
+          # the tag landed, the main push was rule-rejected, and the
+          # default-token tag push could not trigger release.yml).
+          persist-credentials: false
 
       - uses: actions/setup-node@v4
         with:
@@ -114,6 +122,9 @@ jobs:
         run: |
           set -euo pipefail
           next="$(node -p "require('./package.json').version")"
+          # Defensive: drop any inherited github.com credential header so
+          # the URL-embedded token below is authoritative for the push.
+          git config --unset-all http.https://github.com/.extraheader 2>/dev/null || true
           git remote set-url origin "https://x-access-token:${GH_PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           git push -q origin main "v${next}"
           echo "auto-release: cut v${next} on main; the tag-driven release pipeline takes it from here."
