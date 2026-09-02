@@ -1,0 +1,110 @@
+name: Auto release
+
+# Merging a Catalog refresh PR cuts a patch release automatically
+# (issue #115). This workflow performs ONLY the pre-tag ritual — patch
+# version bump, lockfile sync via npm (never hand-editing the lockfile),
+# a CHANGELOG section authored from the merged PR body's semantic
+# sections, a bot-authored `chore(release): X.Y.Z` commit on main, and a
+# `vX.Y.Z` tag on that commit. The existing tag-driven release pipeline
+# (`.github/workflows/release.yml`, ADR-0002) then does everything else —
+# build, full suite, stale-catalog gates, npm publish with provenance,
+# GitHub Release — unchanged: one publish path.
+#
+# Safety rails:
+#   - fires only on merged PRs from `catalog-refresh/*` head branches;
+#   - a `skip-release` label on the merged PR suppresses the release;
+#   - runs are concurrency-serialized;
+#   - a full skip (no commit, no tag) when a tag for the computed
+#     version already exists — a race with a manual release can never
+#     double-publish or mis-tag.
+#
+# Trust model (ADR-0007): the merged PR body is untrusted
+# upstream-derived input. It travels env → file (`pr-body.md`) →
+# scripts/release-notes.mjs and is never interpolated into run scripts;
+# the version and tag are computed locally from package.json, never
+# parsed from the PR. Pushing to main relies on the actor-scoped
+# branch-protection bypass for the workflow bot identity — see ADR-0007
+# for the conditions that keep that bypass safe.
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: auto-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Cut patch release for merged catalog refresh
+    if: >-
+      github.event.pull_request.merged == true &&
+      startsWith(github.event.pull_request.head.ref, 'catalog-refresh/') &&
+      !contains(github.event.pull_request.labels.*.name, 'skip-release')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The bump commit lands on main so the release pipeline's
+          # on-main assertion passes unchanged.
+          ref: main
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # The merged PR body is untrusted input: it is written to a file
+      # via the environment (env vars are data passed to the step, not
+      # spliced into the script text) and consumed as a file by
+      # scripts/release-notes.mjs.
+      - name: Write the merged PR body to a file
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: printf '%s' "$PR_BODY" > pr-body.md
+
+      # The exact fragment is locked by tests/auto-release.test.ts, which
+      # spawns it against a synthetic repository. Update the test's copy
+      # in the same commit as any change here.
+      - name: Cut the patch release (bump, changelog, commit, tag)
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./package.json').version")"
+          next="$(node -e "const [maj,min,pat]=process.argv[1].split('.').map(Number);process.stdout.write(maj+'.'+min+'.'+(pat+1))" "$version")"
+          if git rev-parse -q --verify "refs/tags/v${next}" >/dev/null; then
+            echo "::warning::tag v${next} already exists — skipping the auto-release (no commit, no tag). Delete the stale tag or land the version bump manually if this release is wanted."
+            exit 0
+          fi
+          date="$(date -u +%Y-%m-%d)"
+          node scripts/release-notes.mjs "${next}" "${date}" pr-body.md > release-notes.md
+          { cat release-notes.md; cat CHANGELOG.md; } > CHANGELOG.md.new
+          mv CHANGELOG.md.new CHANGELOG.md
+          npm version "${next}" --no-git-tag-version --allow-same-version >/dev/null
+          npm install --package-lock-only >/dev/null 2>&1
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json CHANGELOG.md
+          git commit -q -m "chore(release): ${next}"
+          git tag "v${next}"
+
+      # A push made with the default GITHUB_TOKEN does NOT start other
+      # workflow runs (GitHub's recursive-event rule) — including the
+      # tag-driven release pipeline. The tag push therefore uses
+      # RELEASE_PUSH_TOKEN when the maintainer has provided one (a
+      # fine-grained PAT or GitHub App token restricted to this repo,
+      # contents: write), falling back to the default token. Without it the
+      # commit and tag still land, but release.yml must be started manually
+      # (re-tag or dispatch). See ADR-0007's repo-settings prerequisite.
+      - name: Push main and the tag
+        env:
+          GH_PUSH_TOKEN: ${{ secrets.RELEASE_PUSH_TOKEN || github.token }}
+        run: |
+          set -euo pipefail
+          next="$(node -p "require('./package.json').version")"
+          git remote set-url origin "https://x-access-token:${GH_PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push -q origin main "v${next}"
+          echo "auto-release: cut v${next} on main; the tag-driven release pipeline takes it from here."

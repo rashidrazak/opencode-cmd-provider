@@ -165,13 +165,13 @@ git tag -a v0.1.1 -m "Release 0.1.1"
 git push origin v0.1.1
 ```
 
-Publish stable locally:
-
-```sh
-npm publish --tag latest --access public
-```
-
-Publishing is intentionally manual/local; there is no GitHub Actions publish workflow. If npm asks for browser or OTP auth, complete the npm prompt locally.
+Publishing runs through the tag-driven GitHub Actions pipeline
+(`.github/workflows/release.yml`, ADR-0002): pushing a `vX.Y.Z` tag whose
+commit is on `main` and whose version matches `package.json` runs the build,
+full suite, and stale-catalog gates, then publishes to npm via OIDC trusted
+publishing and creates the GitHub Release from the CHANGELOG section. If npm
+asks for browser or OTP auth in a local publish, complete the npm prompt
+locally.
 
 Verify npm:
 
@@ -184,6 +184,34 @@ Expected:
 
 - `latest` points to the stable version
 - the stable version exists on npm
+
+## Catalog-refresh auto-release (merge = publish)
+
+Merging a **Catalog refresh PR** (a `catalog-refresh/*` branch) cuts its own
+patch release automatically (`.github/workflows/auto-release.yml`,
+ADR-0007): the workflow patch-bumps the version, syncs the lockfile via npm,
+prepends a `## X.Y.Z - date` CHANGELOG section authored from the merged PR
+body's semantic sections (Model catalog / Reasoning classification / Deals
+intelligence), commits `chore(release): X.Y.Z` as the bot on `main`, and
+tags `vX.Y.Z` — which triggers the unchanged release pipeline. One publish
+path; no manual ritual.
+
+Rails:
+
+- add the `skip-release` label to the refresh PR to suppress the release for
+  that refresh (e.g. bundling it with a larger manual release);
+- the release is skipped entirely when a `vX.Y.Z` tag for the computed
+  version already exists;
+- pushing the bot commit to `main` relies on the branch-protection exemption
+  for the `github-actions[bot]` identity (ADR-0007) — if merging a refresh
+  PR stops producing `chore(release)` commits, check that exemption first;
+- a tag push with the default `GITHUB_TOKEN` does not start the release
+  pipeline (GitHub's recursive-event rule): provide the `RELEASE_PUSH_TOKEN`
+  secret (fine-grained PAT or GitHub App token, this repo only,
+  `contents: write`) so the tag push triggers `release.yml` — without it the
+  commit and tag land but the pipeline must be started manually (ADR-0007).
+
+Feature releases (and any manual release) keep the tag-driven ritual above.
 
 ## GitHub follow-up
 
