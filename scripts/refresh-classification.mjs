@@ -191,6 +191,7 @@ async function main() {
       keys: ["goat", "pro"],
       mode: fixturesMode ? "fixtures" : "live",
       urls,
+      fixturesDir: argValue("--fixtures-dir"),
       prefix: "refresh-classification",
     }))
   } catch (error) {

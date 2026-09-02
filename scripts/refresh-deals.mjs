@@ -374,6 +374,7 @@ async function main() {
       keys: ["pricing", "goat", "pro"],
       mode: fixturesMode ? "fixtures" : "live",
       urls,
+      fixturesDir: argValue("--fixtures-dir"),
       prefix: "refresh-deals",
     }))
   } catch (error) {
