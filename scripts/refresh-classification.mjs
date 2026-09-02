@@ -147,7 +147,8 @@ export function buildClassificationModule({
  * build the module text.
  *
  * @param {{ goatRsc: string, proRsc: string, lastRefreshed: string, allowPartial?: boolean, overrides?: Record<string, { capability: boolean, justification: string }> }} args
- * @returns {string}
+ * @returns {{ module: string, entryCount: number }} the module text and
+ *   the number of emitted classification entries
  */
 export function emitClassificationModuleFromRsc({
   goatRsc,
@@ -171,7 +172,11 @@ export function emitClassificationModuleFromRsc({
       )
     }
   }
-  return buildClassificationModule({ bySnapshotId, lastRefreshed, overrides })
+  const capability = deriveCapabilityMap(bySnapshotId, overrides)
+  return {
+    module: buildClassificationModule({ bySnapshotId, lastRefreshed, overrides }),
+    entryCount: Object.keys(capability).length,
+  }
 }
 
 async function main() {
@@ -204,13 +209,14 @@ async function main() {
 
   const out = argValue("--out") ?? DEFAULT_OUT
   let module
+  let entryCount = 0
   try {
-    module = emitClassificationModuleFromRsc({
+    ;({ module, entryCount } = emitClassificationModuleFromRsc({
       goatRsc,
       proRsc,
       lastRefreshed: new Date().toISOString().split("T")[0],
       allowPartial: process.argv.includes("--allow-partial"),
-    })
+    }))
   } catch (error) {
     // Coverage-gate and shape-gate failures are loud: exit non-zero
     // without writing anything.
@@ -221,22 +227,7 @@ async function main() {
   }
   await mkdir(dirname(out), { recursive: true })
   await writeFile(out, module, "utf-8")
-  console.log(
-    `refresh-classification: wrote ${Object.keys(parseEmittedCapability(module)).length} classification entries to ${out}`,
-  )
-}
-
-// Counts the entries in an emitted module for the write log — a small
-// text scan so the CLI reports what it actually wrote.
-function parseEmittedCapability(module) {
-  const match = module.match(/MODEL_REASONING_CAPABILITY[^{]*\{([^}]*)\}/)
-  if (!match) return {}
-  const entries = {}
-  for (const line of match[1].split("\n")) {
-    const m = line.match(/"([^"]+)": (true|false)/)
-    if (m) entries[m[1]] = m[2] === "true"
-  }
-  return entries
+  console.log(`refresh-classification: wrote ${entryCount} classification entries to ${out}`)
 }
 
 if (process.argv[1] === new URL(import.meta.url).pathname) {

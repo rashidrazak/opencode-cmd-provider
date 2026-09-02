@@ -61,15 +61,19 @@ const PR_BODY = [
 // commit as any workflow change — a divergence means the workflow is no
 // longer locked by the test. The body arrives as the file `pr-body.md`
 // (never interpolated into this script); version and tag are computed
-// locally from package.json.
+// locally from package.json. The tag-existence rail is a FULL skip: the
+// bump step reports skip=true and the push step is gated on that output
+// (SKIP_PUSH=1 stands in for the workflow's step-level `if`).
 const RELEASE_FRAGMENT = `
   set -euo pipefail
   version="$(node -p "require('./package.json').version")"
   next="$(node -e "const [maj,min,pat]=process.argv[1].split('.').map(Number);process.stdout.write(maj+'.'+min+'.'+(pat+1))" "$version")"
   if git rev-parse -q --verify "refs/tags/v\${next}" >/dev/null; then
-    echo "::warning::tag v\${next} already exists — skipping the auto-release (no commit, no tag)."
+    echo "::warning::tag v\${next} already exists — skipping the auto-release (no commit, no tag, no push)."
+    echo "skip=true"
     exit 0
   fi
+  echo "skip=false"
   date="$(date -u +%Y-%m-%d)"
   node scripts/release-notes.mjs "\${next}" "\${date}" pr-body.md > release-notes.md
   { cat release-notes.md; cat CHANGELOG.md; } > CHANGELOG.md.new
@@ -81,9 +85,11 @@ const RELEASE_FRAGMENT = `
   git add package.json package-lock.json CHANGELOG.md
   git commit -q -m "chore(release): \${next}"
   git tag "v\${next}"
-  next="$(node -p "require('./package.json').version")"
-  git push -q origin main "v\${next}"
-  echo "auto-release: cut v\${next} on main; the tag-driven release pipeline takes it from here."
+  if [ "\${SKIP_PUSH:-0}" != "1" ]; then
+    next="$(node -p "require('./package.json').version")"
+    git push -q origin main "v\${next}"
+    echo "auto-release: cut v\${next} on main; the tag-driven release pipeline takes it from here."
+  fi
 `
 
 interface Repo {
@@ -132,11 +138,14 @@ async function setupRepo({ tag = false } = {}): Promise<Repo> {
   }
 }
 
-async function runReleaseFragment(work: string): Promise<{ code: number; out: string }> {
+async function runReleaseFragment(
+  work: string,
+  env: Record<string, string> = {},
+): Promise<{ code: number; out: string }> {
   try {
     const { stdout } = await exec("bash", ["-c", RELEASE_FRAGMENT], {
       cwd: work,
-      env: { ...process.env, npm_config_cache: join(tmpdir(), "cc-npm-cache") },
+      env: { ...process.env, npm_config_cache: join(tmpdir(), "cc-npm-cache"), ...env },
     })
     return { code: 0, out: stdout }
   } catch (error) {
@@ -246,7 +255,7 @@ run([
     },
   ],
   [
-    "release fragment: a pre-existing vX.Y.Z tag causes a full skip (no commit, no tag)",
+    "release fragment: a pre-existing vX.Y.Z tag causes a full skip (no commit, no tag, no push)",
     async () => {
       const repo = await setupRepo({ tag: true })
       try {
@@ -256,6 +265,10 @@ run([
           result.out.includes("skipping the auto-release"),
           `expected a loud skip, got: ${result.out}`,
         )
+        // The bump step reports skip=true — the workflow's push step is
+        // gated on exactly this output (`steps.release.outputs.skip !=
+        // 'true'`, locked statically below).
+        assert(result.out.includes("skip=true"), `expected skip=true, got: ${result.out}`)
         const pkg = JSON.parse(await readFile(join(repo.work, "package.json"), "utf-8")) as {
           version: string
         }
@@ -264,6 +277,14 @@ run([
         assertEqual(subject.trim(), "seed", "no release commit may be created")
         const changelog = await readFile(join(repo.work, "CHANGELOG.md"), "utf-8")
         assert(!changelog.includes("## 1.6.3"), "no CHANGELOG section may be added")
+        // The push step must not run after the skip: gated fragment is a
+        // no-op (the workflow's step-level `if` skips the step outright).
+        const gated = await runReleaseFragment(repo.work, { SKIP_PUSH: "1" })
+        assertEqual(gated.code, 0, gated.out)
+        assert(
+          !gated.out.includes("the tag-driven release pipeline takes it from here"),
+          `the push step must be skipped after a tag skip, got: ${gated.out}`,
+        )
       } finally {
         await repo.cleanup()
       }
@@ -287,6 +308,13 @@ run([
       assert(workflow.includes("skip-release"), workflow)
       // Concurrency-serialized (safety rail).
       assert(workflow.includes("concurrency:"), workflow)
+      // The tag-existence rail must gate the PUSH step too — a full skip
+      // means no commit, no tag, and no push.
+      assert(
+        workflow.includes("if: steps.release.outputs.skip != 'true'"),
+        "the push step must be gated on the bump step's skip output",
+      )
+      assert(workflow.includes('echo "skip=true" >> "$GITHUB_OUTPUT"'), workflow)
       // The body must travel as a file/env, never spliced into `run:`.
       assert(
         !workflow.includes("${{ github.event.pull_request.body }}") || workflow.includes("PR_BODY"),

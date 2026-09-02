@@ -30,6 +30,7 @@
 // pass in the parsed module objects (or their file contents as strings,
 // when invoked from the cron). Tests exercise the function against
 // inline synthetic data so the test file has no fixtures of its own.
+import { readFile } from "node:fs/promises"
 
 /**
  * @typedef {Object} CatalogModel
@@ -407,6 +408,21 @@ function categoryLabel(category) {
 }
 
 /**
+ * Whether two classification categories represent a semantic move — a kind
+ * flip, or an efforts model whose level list changed. The single source of
+ * the comparison, shared by the section renderer and the
+ * classification-changed boolean.
+ *
+ * @param {ReturnType<typeof classificationCategory>} a
+ * @param {ReturnType<typeof classificationCategory>} b
+ * @returns {boolean}
+ */
+function categoryMoved(a, b) {
+  if (a.kind !== b.kind) return true
+  return a.kind === "efforts" && b.kind === "efforts" && a.levels.join(",") !== b.levels.join(",")
+}
+
+/**
  * The plain-language change line for a model present on both sides whose
  * category moved, or "" when the category is unchanged.
  *
@@ -416,15 +432,7 @@ function categoryLabel(category) {
  * @returns {string}
  */
 function classificationChangeLine(id, beforeCategory, afterCategory) {
-  if (beforeCategory.kind === afterCategory.kind) {
-    if (
-      beforeCategory.kind !== "efforts" ||
-      afterCategory.kind !== "efforts" ||
-      beforeCategory.levels.join(",") === afterCategory.levels.join(",")
-    ) {
-      return ""
-    }
-  }
+  if (!categoryMoved(beforeCategory, afterCategory)) return ""
   const b = categoryLabel(beforeCategory)
   const a = categoryLabel(afterCategory)
   if (beforeCategory.kind === "none") return `- \`${id}\`: new reasoning model (${a})`
@@ -523,13 +531,11 @@ export function classificationChanged({ before, after }) {
     ...Object.keys(a.efforts),
   ])
   for (const id of ids) {
-    const beforeCategory = classificationCategory(id, b.capability, b.efforts)
-    const afterCategory = classificationCategory(id, a.capability, a.efforts)
     if (
-      beforeCategory.kind !== afterCategory.kind ||
-      (beforeCategory.kind === "efforts" &&
-        afterCategory.kind === "efforts" &&
-        beforeCategory.levels.join(",") !== afterCategory.levels.join(","))
+      categoryMoved(
+        classificationCategory(id, b.capability, b.efforts),
+        classificationCategory(id, a.capability, a.efforts),
+      )
     ) {
       return true
     }
@@ -650,7 +656,6 @@ async function main() {
   }
   const beforePath = args[1]
   const afterPath = args[2]
-  const { readFile } = await import("node:fs/promises")
   let before, after
   try {
     before = JSON.parse(await readFile(beforePath, "utf-8"))
@@ -687,11 +692,10 @@ async function main() {
   // renders with its levels. A missing facts file degrades to no efforts
   // data (the capability flag alone still renders).
   if (kind === "classification") {
-    const { readFile: readJson } = await import("node:fs/promises")
     const mergeFacts = async (payload, factsPath) => {
       if (!factsPath) return payload
       try {
-        const facts = JSON.parse(await readJson(factsPath, "utf-8"))
+        const facts = JSON.parse(await readFile(factsPath, "utf-8"))
         return { ...payload, efforts: facts.MODEL_EFFORTS ?? facts.efforts ?? payload.efforts }
       } catch {
         return payload

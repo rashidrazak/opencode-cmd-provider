@@ -219,7 +219,7 @@ run([
           goatRsc: RSC_GOAT,
           proRsc: RSC_PRO,
           lastRefreshed: TODAY,
-        })
+        }).module
         assertEqual(
           contents,
           expected,
@@ -281,7 +281,7 @@ run([
         goatRsc: RSC_GOAT,
         proRsc: RSC_PRO,
         lastRefreshed: TODAY,
-      })
+      }).module
       assertEqual(contents, expected, "--fixtures must match the fixture-based emit")
       await rm(dir, { recursive: true, force: true })
     },

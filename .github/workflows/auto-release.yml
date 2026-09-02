@@ -70,15 +70,23 @@ jobs:
       # The exact fragment is locked by tests/auto-release.test.ts, which
       # spawns it against a synthetic repository. Update the test's copy
       # in the same commit as any change here.
+      #
+      # The tag-existence rail is a **full skip**: the step reports
+      # skip=true and skips the bump entirely — the push step is gated on
+      # this output, so a pre-existing tag produces no commit, no tag, and
+      # no push at all.
       - name: Cut the patch release (bump, changelog, commit, tag)
+        id: release
         run: |
           set -euo pipefail
           version="$(node -p "require('./package.json').version")"
           next="$(node -e "const [maj,min,pat]=process.argv[1].split('.').map(Number);process.stdout.write(maj+'.'+min+'.'+(pat+1))" "$version")"
           if git rev-parse -q --verify "refs/tags/v${next}" >/dev/null; then
-            echo "::warning::tag v${next} already exists — skipping the auto-release (no commit, no tag). Delete the stale tag or land the version bump manually if this release is wanted."
+            echo "::warning::tag v${next} already exists — skipping the auto-release (no commit, no tag, no push). Delete the stale tag or land the version bump manually if this release is wanted."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+          echo "skip=false" >> "$GITHUB_OUTPUT"
           date="$(date -u +%Y-%m-%d)"
           node scripts/release-notes.mjs "${next}" "${date}" pr-body.md > release-notes.md
           { cat release-notes.md; cat CHANGELOG.md; } > CHANGELOG.md.new
@@ -100,6 +108,7 @@ jobs:
       # commit and tag still land, but release.yml must be started manually
       # (re-tag or dispatch). See ADR-0007's repo-settings prerequisite.
       - name: Push main and the tag
+        if: steps.release.outputs.skip != 'true'
         env:
           GH_PUSH_TOKEN: ${{ secrets.RELEASE_PUSH_TOKEN || github.token }}
         run: |
