@@ -161,6 +161,11 @@ auto-registered models only.
 - Snapshot — `src/catalog/snapshot.ts` (model ids, names, context lengths) plus
   `src/catalog/facts.ts` (reasoning efforts, per-1M-token rates, input
   modalities). Regenerated from the live catalog via `npm run refresh:snapshot`.
+- Classification — `src/catalog/classification.ts` (per-model reasoning
+  capability, derived from the `reasoning` flag on the docs' RSC slug
+  records; ADR-0006). Regenerated via `npm run refresh:classification`; the
+  runtime derives its reasoning metadata from this module, so upstream
+  classification changes land as data, never as hand edits.
 - Deals — `src/deals/catalog.ts` (per-model tier, benchmarks, deal
   discounts, `was`/`now` rates, peak/off-peak windows, and GOAT/Pro monthly
   allowances for every model). Extracted from the Command Code docs' RSC
@@ -173,12 +178,16 @@ auto-registered models only.
 Run `npm run refresh` to regenerate everything at once: the snapshot and
 facts come from the live Command Code catalog, the RSC fixtures are
 re-captured from the live docs pages (`npm run refresh:fixtures`), and the
-deals catalog is regenerated from the fresh fixtures — so fixtures, catalog,
-and tests stay in lockstep. A daily GitHub Actions cron
+classification module and deals catalog are regenerated from the fresh
+fixtures — so fixtures, catalogs, and tests stay in lockstep. A daily GitHub
+Actions cron
 (`.github/workflows/catalog-refresh.yml`, 06:00 UTC, also manually
 triggerable via `workflow_dispatch`) runs the same pipeline: when upstream
 moved it opens a `chore: catalog refresh` PR whose body is the human-readable
-diff from `scripts/diff-catalog.mjs`; when nothing drifted it exits silently.
+diff from `scripts/diff-catalog.mjs` — model catalog, reasoning
+classification (flips, new reasoning models, retirements, active overrides),
+and deals sections; when nothing meaningful drifted it exits silently (a
+run whose only change is the refreshed-date stamps opens no PR).
 
 Auto-registration adds no network latency to OpenCode startup — the snapshot is
 bundled, and the plugin never contacts the Command Code API to list models. The
@@ -199,7 +208,13 @@ compatible API endpoints:
 
 ### Reasoning support
 
-Reasoning metadata is enriched only for models whose Command Code effort support is known. Supported levels are sent as the documented `reasoning_effort` request field; `off`, unsupported levels, and newly discovered models without metadata do not add reasoning fields to the request. No prompt instructions are injected.
+Reasoning metadata is derived from the generated catalogs (ADR-0006): models
+upstream flags as reasoning-capable advertise `reasoning: true`
+automatically — with explicit effort variants when the generated facts list
+effort levels, and without variants otherwise. Supported levels are sent as
+the documented `reasoning_effort` request field; `off`, unsupported levels,
+and newly discovered models without metadata do not add reasoning fields to
+the request. No prompt instructions are injected.
 
 Reasoning blocks from completed assistant turns are not replayed to Command Code in later requests; only the user-visible text and completed tool calls are sent back as history. This prevents prior private reasoning traces from interfering with reasoning on follow-up turns.
 

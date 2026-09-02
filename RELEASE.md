@@ -28,14 +28,17 @@ npm publish --tag next --access public
 from the live Command Code catalog and `src/catalog/facts.ts` from the CLI
 package's `models.md` plus `dist/cli.mjs` input-modality fields, then
 re-captures the RSC fixtures (`tests/fixtures/rsc-*.txt`) from the live docs
-pages and regenerates `src/deals/catalog.ts` from them (see ADR-0005). The
+pages and regenerates `src/catalog/classification.ts` (ADR-0006) and
+`src/deals/catalog.ts` from them (see ADR-0005). The
 release therefore ships the current model list, reasoning/cost facts, vision
-metadata, and deal/allowance/benchmark intelligence; commit the updated
+metadata, derived reasoning classification, and deal/allowance/benchmark
+intelligence; commit the updated
 generated files and fixtures with the release. The refresh fails if an API
 model is missing from the CLI modality catalog, if the bundle structure
-changes in a way the parser cannot verify, or if the deals coverage gate finds
-a snapshot model with no RSC record (a 4xx from the docs site also fails
-loudly; 5xx/network falls back to the committed fixtures).
+changes in a way the parser cannot verify, if the coverage gate finds a
+snapshot model with no RSC record, or if the RSC records are missing the
+`reasoning` flag the classification derives from (a 4xx from the docs site
+also fails loudly; 5xx/network falls back to the committed fixtures).
 
 If npm asks for browser or OTP auth, run the publish command manually and complete the npm prompt.
 
