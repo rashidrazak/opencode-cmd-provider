@@ -99,7 +99,10 @@ jobs:
       # Diff detection. The generated files live on the working tree
       # after `npm run refresh`. If they match `main`, exit 0 and
       # open no PR (acceptance criterion: "no PR opened when nothing
-      # drifted").
+      # drifted"). The generated classification module
+      # (src/catalog/classification.ts, issue #111) rides the same
+      # detection and commit lists, so classification changes actually
+      # ship in refresh PRs rather than floating uncommitted.
       - name: Detect drift against main
         id: drift
         run: |
@@ -107,6 +110,7 @@ jobs:
           if git diff --quiet origin/main -- \
               src/catalog/snapshot.ts \
               src/catalog/facts.ts \
+              src/catalog/classification.ts \
               src/deals/catalog.ts \
               tests/fixtures/rsc-pricing-limits.txt \
               tests/fixtures/rsc-goat.txt \
@@ -119,6 +123,7 @@ jobs:
             git diff --stat origin/main -- \
               src/catalog/snapshot.ts \
               src/catalog/facts.ts \
+              src/catalog/classification.ts \
               src/deals/catalog.ts \
               tests/fixtures/rsc-pricing-limits.txt \
               tests/fixtures/rsc-goat.txt \
@@ -132,7 +137,8 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add src/catalog/snapshot.ts src/catalog/facts.ts src/deals/catalog.ts \
+          git add src/catalog/snapshot.ts src/catalog/facts.ts src/catalog/classification.ts \
+              src/deals/catalog.ts \
               tests/fixtures/rsc-pricing-limits.txt tests/fixtures/rsc-goat.txt \
               tests/fixtures/rsc-pro.txt
           date="$(date -u +%Y-%m-%d)"
