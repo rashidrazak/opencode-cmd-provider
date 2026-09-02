@@ -96,38 +96,46 @@ jobs:
       - name: Run test suite
         run: npm test
 
-      # Diff detection. The generated files live on the working tree
-      # after `npm run refresh`. If they match `main`, exit 0 and
-      # open no PR (acceptance criterion: "no PR opened when nothing
-      # drifted"). The generated classification module
-      # (src/catalog/classification.ts, issue #111) rides the same
-      # detection and commit lists, so classification changes actually
-      # ship in refresh PRs rather than floating uncommitted.
-      - name: Detect drift against main
+      # Meaningful-change drift detection (issue #113). The old raw
+      # byte-diff judged the fixtures too, so date-only churn (PR #103)
+      # and upstream build-id churn opened no-op PRs. The check now judges
+      # **the generated catalog modules only**, with the release gate's
+      # established date-stamp ignores (the refreshed-date lines of the
+      # facts, deals, and classification modules — the same `-I` patterns
+      # ADR-0003's release gate uses, so the cron and the release gate
+      # agree on what counts as "no change"). Movements of the facts
+      # source/package-version lines remain meaningful (they signal a real
+      # upstream package event). Fixtures keep riding along in meaningful
+      # refresh commits but no longer decide drift. The fragment is
+      # locked by `tests/catalog-refresh-drift.test.ts`, which spawns it
+      # against synthetic before/after trees.
+      - name: Detect meaningful drift against main
         id: drift
         run: |
           git fetch origin main
-          if git diff --quiet origin/main -- \
+          if git diff --quiet \
+              -I 'FACTS_LAST_REFRESHED' \
+              -I 'DEAL_LAST_REFRESHED' \
+              -I 'CLASSIFICATION_LAST_REFRESHED' \
+              origin/main -- \
               src/catalog/snapshot.ts \
               src/catalog/facts.ts \
               src/catalog/classification.ts \
-              src/deals/catalog.ts \
-              tests/fixtures/rsc-pricing-limits.txt \
-              tests/fixtures/rsc-goat.txt \
-              tests/fixtures/rsc-pro.txt; then
+              src/deals/catalog.ts; then
             echo "drift=false" >> "$GITHUB_OUTPUT"
-            echo "No catalog drift detected against main — exiting without opening a PR."
+            echo "No meaningful catalog drift detected against main — exiting without opening a PR."
           else
             echo "drift=true" >> "$GITHUB_OUTPUT"
-            echo "Catalog drift detected — will open a refresh PR."
-            git diff --stat origin/main -- \
+            echo "Meaningful catalog drift detected — will open a refresh PR."
+            git diff --stat \
+              -I 'FACTS_LAST_REFRESHED' \
+              -I 'DEAL_LAST_REFRESHED' \
+              -I 'CLASSIFICATION_LAST_REFRESHED' \
+              origin/main -- \
               src/catalog/snapshot.ts \
               src/catalog/facts.ts \
               src/catalog/classification.ts \
-              src/deals/catalog.ts \
-              tests/fixtures/rsc-pricing-limits.txt \
-              tests/fixtures/rsc-goat.txt \
-              tests/fixtures/rsc-pro.txt
+              src/deals/catalog.ts
           fi
 
       # Commit the regenerated files. Authored by the GitHub Actions
