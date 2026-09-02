@@ -1,4 +1,39 @@
-# Changelog
+## 1.6.3 - 2026-09-02
+
+### Model catalog
+
+## Model catalog
+
+- **FACTS_LAST_REFRESHED**: `2026-09-01` → `2026-09-01`
+
+No changes.
+
+### Reasoning classification
+
+## Reasoning classification
+
+- **CLASSIFICATION_LAST_REFRESHED**: `` → `2026-09-02`
+
+_first refresh — no classification data on the before side._
+
+### Deals intelligence
+
+## Deals intelligence
+
+- **DEAL_LAST_REFRESHED**: `2026-09-01` → `2026-09-01`
+
+No changes.
+
+### Full changeset
+
+The generated-catalog diff above is only the data layer (the new classification module — first refresh). This PR carries the whole derived-classification implementation (#109–#116): the shared RSC record source (scripts/rsc-source.mjs), the classification generator in the refresh ladder, the derived runtime (src/provider/reasoning.ts), the semantic diff sections + classificationChanged boolean, the meaningful-change drift detection (date-only churn opens no PR), ADR-0006/0007 + glossary + docs, and the auto-release workflow. npm test green on the head commit; per-ticket summary in the commit trail.
+
+### Maintainer actions before merge (ADR-0007)
+
+1. Add the RELEASE_PUSH_TOKEN secret (fine-grained PAT, this repo only, Contents: Read and write) so the tag push triggers the release pipeline — a default-token push does not start other workflows.
+2. Branch protection is currently off, so the bot push lands freely; when you enable it, add a bypass for the pushing identity (ruleset bypass list).
+
+_Opened from `catalog-refresh/2026-09-02` so merging exercises the new merge-to-release path: the auto-release workflow cuts `chore(release): 1.6.3` + tags v1.6.3, and release.yml publishes._
 
 ## 1.6.2 - 2026-09-01
 
