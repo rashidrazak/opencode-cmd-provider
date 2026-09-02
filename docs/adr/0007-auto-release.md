@@ -72,13 +72,27 @@ are judged against them rather than rediscovered.
 
 ## Repo-settings prerequisite
 
-Main is branch-protected (required `test` check, review). The bot's bump
-commit can only land if the protection rule **exempts the
-`github-actions[bot]` identity** (or an actor-scoped bypass ruleset exists
-for it). If the exemption is missing, merging a refresh PR will not publish —
-the push to main fails, loudly, in the auto-release run. Rejected
-alternative: a bot-opened release PR needing one more human approval — it
-defeats "merge = publish".
+`main` is protected by two **rulesets** (note: classic branch protection is
+*not* configured — the legacy "branch protection" API reports "Branch not
+protected"; rulesets are the active mechanism, verified 2026-09-02):
+
+- **`main-review`** — requires a pull request with 1 approving review and
+  resolved threads. Its bypass list already contains the maintainer identity
+  (mode: always), which is what lets the auto-release's authenticated push
+  through the review requirement.
+- **`main-hard-rules`** — requires the `test` status check (strict),
+  forbids non-fast-forward pushes and deletion. Its bypass list is **empty**.
+
+The auto-release's bump commit does not carry a `test` status at push time
+(it changes only version metadata and the CHANGELOG, and the status check
+runs on PR heads, not on workflow pushes), so **`main-hard-rules` rejects
+the push** until the pushing identity is added to that ruleset's bypass
+list (Settings → Rules → Rulesets → `main-hard-rules` → Bypass list → the
+identity matching the push credential's actor — the maintainer user for a
+PAT, the App for an App token). This is an actor-scoped exemption exactly
+as the trust model above requires; human pushes to `main` remain
+review-gated for everyone else. Rejected alternative: a bot-opened release
+PR needing one more human approval — it defeats "merge = publish".
 
 ## Workflow-trigger prerequisite
 

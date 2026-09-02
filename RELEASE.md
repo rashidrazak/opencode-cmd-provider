@@ -202,9 +202,11 @@ Rails:
   that refresh (e.g. bundling it with a larger manual release);
 - the release is skipped entirely when a `vX.Y.Z` tag for the computed
   version already exists;
-- pushing the bot commit to `main` relies on the branch-protection exemption
-  for the `github-actions[bot]` identity (ADR-0007) — if merging a refresh
-  PR stops producing `chore(release)` commits, check that exemption first;
+- pushing the bot commit to `main` relies on the `main-hard-rules` ruleset
+  bypass (the required-`test` ruleset) for the pushing identity —
+  `main-review`'s bypass already covers the review requirement (ADR-0007).
+  If merging a refresh PR stops producing `chore(release)` commits, check
+  that bypass first;
 - a tag push with the default `GITHUB_TOKEN` does not start the release
   pipeline (GitHub's recursive-event rule): provide the `RELEASE_PUSH_TOKEN`
   secret (fine-grained PAT or GitHub App token, this repo only,
