@@ -163,12 +163,16 @@ jobs:
           set -euo pipefail
 
           # The capture step writes one JSON file per catalog
-          # (snapshot / facts / deals). The snapshot kind in
+          # (snapshot / facts / classification / deals). The snapshot kind in
           # `diff-catalog.mjs` only consumes `MODEL_SNAPSHOT`; the
           # `date` for snapshot diffs comes from
           # `FACTS_LAST_REFRESHED` (exported from `facts.ts`, not
           # `snapshot.ts`). Same for deals: the data lives in
-          # `deals/catalog.ts`; the date in the same file.
+          # `deals/catalog.ts`; the date in the same file. The
+          # classification kind consumes MODEL_REASONING_CAPABILITY +
+          # CLASSIFICATION_OVERRIDES + CLASSIFICATION_LAST_REFRESHED
+          # (from classification.ts) plus MODEL_EFFORTS (from facts.ts,
+          # needed for the efforts category) — issue #112.
           extract() {
             local ts_path="$1"
             local out_path="$2"
@@ -203,8 +207,12 @@ jobs:
               const out = {};
               if (mod.MODEL_SNAPSHOT) out.MODEL_SNAPSHOT = mod.MODEL_SNAPSHOT;
               if (mod.MODEL_DEALS)    out.MODEL_DEALS    = mod.MODEL_DEALS;
+              if (mod.MODEL_EFFORTS)  out.MODEL_EFFORTS  = mod.MODEL_EFFORTS;
+              if (mod.MODEL_REASONING_CAPABILITY) out.MODEL_REASONING_CAPABILITY = mod.MODEL_REASONING_CAPABILITY;
+              if (mod.CLASSIFICATION_OVERRIDES) out.CLASSIFICATION_OVERRIDES = mod.CLASSIFICATION_OVERRIDES;
               if (mod.FACTS_LAST_REFRESHED) out.FACTS_LAST_REFRESHED = mod.FACTS_LAST_REFRESHED;
               if (mod.DEAL_LAST_REFRESHED)  out.DEAL_LAST_REFRESHED  = mod.DEAL_LAST_REFRESHED;
+              if (mod.CLASSIFICATION_LAST_REFRESHED) out.CLASSIFICATION_LAST_REFRESHED = mod.CLASSIFICATION_LAST_REFRESHED;
               process.stdout.write(JSON.stringify(out));
             " > "${out_path}" 2>extract-err.txt
             if [ ! -s "${out_path}" ]; then
@@ -217,7 +225,7 @@ jobs:
           # 1) Capture the "before" state from origin/main
           #    (read-only checkout via `git show`).
           mkdir -p /tmp/before
-          for f in src/catalog/snapshot.ts src/catalog/facts.ts src/deals/catalog.ts; do
+          for f in src/catalog/snapshot.ts src/catalog/facts.ts src/catalog/classification.ts src/deals/catalog.ts; do
             base="$(basename "${f}" .ts)"
             if git show "origin/main:${f}" > "/tmp/before/${base}.ts" 2>/dev/null; then
               extract "/tmp/before/${base}.ts" "/tmp/before/${base}.json"
@@ -229,7 +237,7 @@ jobs:
           # 2) Capture the "after" state from the working tree
           #    (post-refresh, post-commit).
           mkdir -p /tmp/after
-          for f in src/catalog/snapshot.ts src/catalog/facts.ts src/deals/catalog.ts; do
+          for f in src/catalog/snapshot.ts src/catalog/facts.ts src/catalog/classification.ts src/deals/catalog.ts; do
             base="$(basename "${f}" .ts)"
             extract "${f}" "/tmp/after/${base}.json"
           done
@@ -248,7 +256,7 @@ jobs:
             echo "### Changed files"
             echo ""
             echo '```'
-            git diff --stat origin/main -- src/catalog/snapshot.ts src/catalog/facts.ts src/deals/catalog.ts
+            git diff --stat origin/main -- src/catalog/snapshot.ts src/catalog/facts.ts src/catalog/classification.ts src/deals/catalog.ts
             echo '```'
             echo ""
             echo "### Model catalog"
@@ -258,6 +266,15 @@ jobs:
             node scripts/diff-catalog.mjs snapshot /tmp/before/snapshot.json /tmp/after/snapshot.json \
               --before-date "${before_date}" --after-date "${after_date}" \
               || echo "_snapshot diff unavailable_"
+            echo ""
+            echo "### Reasoning classification"
+            echo ""
+            before_date="$(node -p "JSON.parse(require('fs').readFileSync('/tmp/before/classification.json','utf-8')).CLASSIFICATION_LAST_REFRESHED ?? ''" 2>/dev/null || true)"
+            after_date="$(node -p "JSON.parse(require('fs').readFileSync('/tmp/after/classification.json','utf-8')).CLASSIFICATION_LAST_REFRESHED ?? ''" 2>/dev/null || true)"
+            node scripts/diff-catalog.mjs classification /tmp/before/classification.json /tmp/after/classification.json \
+              --before-facts /tmp/before/facts.json --after-facts /tmp/after/facts.json \
+              --before-date "${before_date}" --after-date "${after_date}" \
+              || echo "_classification diff unavailable_"
             echo ""
             echo "### Deals intelligence"
             echo ""
