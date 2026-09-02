@@ -5,25 +5,28 @@
 // modalities parsed from its CLI bundle (dist/cli.mjs). Regenerate
 // with `npm run refresh:snapshot`.
 
-export const FACTS_SOURCE_URL = "https://unpkg.com/command-code@1.39.2/dist/bundled/command-code-knowledge/reference/models.md"
-export const MODALITIES_SOURCE_URL = "https://unpkg.com/command-code@1.39.2/dist/cli.mjs"
-export const FACTS_PACKAGE_VERSION = "1.39.2"
-export const FACTS_LAST_REFRESHED = "2026-09-01"
+export const FACTS_SOURCE_URL = "https://unpkg.com/command-code@1.44.0/dist/bundled/command-code-knowledge/reference/models.md"
+export const MODALITIES_SOURCE_URL = "https://unpkg.com/command-code@1.44.0/dist/cli.mjs"
+export const FACTS_PACKAGE_VERSION = "1.44.0"
+export const FACTS_LAST_REFRESHED = "2026-09-02"
 
 export const MODEL_EFFORTS: Readonly<Record<string, readonly string[]>> = {
   "deepseek/deepseek-v4-pro": ["high","max"],
   "deepseek/deepseek-v4-flash": ["high","max"],
   "deepseek/deepseek-v4-flash-vision-exp": ["high","max"],
   "deepseek/deepseek-v4-flash-fast": ["low","high","max"],
+  "moonshotai/Kimi-K3": ["low","high","max"],
   "z-ai/glm-5.3-flash": ["low","high","max"],
   "zai-org/GLM-5.3": ["low","high","max"],
   "zai-org/GLM-5.2": ["high","max"],
+  "Qwen/Qwen3.8-Max-0902": ["low","medium","xhigh"],
   "Qwen/Qwen3.8-Max": ["low","medium","xhigh"],
   "Qwen/Qwen3.8-27B": ["low","medium","xhigh"],
   "Qwen/Qwen3.8-Flash": ["low","medium","xhigh"],
   "tencent/hy4-preview": ["low","medium","high"],
   "claude-sonnet-5": ["low","medium","high","xhigh","max"],
   "claude-sonnet-4-6": ["low","medium","high","xhigh","max"],
+  "claude-fable-5-1": ["low","medium","high","xhigh","max"],
   "claude-fable-5": ["low","medium","high","xhigh","max"],
   "claude-opus-5": ["low","medium","high","xhigh","max"],
   "claude-opus-4-8": ["low","medium","high","xhigh","max"],
@@ -35,6 +38,7 @@ export const MODEL_EFFORTS: Readonly<Record<string, readonly string[]>> = {
   "gpt-5.4": ["low","medium","high","xhigh"],
   "gpt-5.3-codex": ["low","medium","high","xhigh"],
   "gpt-5.4-mini": ["low","medium","high"],
+  "google/gemini-3.8-flash": ["low","medium","high"],
   "google/gemini-3.7-flash": ["low","medium","high"],
   "google/gemini-3.6-flash": ["low","medium","high"],
   "google/gemini-3.5-flash": ["low","medium","high"],
@@ -68,6 +72,7 @@ export const MODEL_COSTS: Readonly<
   "MiniMaxAI/MiniMax-M2.5": { input: 0.3, output: 1.2, cacheRead: 0.03, cacheWrite: 0 },
   "xiaomi/mimo-v2.5-pro": { input: 0.435, output: 0.87, cacheRead: 0.0036, cacheWrite: 0 },
   "xiaomi/mimo-v2.5": { input: 0.14, output: 0.28, cacheRead: 0.0028, cacheWrite: 0 },
+  "Qwen/Qwen3.8-Max-0902": { input: 2, output: 6, cacheRead: 0.25, cacheWrite: 0 },
   "Qwen/Qwen3.8-Max": { input: 2, output: 6, cacheRead: 0.25, cacheWrite: 2.5 },
   "Qwen/Qwen3.8-27B": { input: 0.4, output: 3, cacheRead: 0.04, cacheWrite: 0 },
   "Qwen/Qwen3.8-Flash": { input: 0.16, output: 0.47, cacheRead: 0.016, cacheWrite: 0 },
@@ -76,6 +81,7 @@ export const MODEL_COSTS: Readonly<
   "Qwen/Qwen3.7-Flash": { input: 0.03, output: 0.13, cacheRead: 0.006, cacheWrite: 0.038 },
   "Qwen/Qwen3.6-Max-Preview": { input: 1.3, output: 7.8, cacheRead: 0.26, cacheWrite: 1.63 },
   "Qwen/Qwen3.6-Plus": { input: 0.5, output: 3, cacheRead: 0.1, cacheWrite: 0 },
+  "meituan/LongCat-2.0:free": { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
   "stepfun/Step-3.7-Flash": { input: 0.2, output: 1.15, cacheRead: 0.04, cacheWrite: 0 },
   "stepfun/Step-3.5-Flash": { input: 0.1, output: 0.3, cacheRead: 0.02, cacheWrite: 0 },
   "tencent/hy3-paid": { input: 0.14, output: 0.58, cacheRead: 0.035, cacheWrite: 0 },
@@ -86,6 +92,7 @@ export const MODEL_COSTS: Readonly<
   "poolside/laguna-s-2.1-free": { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
   "claude-sonnet-5": { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 },
   "claude-sonnet-4-6": { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
+  "claude-fable-5-1": { input: 10, output: 50, cacheRead: 0.25, cacheWrite: 12.5 },
   "claude-fable-5": { input: 10, output: 50, cacheRead: 1, cacheWrite: 12.5 },
   "claude-opus-5": { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 },
   "claude-opus-4-8": { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 },
@@ -98,6 +105,7 @@ export const MODEL_COSTS: Readonly<
   "gpt-5.4": { input: 2.5, output: 15, cacheRead: 0.25, cacheWrite: 0 },
   "gpt-5.3-codex": { input: 2, output: 8, cacheRead: 0.5, cacheWrite: 0 },
   "gpt-5.4-mini": { input: 0.75, output: 4.5, cacheRead: 0.075, cacheWrite: 0 },
+  "google/gemini-3.8-flash": { input: 1.5, output: 7.5, cacheRead: 0.15, cacheWrite: 0 },
   "google/gemini-3.7-flash": { input: 1.5, output: 7.5, cacheRead: 0.15, cacheWrite: 0.08334 },
   "google/gemini-3.6-flash": { input: 1.5, output: 7.5, cacheRead: 0.15, cacheWrite: 0 },
   "google/gemini-3.5-flash": { input: 1.5, output: 9, cacheRead: 0.15, cacheWrite: 0 },
@@ -107,6 +115,8 @@ export const MODEL_COSTS: Readonly<
   "meta/muse-spark-1.1": { input: 1.25, output: 4.25, cacheRead: 0.15, cacheWrite: 0 },
   "meta/muse-spark-1.2": { input: 1.25, output: 4.25, cacheRead: 0.15, cacheWrite: 0 },
   "meta/muse-spark-1.2-contributor": { input: 0.1, output: 0.2, cacheRead: 0.002, cacheWrite: 0 },
+  "meta/muse-spark-1.3": { input: 1.25, output: 4.25, cacheRead: 0.15, cacheWrite: 0 },
+  "meta/muse-spark-1.3-contributor": { input: 0.1, output: 0.2, cacheRead: 0.002, cacheWrite: 0 },
   "xai/grok-4.5": { input: 2, output: 6, cacheRead: 0.5, cacheWrite: 0 },
   "xai/grok-4.6": { input: 2, output: 6, cacheRead: 0.5, cacheWrite: 0 },
 }
@@ -121,7 +131,9 @@ export const MODEL_INPUT_MODALITIES: Readonly<
   "Qwen/Qwen3.8-27B": ["text","image"],
   "Qwen/Qwen3.8-Flash": ["text","image"],
   "Qwen/Qwen3.8-Max": ["text","image"],
+  "Qwen/Qwen3.8-Max-0902": ["text","image"],
   "claude-fable-5": ["text","image"],
+  "claude-fable-5-1": ["text","image"],
   "claude-haiku-4-5-20251001": ["text","image"],
   "claude-opus-4-7": ["text","image"],
   "claude-opus-4-8": ["text","image"],
@@ -134,6 +146,7 @@ export const MODEL_INPUT_MODALITIES: Readonly<
   "google/gemini-3.5-flash-lite": ["text","image"],
   "google/gemini-3.6-flash": ["text","image"],
   "google/gemini-3.7-flash": ["text","image"],
+  "google/gemini-3.8-flash": ["text","image"],
   "gpt-5.3-codex": ["text","image"],
   "gpt-5.4": ["text","image"],
   "gpt-5.4-mini": ["text","image"],
@@ -144,6 +157,8 @@ export const MODEL_INPUT_MODALITIES: Readonly<
   "meta/muse-spark-1.1": ["text","image"],
   "meta/muse-spark-1.2": ["text","image"],
   "meta/muse-spark-1.2-contributor": ["text","image"],
+  "meta/muse-spark-1.3": ["text","image"],
+  "meta/muse-spark-1.3-contributor": ["text","image"],
   "moonshotai/Kimi-K2.5": ["text","image"],
   "moonshotai/Kimi-K2.6": ["text","image"],
   "moonshotai/Kimi-K2.7-Code": ["text","image"],

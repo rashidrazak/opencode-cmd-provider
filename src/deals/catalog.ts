@@ -43,6 +43,7 @@ export interface ModelDeals {
 
 export const MODEL_DEALS: Readonly<Record<string, ModelDeals>> = {
   "claude-fable-5": { tier: "premium", benchmark: {"intelligence":62.1,"tokPerSec":67.8}, free: false, allowance: {"goat":20,"pro":20} },
+  "claude-fable-5-1": { tier: "premium", free: false, allowance: {"goat":20,"pro":20} },
   "claude-haiku-4-5-20251001": { tier: "premium", benchmark: {"intelligence":24.1,"tokPerSec":103.9}, free: false, allowance: {"goat":20,"pro":20} },
   "claude-opus-4-7": { tier: "premium", benchmark: {"intelligence":55}, free: false, allowance: {"goat":20,"pro":20} },
   "claude-opus-4-8": { tier: "premium", benchmark: {"intelligence":57.3}, free: false, allowance: {"goat":20,"pro":20} },
@@ -58,6 +59,7 @@ export const MODEL_DEALS: Readonly<Record<string, ModelDeals>> = {
   "google/gemini-3.5-flash-lite": { tier: "premium", benchmark: {"intelligence":37.4,"tokPerSec":368.8}, free: false, allowance: {"goat":20,"pro":20} },
   "google/gemini-3.6-flash": { tier: "premium", benchmark: {"intelligence":51.6,"tokPerSec":197.3}, free: false, allowance: {"goat":20,"pro":20} },
   "google/gemini-3.7-flash": { tier: "opensource", benchmark: {"intelligence":56,"tokPerSec":365.9}, free: false, allowance: {"goat":40,"pro":50} },
+  "google/gemini-3.8-flash": { tier: "premium", free: false, allowance: {"goat":40,"pro":50} },
   "gpt-5.3-codex": { tier: "premium", benchmark: {"intelligence":45.5,"tokPerSec":121.4}, free: false, allowance: {"goat":20,"pro":20} },
   "gpt-5.4": { tier: "premium", benchmark: {"intelligence":53.1}, free: false, allowance: {"goat":20,"pro":20} },
   "gpt-5.4-mini": { tier: "premium", benchmark: {"intelligence":40.9}, free: false, allowance: {"goat":20,"pro":20} },
@@ -65,9 +67,12 @@ export const MODEL_DEALS: Readonly<Record<string, ModelDeals>> = {
   "gpt-5.6-luna": { tier: "opensource", benchmark: {"intelligence":52.3,"tokPerSec":124.1}, overContext: {"input":0.4,"output":1.8,"cacheRead":0.04,"cacheWrite":0.5}, free: false, allowance: {"goat":20,"pro":30} },
   "gpt-5.6-sol": { tier: "opensource", benchmark: {"intelligence":60.9,"tokPerSec":69.6}, overContext: {"input":10,"output":45,"cacheRead":1,"cacheWrite":12.5}, free: false, allowance: {"goat":70,"pro":80} },
   "gpt-5.6-terra": { tier: "premium", benchmark: {"intelligence":56.6,"tokPerSec":112.8}, overContext: {"input":4,"output":18,"cacheRead":0.4,"cacheWrite":5}, free: false, allowance: {"goat":20,"pro":20} },
+  "meituan/LongCat-2.0:free": { tier: "opensource", free: true },
   "meta/muse-spark-1.1": { tier: "premium", benchmark: {"intelligence":53.2}, free: false, allowance: {"goat":20,"pro":20} },
   "meta/muse-spark-1.2": { tier: "opensource", benchmark: {"intelligence":56.8}, free: false, allowance: {"goat":20,"pro":30} },
   "meta/muse-spark-1.2-contributor": { tier: "opensource", benchmark: {"intelligence":56.8}, free: false, allowance: {"goat":20,"pro":30} },
+  "meta/muse-spark-1.3": { tier: "premium", free: false, allowance: {"goat":20,"pro":30} },
+  "meta/muse-spark-1.3-contributor": { tier: "premium", free: false, allowance: {"goat":20,"pro":30} },
   "MiniMaxAI/MiniMax-M2.5": { tier: "opensource", benchmark: {"intelligence":34.5}, free: false, allowance: {"goat":20,"pro":30} },
   "MiniMaxAI/MiniMax-M2.7": { tier: "opensource", benchmark: {"intelligence":38.9}, free: false, allowance: {"goat":20,"pro":30} },
   "MiniMaxAI/MiniMax-M3": { tier: "opensource", discount: {"pct":50}, was: {"input":0.6,"output":2.4,"cacheRead":0.12}, now: {"input":0.3,"output":1.2,"cacheRead":0.06}, benchmark: {"intelligence":45.4,"tokPerSec":111.3}, free: false, allowance: {"goat":47,"pro":57} },
@@ -86,6 +91,7 @@ export const MODEL_DEALS: Readonly<Record<string, ModelDeals>> = {
   "Qwen/Qwen3.8-27B": { tier: "opensource", benchmark: {"intelligence":52,"tokPerSec":50.5}, free: false, allowance: {"goat":70,"pro":80} },
   "Qwen/Qwen3.8-Flash": { tier: "opensource", free: false, allowance: {"goat":20,"pro":30} },
   "Qwen/Qwen3.8-Max": { tier: "opensource", benchmark: {"intelligence":58.1,"tokPerSec":23.6}, free: false, allowance: {"goat":20,"pro":30} },
+  "Qwen/Qwen3.8-Max-0902": { tier: "opensource", free: false, allowance: {"goat":20,"pro":30} },
   "sakana/fugu-ultra": { tier: "premium", free: false, allowance: {"goat":20,"pro":20} },
   "stepfun/Step-3.5-Flash": { tier: "opensource", benchmark: {"intelligence":26.5}, free: false, allowance: {"goat":20,"pro":30} },
   "stepfun/Step-3.7-Flash": { tier: "opensource", benchmark: {"intelligence":30.9,"tokPerSec":94.1}, free: false, allowance: {"goat":20,"pro":30} },
@@ -116,5 +122,5 @@ export const PLAN_CATALOG: Readonly<Record<PlanId, PlanInfo>> = {
 }
 
 export const DEAL_SOURCE_URL = "https://commandcode.ai/docs/resources/pricing-limits"
-export const DEAL_LAST_REFRESHED = "2026-09-01"
+export const DEAL_LAST_REFRESHED = "2026-09-02"
 export const DEAL_PACKAGE_VERSION = "docs"
