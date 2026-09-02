@@ -179,7 +179,10 @@ export const REQUIRED_AVAILABILITY_FIELDS = [
 
 // Slug records are richer (used as the source of truth for the snapshot
 // `id` / `name`), so the required set is larger. `deal` and `timeOfDay`
-// are conditional here too.
+// are conditional here too. `reasoning` is the per-model reasoning flag
+// the classification generator derives from (issue #110) — an upstream
+// rename or drop must be a loud shape failure, never a silent
+// default-to-non-reasoning.
 export const REQUIRED_SLUG_RECORD_FIELDS = [
   "slug",
   "id",
@@ -189,6 +192,7 @@ export const REQUIRED_SLUG_RECORD_FIELDS = [
   "minPlanName",
   "tiers",
   "caps",
+  "reasoning",
 ]
 
 // The compact array has a different shape (no `tiers` or `caps`); its

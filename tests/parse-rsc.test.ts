@@ -141,6 +141,20 @@ run([
     },
   ],
   [
+    "REQUIRED_SLUG_RECORD_FIELDS pins the reasoning flag (derived classification source)",
+    () => {
+      // The classification generator (scripts/refresh-classification.mjs)
+      // reads the per-model `reasoning` flag off every slug record. The
+      // flag joins the required-fields pin so an upstream rename or drop
+      // is a loud shape failure — never a silent default-to-non-reasoning
+      // (spec #108, user story 14).
+      assert(
+        REQUIRED_SLUG_RECORD_FIELDS.includes("reasoning"),
+        "reasoning must be a required slug-record field",
+      )
+    },
+  ],
+  [
     "applySlugIdAlias maps claude-haiku-4-5 to the date-suffixed snapshot id",
     () => {
       // The snapshot ships `claude-haiku-4-5-20251001`; the RSC's slug

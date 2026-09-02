@@ -1,9 +1,16 @@
 // src/provider/reasoning.ts — reasoning-effort metadata tables (PLAN #5 Part A,
-// port of pi's models.ts:67-150). Reasoning metadata now comes from the
-// generated catalog facts (`src/catalog/facts.ts`), with hand-maintained
-// classification sets (`REASONING_MODELS`) layered on top.
+// port of pi's models.ts:67-150). Reasoning metadata comes from the
+// generated catalog facts (`src/catalog/facts.ts`, the efforts table) and
+// the generated classification module (`src/catalog/classification.ts`,
+// the per-model capability flag the docs' RSC records carry). There is no
+// hand-maintained reasoning set: classification is **derived** (ADR-0006) —
+//   reasoning-without-efforts = capability flag true AND no efforts entry;
+//   isReasoningModel          = has an efforts entry OR capability flag true.
+// The only human seam is the classification override map baked into the
+// generated module at refresh time.
 
 import { MODEL_EFFORTS as GENERATED_MODEL_EFFORTS } from "../catalog/facts.js"
+import { MODEL_REASONING_CAPABILITY } from "../catalog/classification.js"
 
 /**
  * Models omitted here let Command Code choose their reasoning depth.
@@ -22,37 +29,39 @@ export type PiThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "x
 type CommandCodeReasoningEffort = Exclude<PiThinkingLevel, "off">
 
 /**
+ * Derives the reasoning-without-efforts set from a capability map and an
+ * efforts table: a model is reasoning-capable without explicit efforts
+ * when upstream's capability flag is true AND the facts carry no efforts
+ * entry for it. Efforts precedence holds by construction — an efforts
+ * model never appears in this set, so the "a model is classified exactly
+ * once" invariant is true by construction rather than asserted after
+ * regeneration (spec #108 / issue #111). Exported for the derivation
+ * checks; the runtime consumes the derived REASONING_MODELS below.
+ */
+export function deriveReasoningWithoutEfforts(
+  capability: Readonly<Record<string, boolean>>,
+  efforts: Readonly<Record<string, readonly string[]>>,
+): ReadonlySet<string> {
+  return new Set(
+    Object.entries(capability)
+      .filter(([id, flag]) => flag === true && efforts[id] === undefined)
+      .map(([id]) => id),
+  )
+}
+
+/**
  * Models Command Code advertises as reasoning-capable without exposing
  * explicit effort levels (Command Code chooses the reasoning depth). These
  * advertise `reasoning: true` in opencode but never generate `variants`.
+ *
+ * Derived from the generated classification module + the generated efforts
+ * facts — upstream data is the source of truth, so upstream classification
+ * changes land on the next catalog refresh with zero human edits.
  */
-export const REASONING_MODELS: ReadonlySet<string> = new Set([
-  "MiniMaxAI/MiniMax-M3",
-  "Qwen/Qwen3.6-Max-Preview",
-  "Qwen/Qwen3.6-Plus",
-  "Qwen/Qwen3.7-Flash",
-  "Qwen/Qwen3.7-Max",
-  "Qwen/Qwen3.7-Plus",
-  "meta/muse-spark-1.1",
-  "meta/muse-spark-1.2",
-  "meta/muse-spark-1.2-contributor",
-  "moonshotai/Kimi-K2.7-Code",
-  "moonshotai/Kimi-K2.7-Code-Highspeed",
-  "moonshotai/Kimi-K3",
-  "nvidia/nemotron-3-ultra-550b-a55b",
-  "poolside/laguna-s-2.1-free",
-  "stepfun/Step-3.7-Flash",
-  "tencent/hy3-paid",
-  // tencent/hy4-preview is reasoning-capable with explicit efforts
-  // (models.md lists `low, medium, high` since command-code@1.38.0,
-  // 2026-08-28) — it belongs in MODEL_EFFORTS, not here. Keeping it here
-  // would leave a snapshot model classified in both REASONING_MODELS and
-  // MODEL_EFFORTS, which breaks the dedicated
-  // `tencent/hy4-preview is an efforts model` pin in
-  // tests/catalog-metadata.test.ts.
-  "thinkingmachines/inkling",
-  "thinkingmachines/inkling-small",
-])
+export const REASONING_MODELS: ReadonlySet<string> = deriveReasoningWithoutEfforts(
+  MODEL_REASONING_CAPABILITY,
+  GENERATED_MODEL_EFFORTS,
+)
 
 const PI_THINKING_LEVELS: readonly PiThinkingLevel[] = [
   "off",
@@ -91,6 +100,11 @@ export function thinkingMetadataForModel(modelId: string): ThinkingMetadata | un
   }
 }
 
+/**
+ * A model is reasoning-capable when it has an explicit efforts entry OR
+ * upstream's capability flag is true. Derived entirely from the generated
+ * catalogs — no hand-maintained set remains.
+ */
 export function isReasoningModel(modelId: string): boolean {
   return MODEL_EFFORTS[modelId] !== undefined || REASONING_MODELS.has(modelId)
 }

@@ -23,22 +23,30 @@ decisions in `docs/adr/`.
 
 ## Generated files — do not hand-edit
 
-`src/catalog/snapshot.ts`, `src/catalog/facts.ts`, and `src/deals/catalog.ts`
-are generated (`scripts/refresh-snapshot.mjs`, `scripts/refresh-deals.mjs`).
-Regenerate with `npm run refresh` — snapshot from the live models API; the
+`src/catalog/snapshot.ts`, `src/catalog/facts.ts`,
+`src/catalog/classification.ts`, and `src/deals/catalog.ts` are generated
+(`scripts/refresh-snapshot.mjs`, `scripts/refresh-classification.mjs`,
+`scripts/refresh-deals.mjs`). Regenerate with `npm run refresh` — snapshot from the live models API; the
 RSC fixtures (`tests/fixtures/rsc-*.txt`) are re-captured from the live docs
 pages (`scripts/capture-rsc-fixtures.mjs`, all-or-nothing, loud on any
-failure); the deals catalog is regenerated from the freshly captured
-fixtures, so fixtures, catalog, and the fixture-based unit tests stay in
-lockstep. The cron commits the fixtures alongside the catalog when upstream
-moved. Standalone live regeneration: `npm run refresh:deals` (5xx/network →
+failure); the classification module and the deals catalog are regenerated
+from the freshly captured fixtures, so fixtures, catalogs, and the
+fixture-based unit tests stay in lockstep. The cron commits the fixtures
+alongside the catalogs when upstream moved. Standalone live regeneration:
+`npm run refresh:deals` / `npm run refresh:classification` (5xx/network →
 fixture fallback, 4xx fails loudly); offline-only:
-`npm run refresh:deals -- --fixtures`.
+`npm run refresh:deals -- --fixtures` / `npm run refresh:classification --
+--fixtures`.
 `refresh:deals` **fails loudly (exit 1) when the RSC/fixture records lack a
 snapshot model** — a partial deals catalog silently hides the TUI sidebar
-"Command Code" section for the missing models. This gate is why the fixtures
-must be refreshed alongside the snapshot (see `scripts/check-deals-coverage.mjs`
-and `tests/deals-coverage.test.ts`). `--allow-partial` opts out for tooling
+"Command Code" section for the missing models. The classification refresh
+enforces the same coverage gate (a partial classification silently
+under-advertises reasoning models) plus a shape gate on the RSC `reasoning`
+flag — upstream renaming or dropping it must be a loud failure, never a
+silent default-to-non-reasoning (see ADR-0006). These gates are why the
+fixtures must be refreshed alongside the snapshot (see
+`scripts/check-deals-coverage.mjs` and `tests/deals-coverage.test.ts`).
+`--allow-partial` opts out for tooling
 that must not exit non-zero (the release pipeline's non-blocking deals check);
 it never emits an empty catalog.
 

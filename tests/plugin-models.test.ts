@@ -8,6 +8,7 @@ import {
 } from "../src/plugin/models.js"
 import type { CatalogModel } from "../src/catalog/snapshot.js"
 import { MODEL_SNAPSHOT } from "../src/catalog/snapshot.js"
+import { MODEL_EFFORTS, REASONING_MODELS } from "../src/provider/reasoning.js"
 import { assert, assertEqual, run } from "./harness.js"
 
 const OPTIONS = {
@@ -73,6 +74,40 @@ run([
       assertEqual(unknown.variants, undefined)
       assertEqual(unknown.modalities, { input: ["text"] })
       assertEqual(unknown.cost, { input: 0, output: 0, cache_read: 0, cache_write: 0 })
+    },
+  ],
+
+  [
+    "auto-registration advertises a derived reasoning-without-efforts model without variants, and an efforts model with variants",
+    () => {
+      // End-to-end derivation check (issue #111): the model ids are picked
+      // from the generated catalogs at runtime — no upstream value pins —
+      // and pushed through the public auto-registration export.
+      const reasoningId = [...REASONING_MODELS][0]
+      assert(reasoningId, "the derived reasoning-without-efforts set must not be empty")
+      const effortsId = Object.keys(MODEL_EFFORTS)[0]
+      assert(effortsId, "the generated efforts facts must not be empty")
+      const snapshot: readonly CatalogModel[] = [
+        { id: reasoningId, name: "Derived Reasoning", contextLength: 1000 },
+        { id: effortsId, name: "Efforts Model", contextLength: 2000 },
+      ]
+      const config = {}
+      autoRegister(config, snapshot, OPTIONS)
+      const entry = config.provider.commandcode
+      // A reasoning-capable model without efforts: `reasoning: true` with
+      // no variants (opencode has nothing to cycle).
+      const reasoning = entry.models[reasoningId]
+      assertEqual(reasoning.reasoning, true)
+      assertEqual(reasoning.variants, undefined)
+      // An efforts model: its variants come from the generated efforts
+      // facts, one per supported effort.
+      const efforts = entry.models[effortsId]
+      assertEqual(efforts.reasoning, true)
+      assertEqual(
+        Object.keys(efforts.variants ?? {}),
+        [...MODEL_EFFORTS[effortsId]],
+        "variants must mirror the generated efforts entry",
+      )
     },
   ],
 

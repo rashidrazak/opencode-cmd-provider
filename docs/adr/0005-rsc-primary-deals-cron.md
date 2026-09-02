@@ -65,11 +65,21 @@ check, per ADR-0003).
 `.github/workflows/catalog-refresh.yml` (06:00 UTC + `workflow_dispatch`,
 concurrency-serialized): `npm ci` → `npm run refresh` → **`npm run build`**
 (required — `npm test` includes an `npm pack` contract test, and a fresh
-checkout has no `dist/`) → `npm test` → byte-diff against `origin/main` for
-the three generated files plus the fixtures. Drift opens a
+checkout has no `dist/`) → `npm test` → drift judgment against `origin/main`.
+Since ADR-0006 the ladder also regenerates the derived classification module
+(`src/catalog/classification.ts`) from the freshly captured fixtures, and
+the drift check judges **meaningful change**: the generated catalog modules
+only, with the release gate's date-stamp ignores (`FACTS_LAST_REFRESHED`,
+`DEAL_LAST_REFRESHED`, `CLASSIFICATION_LAST_REFRESHED` — the ADR-0003
+convention), so date-only churn opens no PR at all (the PR #103 replay
+ships nothing) and fixture-only byte churn never opens a PR; fixtures still
+ride along in meaningful refresh commits. Movements of the facts
+source/package-version lines remain meaningful (they signal a real upstream
+package event). Drift opens a
 `chore: catalog refresh — YYYY-MM-DD` PR whose body is produced by
 `scripts/diff-catalog.mjs` (added/removed/changed models, last-refreshed
-dates); no drift exits silently. Re-run safety: an existing same-date PR is
+dates, semantic classification sections, active classification overrides);
+no drift exits silently. Re-run safety: an existing same-date PR is
 updated instead of duplicated. The release pipeline's stale-snapshot gate
 (ADR-0003) is untouched — the cron is best-effort freshness, the tag-time gate
 is the safety net.

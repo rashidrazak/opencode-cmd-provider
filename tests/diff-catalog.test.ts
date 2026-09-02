@@ -5,7 +5,7 @@
 // changes, deals field changes, no-change short-circuit, and the
 // FACTS/DEAL_LAST_REFRESHED date surfacing). No network, no fixtures —
 // the test data is inline so the contract is self-contained.
-import { diffCatalogs } from "../scripts/diff-catalog.mjs"
+import { classificationChanged, diffCatalogs } from "../scripts/diff-catalog.mjs"
 import { assert, assertEqual, run } from "./harness.js"
 
 run([
@@ -293,6 +293,317 @@ run([
         threw = true
       }
       assert(threw, "diffCatalogs must throw for an unknown kind")
+    },
+  ],
+
+  // ------------------------------------------------------------------
+  // Classification sections (issue #112): semantic plain-language diff
+  // over before/after classification payloads. Synthetic data only.
+  // ------------------------------------------------------------------
+
+  [
+    "classification: a reasoning-without-efforts → efforts flip renders with the effort levels",
+    () => {
+      const before = {
+        capability: { "moonshotai/Kimi-K3": true },
+        efforts: {},
+      }
+      const after = {
+        capability: { "moonshotai/Kimi-K3": true },
+        efforts: { "moonshotai/Kimi-K3": ["low", "high", "max"] },
+      }
+      const md = diffCatalogs({ kind: "classification", before, after })
+      assert(md.includes("## Reasoning classification"), "must use the classification label")
+      assert(
+        md.includes(
+          "- `moonshotai/Kimi-K3`: reasoning-without-efforts → efforts model (`low, high, max`)",
+        ),
+        `must render the flip in plain language, got: ${md}`,
+      )
+    },
+  ],
+  [
+    "classification: an efforts → reasoning-without-efforts flip renders both categories",
+    () => {
+      const before = {
+        capability: { "a/model": true },
+        efforts: { "a/model": ["low", "high"] },
+      }
+      const after = { capability: { "a/model": true }, efforts: {} }
+      const md = diffCatalogs({ kind: "classification", before, after })
+      assert(
+        md.includes("- `a/model`: efforts model (`low, high`) → reasoning-without-efforts"),
+        `must render the reverse flip, got: ${md}`,
+      )
+    },
+  ],
+  [
+    "classification: a capability-flag promotion renders as a new reasoning model",
+    () => {
+      const before = { capability: { "a/model": false }, efforts: {} }
+      const after = { capability: { "a/model": true }, efforts: {} }
+      const md = diffCatalogs({ kind: "classification", before, after })
+      assert(
+        md.includes("- `a/model`: new reasoning model (reasoning-without-efforts)"),
+        `must render the promotion, got: ${md}`,
+      )
+    },
+  ],
+  [
+    "classification: a model added upstream with efforts renders as a new reasoning model with levels",
+    () => {
+      const before = { capability: {}, efforts: {} }
+      const after = { capability: { "new/model": true }, efforts: { "new/model": ["high"] } }
+      const md = diffCatalogs({ kind: "classification", before, after })
+      assert(
+        md.includes("- new reasoning model: `new/model` (efforts model (`high`))"),
+        `must render the added reasoning model, got: ${md}`,
+      )
+    },
+  ],
+  [
+    "classification: a removed reasoning model renders as retired; a removed non-reasoning model renders nothing",
+    () => {
+      const before = {
+        capability: { "gone/reasoning": true, "gone/plain": false },
+        efforts: { "gone/efforts": ["low"] },
+      }
+      const after = { capability: {}, efforts: {} }
+      const md = diffCatalogs({ kind: "classification", before, after })
+      assert(
+        md.includes("- retired: `gone/reasoning` (was reasoning-without-efforts)"),
+        `must render the retired reasoning model, got: ${md}`,
+      )
+      assert(
+        md.includes("- retired: `gone/efforts` (was efforts model (`low`))"),
+        `must render the retired efforts model, got: ${md}`,
+      )
+      assert(
+        !md.includes("gone/plain"),
+        "a removed non-reasoning model is not a classification change",
+      )
+    },
+  ],
+  [
+    "classification: losing the capability flag renders as no-longer-reasoning",
+    () => {
+      const before = { capability: { "a/model": true }, efforts: {} }
+      const after = { capability: { "a/model": false }, efforts: {} }
+      const md = diffCatalogs({ kind: "classification", before, after })
+      assert(
+        md.includes("- `a/model`: no longer reasoning (was reasoning-without-efforts)"),
+        `must render the demotion, got: ${md}`,
+      )
+    },
+  ],
+  [
+    "classification: identical before/after renders no changes and no override section",
+    () => {
+      const payload = {
+        capability: { "a/model": true, "b/model": false },
+        efforts: { "c/model": ["low"] },
+      }
+      const md = diffCatalogs({ kind: "classification", before: payload, after: payload })
+      assert(md.includes("No changes."), "must short-circuit identical classification")
+      assert(!md.includes("overrides"), "an empty override map renders nothing")
+    },
+  ],
+  [
+    "classification: active overrides are listed with their justification notes",
+    () => {
+      const payload = {
+        capability: { "a/model": true },
+        efforts: {},
+        overrides: {
+          "a/model": {
+            capability: false,
+            justification: "upstream RSC flag says true but models.md omits reasoning",
+          },
+        },
+      }
+      const md = diffCatalogs({ kind: "classification", before: payload, after: payload })
+      assert(
+        md.includes("### Active classification overrides (1)"),
+        `must render the overrides section, got: ${md}`,
+      )
+      assert(
+        md.includes(
+          "- `a/model`: capability false — upstream RSC flag says true but models.md omits reasoning",
+        ),
+        `must render the override entry with its justification, got: ${md}`,
+      )
+    },
+  ],
+  [
+    "classification: accepts the cron's module-export wrapper shape and degrades gracefully when the before side is missing",
+    () => {
+      // The cron extracts { MODEL_REASONING_CAPABILITY, MODEL_EFFORTS,
+      // CLASSIFICATION_OVERRIDES, CLASSIFICATION_LAST_REFRESHED } per side.
+      const after = {
+        MODEL_REASONING_CAPABILITY: { "a/model": true },
+        MODEL_EFFORTS: {},
+        CLASSIFICATION_OVERRIDES: {},
+        CLASSIFICATION_LAST_REFRESHED: "2026-09-03",
+      }
+      const md = diffCatalogs({
+        kind: "classification",
+        before: { missing: true },
+        after,
+        beforeDate: "",
+        afterDate: "2026-09-03",
+      })
+      assert(
+        md.includes("first refresh"),
+        `missing before module must degrade gracefully, got: ${md}`,
+      )
+      assert(!md.includes("`a/model`"), "a missing before side must not render change lines")
+    },
+  ],
+  [
+    "classification: output is byte-stable across calls (deterministic ordering)",
+    () => {
+      const before = {
+        capability: { "z/model": true, "a/model": true },
+        efforts: {},
+      }
+      const after = {
+        capability: { "z/model": true, "a/model": true },
+        efforts: { "a/model": ["low"], "z/model": ["high"] },
+      }
+      const md1 = diffCatalogs({ kind: "classification", before, after })
+      const md2 = diffCatalogs({ kind: "classification", before, after })
+      assertEqual(md1, md2, "classification diff must be deterministic")
+      const aIdx = md1.indexOf("`a/model`")
+      const zIdx = md1.indexOf("`z/model`")
+      assert(aIdx >= 0 && zIdx > aIdx, "change lines must be sorted by model id")
+    },
+  ],
+  [
+    "classificationChanged: flips/promotions/retirements are true; identical and date-only churn are false",
+    () => {
+      // True: a semantic flip.
+      assertEqual(
+        classificationChanged({
+          before: { capability: { "a/model": true }, efforts: {} },
+          after: { capability: { "a/model": true }, efforts: { "a/model": ["high"] } },
+        }),
+        true,
+        "a category flip must be reported as changed",
+      )
+      // True: a new reasoning model.
+      assertEqual(
+        classificationChanged({
+          before: { capability: {}, efforts: {} },
+          after: { capability: { "new/model": true }, efforts: {} },
+        }),
+        true,
+        "a new reasoning model must be reported as changed",
+      )
+      // True: a retirement.
+      assertEqual(
+        classificationChanged({
+          before: { capability: { "gone/model": true }, efforts: {} },
+          after: { capability: {}, efforts: {} },
+        }),
+        true,
+        "a retired reasoning model must be reported as changed",
+      )
+      // False: identical payloads.
+      const payload = { capability: { "a/model": true }, efforts: { "b/model": ["low"] } }
+      assertEqual(classificationChanged({ before: payload, after: payload }), false)
+      // False: date-only churn (the refreshed date moves, the data does not).
+      assertEqual(
+        classificationChanged({
+          before: { ...payload, lastRefreshed: "2026-09-02" },
+          after: { ...payload, lastRefreshed: "2026-09-03" },
+        }),
+        false,
+        "date-only churn must not count as a classification change",
+      )
+      // False: override-justification-only churn is not a data change.
+      assertEqual(
+        classificationChanged({
+          before: {
+            capability: { "a/model": true },
+            efforts: {},
+            overrides: { "a/model": { capability: true, justification: "note one" } },
+          },
+          after: {
+            capability: { "a/model": true },
+            efforts: {},
+            overrides: { "a/model": { capability: true, justification: "note two" } },
+          },
+        }),
+        false,
+        "justification-only churn must not count as a classification change",
+      )
+    },
+  ],
+  [
+    "classification CLI: merges the generated facts via --before-facts/--after-facts and renders the flip",
+    async () => {
+      // The cron invokes the CLI with the extracted classification
+      // payloads plus the facts JSONs (which carry MODEL_EFFORTS). This
+      // locks the CLI arg surface end-to-end.
+      const { mkdtemp, writeFile, rm } = await import("node:fs/promises")
+      const { tmpdir } = await import("node:os")
+      const { join } = await import("node:path")
+      const { execFile } = await import("node:child_process")
+      const { promisify } = await import("node:util")
+      const exec = promisify(execFile)
+      const dir = await mkdtemp(join(tmpdir(), "cc-diff-cli-"))
+      try {
+        await writeFile(
+          join(dir, "before.json"),
+          JSON.stringify({
+            MODEL_REASONING_CAPABILITY: { "moonshotai/Kimi-K3": true },
+            CLASSIFICATION_OVERRIDES: {},
+            CLASSIFICATION_LAST_REFRESHED: "2026-09-02",
+          }),
+        )
+        await writeFile(
+          join(dir, "after.json"),
+          JSON.stringify({
+            MODEL_REASONING_CAPABILITY: { "moonshotai/Kimi-K3": true },
+            CLASSIFICATION_OVERRIDES: {},
+            CLASSIFICATION_LAST_REFRESHED: "2026-09-03",
+          }),
+        )
+        await writeFile(
+          join(dir, "facts-before.json"),
+          JSON.stringify({ MODEL_EFFORTS: {}, FACTS_LAST_REFRESHED: "2026-09-02" }),
+        )
+        await writeFile(
+          join(dir, "facts-after.json"),
+          JSON.stringify({ MODEL_EFFORTS: { "moonshotai/Kimi-K3": ["low", "high", "max"] } }),
+        )
+        const { stdout } = await exec("node", [
+          "scripts/diff-catalog.mjs",
+          "classification",
+          join(dir, "before.json"),
+          join(dir, "after.json"),
+          "--before-facts",
+          join(dir, "facts-before.json"),
+          "--after-facts",
+          join(dir, "facts-after.json"),
+          "--before-date",
+          "2026-09-02",
+          "--after-date",
+          "2026-09-03",
+        ])
+        assert(
+          stdout.includes(
+            "- `moonshotai/Kimi-K3`: reasoning-without-efforts → efforts model (`low, high, max`)",
+          ),
+          `CLI must render the flip, got: ${stdout}`,
+        )
+        assert(
+          stdout.includes("- **CLASSIFICATION_LAST_REFRESHED**: `2026-09-02` → `2026-09-03`"),
+          "CLI must surface the classification date line",
+        )
+      } finally {
+        await rm(dir, { recursive: true, force: true })
+      }
     },
   ],
 ])

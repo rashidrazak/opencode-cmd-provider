@@ -28,39 +28,36 @@
 // air-gapped environments per the wayfinder spec at #77; this script
 // no longer calls them. Run them via Node directly if you need the
 // legacy HTML pipeline.
-import { mkdir, readFile, writeFile } from "node:fs/promises"
+import { mkdir, writeFile } from "node:fs/promises"
 import { dirname, resolve } from "node:path"
 import { num, ratesFor, benchmarkFor, endsAtFor } from "./parse-docs.mjs"
 import { applySlugIdAlias, extractPlanPageRsc, extractPricingLimitsRsc } from "./parse-rsc.mjs"
 import { applyTierOverride } from "./tier-overrides.mjs"
+import { RSC_PAGES, loadRscPages, missingSnapshotModels } from "./rsc-source.mjs"
 import { snapshotIndex } from "./snapshot-index.mjs"
 
-// The RSC flight payload rides the docs pages themselves: the live site
-// serves `text/x-component` for `rsc: 1` requests to the same URLs the
-// HTML pipeline fetched (verified 2026-08-28).
-export const DEFAULT_RSC_PRICING_URL = "https://commandcode.ai/docs/resources/pricing-limits"
-export const DEFAULT_RSC_GOAT_URL = "https://commandcode.ai/docs/plans/goat"
-export const DEFAULT_RSC_PRO_URL = "https://commandcode.ai/docs/plans/pro"
+// The RSC page catalog and the fetch/fixture ladder live in the shared
+// record source (issue #109) so the classification generator cannot drift
+// from the fetch semantics or grow a second copy of the fallback ladder.
+// The historical export names stay (the DEAL_SOURCE_URL emit and the
+// tests import them from here).
+export const DEFAULT_RSC_PRICING_URL = RSC_PAGES.pricing.defaultUrl
+export const DEFAULT_RSC_GOAT_URL = RSC_PAGES.goat.defaultUrl
+export const DEFAULT_RSC_PRO_URL = RSC_PAGES.pro.defaultUrl
 const DEFAULT_OUT = resolve(import.meta.dirname, "..", "src", "deals", "catalog.ts")
 
-// Coverage gate for the RSC path. `bySnapshotId` is the Map built by
-// `buildRscInputs` (the records are already snapshot-keyed by
-// extractPlanPageRsc, which applies the slug-id alias). A partial
-// catalog silently drops the TUI sidebar "Command Code" section for the
-// missing models, so refresh must fail loudly instead of emitting a
-// partial catalog (issue: Ox Alpha / DeepSeek V4 Flash Vision (exp)
-// showed no section because the fixtures predated them). `--allow-partial`
-// overrides for tooling that must not exit non-zero (e.g. the release
-// pipeline's non-blocking deals check).
-export function missingDealsModelsFromRsc(bySnapshotId) {
-  const { byId } = snapshotIndex()
-  const present = new Set(bySnapshotId.keys())
-  const missing = []
-  for (const [id] of byId) {
-    if (!present.has(id)) missing.push(id)
-  }
-  return { missing, covered: byId.size - missing.length }
-}
+// Coverage gate for the RSC path. Re-exported under its historical name:
+// the gate itself lives in the shared record source so the classification
+// generator reuses it without importing from the Deals generator
+// (issue #109). `bySnapshotId` is the Map built by `buildRscInputs` (the
+// records are already snapshot-keyed by extractPlanPageRsc, which applies
+// the slug-id alias). A partial catalog silently drops the TUI sidebar
+// "Command Code" section for the missing models, so refresh must fail
+// loudly instead of emitting a partial catalog (issue: Ox Alpha /
+// DeepSeek V4 Flash Vision (exp) showed no section because the fixtures
+// predated them). `--allow-partial` overrides for tooling that must not
+// exit non-zero (e.g. the release pipeline's non-blocking deals check).
+export { missingSnapshotModels as missingDealsModelsFromRsc } from "./rsc-source.mjs"
 
 function argValue(name) {
   const index = process.argv.indexOf(name)
@@ -352,112 +349,37 @@ export function emitDealsModuleFromRsc({
   })
 }
 
-async function readRscFixtures() {
-  const fixtures = resolve(import.meta.dirname, "..", "tests", "fixtures")
-  const [pricingRsc, goatRsc, proRsc] = await Promise.all([
-    readFile(resolve(fixtures, "rsc-pricing-limits.txt"), "utf-8"),
-    readFile(resolve(fixtures, "rsc-goat.txt"), "utf-8"),
-    readFile(resolve(fixtures, "rsc-pro.txt"), "utf-8"),
-  ])
-  return { pricingRsc, goatRsc, proRsc }
-}
-
-// A 4xx from an RSC endpoint is a configuration error (route moved, or
-// COMMANDCODE_RSC_*_URL overridden wrongly) — it must surface loudly,
-// never silently fall back to the fixtures. 5xx and network failures are
-// transient and fall back per the spec (the fixtures are the offline
-// source of truth for air-gapped runs).
-class RscHttpError extends Error {
-  constructor(status, label, url) {
-    super(
-      `refresh-deals: RSC ${label} returned HTTP ${status} (${url}) — the docs ` +
-        `route moved or a COMMANDCODE_RSC_*_URL override is wrong; fix the URL, ` +
-        `do not ship fixture data as if it were live`,
-    )
-    this.name = "RscHttpError"
-    this.status = status
-  }
-}
-
-async function fetchRscOrFail(url, label) {
-  let response
-  try {
-    response = await fetch(url, { headers: { rsc: "1" } })
-  } catch (error) {
-    console.error(`refresh-deals: could not fetch RSC ${label} (${url}): ${error.message}`)
-    return ""
-  }
-  if (response.status >= 500) {
-    console.error(
-      `refresh-deals: RSC ${label} returned ${response.status} — falling back to fixtures`,
-    )
-    return ""
-  }
-  if (!response.ok) {
-    throw new RscHttpError(response.status, label, url)
-  }
-  return response.text()
-}
-
 async function main() {
+  // RSC source resolution runs through the shared record source
+  // (scripts/rsc-source.mjs): --fixtures reads the committed fixtures
+  // offline; live fetch follows the ADR-0005 semantics (5xx/network →
+  // committed fixtures; 4xx → loud RscHttpError that propagates out of
+  // main and exits non-zero before anything is written).
+  const fixturesMode = process.argv.includes("--fixtures")
+  const urls = {}
+  for (const key of ["pricing", "goat", "pro"]) {
+    const page = RSC_PAGES[key]
+    const override = process.env[page.env]
+    if (override) urls[key] = override
+  }
   let pricingRsc
   let goatRsc
   let proRsc
-  if (process.argv.includes("--fixtures")) {
-    try {
-      ;({ pricingRsc, goatRsc, proRsc } = await readRscFixtures())
-    } catch (error) {
-      console.warn(
-        `refresh-deals: warning — could not read RSC fixtures (${error instanceof Error ? error.message : String(error)}) — emitting empty deals catalog`,
-      )
-      pricingRsc = ""
-      goatRsc = ""
-      proRsc = ""
-    }
-  } else {
-    const pricingUrl = process.env.COMMANDCODE_RSC_PRICING_URL ?? DEFAULT_RSC_PRICING_URL
-    const goatUrl = process.env.COMMANDCODE_RSC_GOAT_URL ?? DEFAULT_RSC_GOAT_URL
-    const proUrl = process.env.COMMANDCODE_RSC_PRO_URL ?? DEFAULT_RSC_PRO_URL
-    let livePricingRsc
-    let liveGoatRsc
-    let liveProRsc
-    try {
-      ;[livePricingRsc, liveGoatRsc, liveProRsc] = await Promise.all([
-        fetchRscOrFail(pricingUrl, "pricing-limits"),
-        fetchRscOrFail(goatUrl, "plans/goat"),
-        fetchRscOrFail(proUrl, "plans/pro"),
-      ])
-    } catch (error) {
-      // A 4xx is a config error — fail loudly instead of silently
-      // shipping fixture data. Only transient failures (5xx/network,
-      // already converted to "") fall back.
-      if (error instanceof RscHttpError) throw error
-      console.warn(
-        `refresh-deals: warning — RSC live fetch threw (${error instanceof Error ? error.message : String(error)}) — falling back to RSC fixtures`,
-      )
-      livePricingRsc = ""
-      liveGoatRsc = ""
-      liveProRsc = ""
-    }
-    const anyEmpty = !livePricingRsc || !liveGoatRsc || !liveProRsc
-    if (anyEmpty) {
-      console.warn("refresh-deals: warning — RSC live fetch failed — falling back to RSC fixtures")
-      try {
-        ;({ pricingRsc, goatRsc, proRsc } = await readRscFixtures())
-        console.warn("refresh-deals: warning — using RSC fixtures for deals catalog")
-      } catch (error) {
-        console.warn(
-          `refresh-deals: warning — RSC fixtures unavailable (${error instanceof Error ? error.message : String(error)}) — emitting empty deals catalog`,
-        )
-        pricingRsc = ""
-        goatRsc = ""
-        proRsc = ""
-      }
-    } else {
-      pricingRsc = livePricingRsc
-      goatRsc = liveGoatRsc
-      proRsc = liveProRsc
-    }
+  try {
+    ;({
+      pricing: pricingRsc,
+      goat: goatRsc,
+      pro: proRsc,
+    } = await loadRscPages({
+      keys: ["pricing", "goat", "pro"],
+      mode: fixturesMode ? "fixtures" : "live",
+      urls,
+      fixturesDir: argValue("--fixtures-dir"),
+      prefix: "refresh-deals",
+    }))
+  } catch (error) {
+    console.error(`refresh-deals: ${error instanceof Error ? error.message : String(error)}`)
+    process.exit(1)
   }
 
   const out = argValue("--out") ?? DEFAULT_OUT
@@ -475,9 +397,9 @@ async function main() {
     // "Command Code" section for the missing models. The RSC path
     // keys records by snapshot id directly (extractPlanPageRsc
     // applies the alias), so the gate is a direct id-set comparison
-    // via missingDealsModelsFromRsc.
+    // via the shared missingSnapshotModels gate.
     if (!process.argv.includes("--allow-partial")) {
-      const { missing, covered } = missingDealsModelsFromRsc(bySnapshotId)
+      const { missing, covered } = missingSnapshotModels(bySnapshotId)
       if (missing.length > 0) {
         console.error(
           `refresh-deals: aborting — ${missing.length} snapshot model(s) have no RSC record ` +
