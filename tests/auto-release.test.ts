@@ -308,6 +308,19 @@ run([
       assert(workflow.includes("skip-release"), workflow)
       // Concurrency-serialized (safety rail).
       assert(workflow.includes("concurrency:"), workflow)
+      // The checkout must NOT persist the default token credential: it
+      // would override the push token (run 33683416448 failed exactly
+      // this way — push ran as github-actions[bot] and was rule-rejected).
+      assert(
+        workflow.includes("persist-credentials: false"),
+        "checkout must set persist-credentials: false so the push uses RELEASE_PUSH_TOKEN",
+      )
+      // The push step must clear any inherited credential header before
+      // rewriting the remote URL (defence in depth).
+      assert(
+        workflow.includes("git config --unset-all http.https://github.com/.extraheader"),
+        "the push step must clear the inherited extraheader before pushing",
+      )
       // The tag-existence rail must gate the PUSH step too — a full skip
       // means no commit, no tag, and no push.
       assert(
