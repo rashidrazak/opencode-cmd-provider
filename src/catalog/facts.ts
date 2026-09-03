@@ -5,10 +5,10 @@
 // modalities parsed from its CLI bundle (dist/cli.mjs). Regenerate
 // with `npm run refresh:snapshot`.
 
-export const FACTS_SOURCE_URL = "https://unpkg.com/command-code@1.44.0/dist/bundled/command-code-knowledge/reference/models.md"
-export const MODALITIES_SOURCE_URL = "https://unpkg.com/command-code@1.44.0/dist/cli.mjs"
-export const FACTS_PACKAGE_VERSION = "1.44.0"
-export const FACTS_LAST_REFRESHED = "2026-09-02"
+export const FACTS_SOURCE_URL = "https://unpkg.com/command-code@1.46.0/dist/bundled/command-code-knowledge/reference/models.md"
+export const MODALITIES_SOURCE_URL = "https://unpkg.com/command-code@1.46.0/dist/cli.mjs"
+export const FACTS_PACKAGE_VERSION = "1.46.0"
+export const FACTS_LAST_REFRESHED = "2026-09-03"
 
 export const MODEL_EFFORTS: Readonly<Record<string, readonly string[]>> = {
   "deepseek/deepseek-v4-pro": ["high","max"],
@@ -45,6 +45,11 @@ export const MODEL_EFFORTS: Readonly<Record<string, readonly string[]>> = {
   "google/gemini-3.5-flash-lite": ["low","medium","high"],
   "google/gemini-3.1-flash-lite": ["low","medium","high"],
   "sakana/fugu-ultra": ["high","xhigh"],
+  "meta/muse-spark-1.1": ["low","medium","high","xhigh"],
+  "meta/muse-spark-1.2": ["low","medium","high","xhigh"],
+  "meta/muse-spark-1.2-contributor": ["low","medium","high","xhigh"],
+  "meta/muse-spark-1.3": ["low","medium","high","xhigh"],
+  "meta/muse-spark-1.3-contributor": ["low","medium","high","xhigh"],
   "xai/grok-4.5": ["low","medium","high"],
   "xai/grok-4.6": ["low","medium","high","xhigh"],
 }
