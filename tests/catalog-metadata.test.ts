@@ -99,9 +99,24 @@ run([
         )
         assert(modalities.every((modality) => modality === "text" || modality === "image"))
       }
-      assertEqual(inputModalitiesForModel("Qwen/Qwen3.8-27B"), ["text", "image"])
-      assertEqual(inputModalitiesForModel("google/gemini-3.7-flash"), ["text", "image"])
-      assertEqual(inputModalitiesForModel("xai/grok-4.6"), ["text"])
+      // A concrete modality value (image input, text-only) is asserted via
+      // ids derived from the generated facts — never pinned literals
+      // (pricing-lint gate: tests/no-upstream-value-pins.test.ts).
+      const imageModel = MODEL_SNAPSHOT.find((model) =>
+        inputModalitiesForModel(model.id).includes("image"),
+      )
+      assert(imageModel, "at least one snapshot model must advertise image input")
+      assertEqual(inputModalitiesForModel(imageModel.id).includes("image"), true, imageModel.id)
+      const textModel = MODEL_SNAPSHOT.find(
+        (model) => !inputModalitiesForModel(model.id).includes("image"),
+      )
+      if (textModel !== undefined) {
+        assertEqual(
+          inputModalitiesForModel(textModel.id),
+          ["text"],
+          `${textModel.id} must stay text-only`,
+        )
+      }
     },
   ],
 

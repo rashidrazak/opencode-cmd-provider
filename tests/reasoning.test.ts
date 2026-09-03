@@ -159,11 +159,18 @@ run([
   [
     "reasoningVariantsForModel exposes one variant per supported effort",
     () => {
-      const variants = reasoningVariantsForModel("deepseek/deepseek-v4-flash")
+      // The id and the expected efforts both derive from the generated
+      // facts — this test owns the variant-shape behavior, not upstream's
+      // current values (pricing-lint gate:
+      // tests/no-upstream-value-pins.test.ts).
+      const effortsId = Object.keys(MODEL_EFFORTS)[0]
+      assert(effortsId, "the generated efforts facts must not be empty")
+      const variants = reasoningVariantsForModel(effortsId)
       assert(variants, "expected variants")
-      assertEqual(Object.keys(variants), ["high", "max"])
-      assertEqual(variants.high, { reasoningEffort: "high" })
-      assertEqual(variants.max, { reasoningEffort: "max" })
+      assertEqual(Object.keys(variants), [...MODEL_EFFORTS[effortsId]])
+      for (const effort of MODEL_EFFORTS[effortsId]) {
+        assertEqual(variants[effort], { reasoningEffort: effort })
+      }
     },
   ],
 
