@@ -2,6 +2,7 @@
 // port of pi's test-models.ts reasoning subset)
 import {
   MODEL_EFFORTS,
+  REASONING_MODELS,
   deriveReasoningWithoutEfforts,
   isReasoningModel,
   mappedReasoningEffort,
@@ -54,11 +55,22 @@ run([
   [
     "known reasoning models expose an effort map",
     () => {
-      const meta = thinkingMetadataForModel("claude-sonnet-5")
+      // The id is derived from the generated efforts facts, not pinned:
+      // upstream can promote or retire any model at any time (the muse-spark
+      // promotion of 2026-09-03), and this check owns the *mapping
+      // behavior*, not upstream's values.
+      const effortsId = Object.keys(MODEL_EFFORTS)[0]
+      assert(effortsId, "the generated efforts facts must not be empty")
+      const efforts = MODEL_EFFORTS[effortsId]
+      const meta = thinkingMetadataForModel(effortsId)
       assert(meta, "expected metadata")
       assertEqual(meta.thinking.mode, "effort")
-      assertEqual(meta.thinkingLevelMap.high, "high")
-      assertEqual(meta.thinkingLevelMap.minimal, null)
+      for (const effort of efforts) {
+        assertEqual(meta.thinkingLevelMap[effort], effort)
+        assertEqual(meta.thinking.effortMap[effort], effort)
+      }
+      // A level upstream does not advertise maps to null (cycling off).
+      assertEqual(meta.thinkingLevelMap.minimal, efforts.includes("minimal") ? "minimal" : null)
     },
   ],
 
@@ -67,7 +79,11 @@ run([
     () => {
       assertEqual(thinkingMetadataForModel("brand-new/model"), undefined)
       assertEqual(isReasoningModel("brand-new/model"), false)
-      assertEqual(isReasoningModel("claude-sonnet-5"), true)
+      // The positive control derives from the generated catalogs rather
+      // than pinning a specific upstream id.
+      const knownId = Object.keys(MODEL_EFFORTS)[0] ?? [...REASONING_MODELS][0]
+      assert(knownId, "the generated catalogs must expose at least one reasoning model")
+      assertEqual(isReasoningModel(knownId), true)
     },
   ],
 
@@ -143,11 +159,18 @@ run([
   [
     "reasoningVariantsForModel exposes one variant per supported effort",
     () => {
-      const variants = reasoningVariantsForModel("deepseek/deepseek-v4-flash")
+      // The id and the expected efforts both derive from the generated
+      // facts — this test owns the variant-shape behavior, not upstream's
+      // current values (pricing-lint gate:
+      // tests/no-upstream-value-pins.test.ts).
+      const effortsId = Object.keys(MODEL_EFFORTS)[0]
+      assert(effortsId, "the generated efforts facts must not be empty")
+      const variants = reasoningVariantsForModel(effortsId)
       assert(variants, "expected variants")
-      assertEqual(Object.keys(variants), ["high", "max"])
-      assertEqual(variants.high, { reasoningEffort: "high" })
-      assertEqual(variants.max, { reasoningEffort: "max" })
+      assertEqual(Object.keys(variants), [...MODEL_EFFORTS[effortsId]])
+      for (const effort of MODEL_EFFORTS[effortsId]) {
+        assertEqual(variants[effort], { reasoningEffort: effort })
+      }
     },
   ],
 

@@ -112,13 +112,28 @@ run([
         )
         assert(contents.includes("Do not edit"), "missing do-not-edit marker")
         const mod = await import(out)
-        assertEqual(mod.MODEL_REASONING_CAPABILITY["claude-sonnet-5"], true)
-        assertEqual(mod.MODEL_REASONING_CAPABILITY["moonshotai/Kimi-K2.6"], false)
-        assertEqual(mod.MODEL_REASONING_CAPABILITY["tencent/hy3-paid"], true)
+        // Values are asserted via snapshot-derived ids, not pinned literals
+        // (pricing-lint gate: tests/no-upstream-value-pins.test.ts). The
+        // generator consumed the real RSC fixtures, so a snapshot model
+        // present in the fixture RSC records classifies true, and one
+        // absent from them classifies false — whichever models those are
+        // after any upstream churn.
+        const { byId: fixtureById } = snapshotIndex()
+        const { extractPlanPageRsc } = await import("../scripts/parse-rsc.mjs")
+        const fixtureIds = new Set([
+          ...extractPlanPageRsc(RSC_GOAT).keys(),
+          ...extractPlanPageRsc(RSC_PRO).keys(),
+        ])
+        const coveredId = [...fixtureById.keys()].find((id) => fixtureIds.has(id))
+        const uncoveredId = [...fixtureById.keys()].find((id) => !fixtureIds.has(id))
+        assert(coveredId, "at least one snapshot model must appear in the RSC fixtures")
+        assertEqual(mod.MODEL_REASONING_CAPABILITY[coveredId], true, coveredId)
+        if (uncoveredId !== undefined) {
+          assertEqual(mod.MODEL_REASONING_CAPABILITY[uncoveredId], false, uncoveredId)
+        }
         assertEqual(mod.CLASSIFICATION_LAST_REFRESHED, TODAY)
         // Every snapshot model got an entry — the coverage gate held.
-        const { byId } = snapshotIndex()
-        for (const id of byId.keys()) {
+        for (const id of fixtureById.keys()) {
           assertEqual(typeof mod.MODEL_REASONING_CAPABILITY[id], "boolean", id)
         }
       } finally {

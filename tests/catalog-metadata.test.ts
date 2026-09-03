@@ -63,34 +63,27 @@ run([
   ],
 
   [
-    "muse-spark-1.2-contributor pricing matches the published rates",
+    "muse-spark pricing is covered by the synthetic parser fixture, not pinned here",
     () => {
-      // Live page (2026-08-19): In $0.100 / Out $0.200 / Cache $0.0020, and no
-      // cache-write rate is published (shown as "—"), so cacheWrite stays 0.
-      assertEqual(MODEL_COSTS["meta/muse-spark-1.2-contributor"], {
-        input: 0.1,
-        output: 0.2,
-        cacheRead: 0.002,
-        cacheWrite: 0,
-      })
-    },
-  ],
-
-  [
-    "muse-spark-1.1/1.2 pricing matches the published rates",
-    () => {
-      assertEqual(MODEL_COSTS["meta/muse-spark-1.1"], {
-        input: 1.25,
-        output: 4.25,
-        cacheRead: 0.15,
-        cacheWrite: 0,
-      })
-      assertEqual(MODEL_COSTS["meta/muse-spark-1.2"], {
-        input: 1.25,
-        output: 4.25,
-        cacheRead: 0.15,
-        cacheWrite: 0,
-      })
+      // Upstream *values* moved to tests/parse-facts.test.ts over the
+      // synthetic models.md fixture (spec #108 story 8): a real upstream
+      // price change must surface as a refresh-PR diff, never as a red
+      // test. Here only the relation is asserted: the ids used to be pinned
+      // stay resolvable from the generated facts as long as upstream lists
+      // them.
+      for (const id of [
+        "meta/muse-spark-1.2-contributor",
+        "meta/muse-spark-1.1",
+        "meta/muse-spark-1.2",
+      ]) {
+        if (!MODEL_SNAPSHOT.some((model) => model.id === id)) continue
+        const costs = MODEL_COSTS[id]
+        assert(costs, `${id} must keep a generated cost entry while upstream lists it`)
+        assert(
+          costs.input > 0 && costs.output > 0,
+          `${id} is a paid model; a zero entry would mean a parsing regression`,
+        )
+      }
     },
   ],
 
@@ -106,9 +99,24 @@ run([
         )
         assert(modalities.every((modality) => modality === "text" || modality === "image"))
       }
-      assertEqual(inputModalitiesForModel("Qwen/Qwen3.8-27B"), ["text", "image"])
-      assertEqual(inputModalitiesForModel("google/gemini-3.7-flash"), ["text", "image"])
-      assertEqual(inputModalitiesForModel("xai/grok-4.6"), ["text"])
+      // A concrete modality value (image input, text-only) is asserted via
+      // ids derived from the generated facts — never pinned literals
+      // (pricing-lint gate: tests/no-upstream-value-pins.test.ts).
+      const imageModel = MODEL_SNAPSHOT.find((model) =>
+        inputModalitiesForModel(model.id).includes("image"),
+      )
+      assert(imageModel, "at least one snapshot model must advertise image input")
+      assertEqual(inputModalitiesForModel(imageModel.id).includes("image"), true, imageModel.id)
+      const textModel = MODEL_SNAPSHOT.find(
+        (model) => !inputModalitiesForModel(model.id).includes("image"),
+      )
+      if (textModel !== undefined) {
+        assertEqual(
+          inputModalitiesForModel(textModel.id),
+          ["text"],
+          `${textModel.id} must stay text-only`,
+        )
+      }
     },
   ],
 

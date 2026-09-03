@@ -59,6 +59,31 @@ run([
   ],
 
   [
+    "fine-grained contributor rates parse exactly (moved from artifact value pins, issue #108 story 8)",
+    async () => {
+      // These upstream *values* were once pinned against the generated
+      // artifact (tests/catalog-metadata.test.ts); upstream can move them at
+      // any time, so they live here over a synthetic fixture instead. The
+      // artifact tests keep only the relation "every snapshot model has a
+      // cost entry".
+      const md = await readFile(FIXTURE, "utf-8")
+      const facts = parseFactsMarkdown(md)
+      assertEqual(facts.costs["meta/muse-spark-1.2-contributor"], {
+        input: 0.1,
+        output: 0.2,
+        cacheRead: 0.002,
+        cacheWrite: 0,
+      })
+      assertEqual(facts.costs["meta/muse-spark-1.1"], {
+        input: 1.25,
+        output: 4.25,
+        cacheRead: 0.15,
+        cacheWrite: 0,
+      })
+    },
+  ],
+
+  [
     "unparseable pricing rows fail loudly",
     () => {
       const md = "| `x/y` | X Y | 1M | low | $nope/$1 · cache $0.2 | Go | best |\n"

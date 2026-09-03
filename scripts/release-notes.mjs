@@ -61,14 +61,30 @@ export function buildChangelogSection({ version, date, prBody }) {
     current.lines.push(line)
   }
   const semantic = sections.filter((section) => section.title.toLowerCase() !== "changed files")
+  // A section whose body carries no table rows and no substantive list
+  // content beyond the diff tool's date line is **empty noise** (the 1.6.3
+  // release note was a bare "### Model catalog" followed by a date line
+  // and "No changes."). Release notes must state what actually changed;
+  // sections with no change rows are dropped so the CHANGELOG never shows
+  // an empty heading.
+  const meaningful = semantic.filter((section) => {
+    const body = section.lines.filter((line) => line.trim() !== "")
+    if (body.length === 0) return false
+    // A table row (| ...) means the diff tool emitted actual changes.
+    if (body.some((line) => /^\|/.test(line))) return true
+    // Otherwise: any list item other than the `- **...LAST_REFRESHED**:`
+    // date line is a legacy prose diff line — treat it as content.
+    return body.some((line) => /^\s*[-*+]\s/.test(line) && !/LAST_REFRESHED\*\*/.test(line))
+  })
   const out = [`## ${version} - ${date}`]
-  if (semantic.length === 0) {
-    // The PR body is untrusted and may not carry the expected sections;
-    // the release still ships with a minimal, honest entry.
+  if (meaningful.length === 0) {
+    // The PR body may not carry any substantive sections (pure date
+    // churn or an unexpected shape); the release still ships with a
+    // minimal, honest entry.
     out.push("", "Automated catalog refresh.", "")
     return collapseBlankLines(out)
   }
-  for (const section of semantic) {
+  for (const section of meaningful) {
     out.push("", `### ${section.title}`)
     // Trim trailing blank lines per section so the join is deterministic
     // regardless of upstream spacing churn.
@@ -94,6 +110,7 @@ export function buildChangelogSection({ version, date, prBody }) {
 function collapseBlankLines(lines) {
   const out = []
   const isListItem = (line) => /^\s*(?:[-*+]|\d+[.)])\s/.test(line)
+  const isTableRow = (line) => /^\s*\|/.test(line)
   for (const line of lines) {
     if (line.trim() === "") {
       if (out.length === 0 || out[out.length - 1] === "") continue
@@ -102,9 +119,14 @@ function collapseBlankLines(lines) {
     }
     // A paragraph line right after a list item is a lazy continuation in
     // Markdown — Prettier re-indents it, so break it out with a blank line.
+    // Table rows are atomic: a table directly after a list/paragraph line
+    // also needs the separating blank (Prettier would otherwise treat the
+    // table as the paragraph's lazy continuation and indent it).
     if (
       out.length > 0 &&
-      isListItem(out[out.length - 1]) &&
+      out[out.length - 1] !== "" &&
+      ((isListItem(out[out.length - 1]) && !isTableRow(line)) ||
+        (isTableRow(line) && !isTableRow(out[out.length - 1]))) &&
       !isListItem(line) &&
       !line.startsWith("#") &&
       !line.startsWith("```")

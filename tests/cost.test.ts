@@ -3,6 +3,14 @@
 import { calculateCommandCodeCost, costUsageFromAiSdkUsage } from "../src/provider/cost.js"
 import { MODEL_COSTS } from "../src/provider/pricing.js"
 import { assertEqual, run } from "./harness.js"
+import { assert } from "./harness.js"
+import { MODEL_EFFORTS } from "../src/provider/reasoning.js"
+
+// Any resolvable generated cost entry works as the arithmetic fixture — the
+// pricing-lint gate (tests/no-upstream-value-pins.test.ts) forbids pinning a
+// literal model id, so the id is derived from the generated facts at runtime.
+const ARITHMETIC_MODEL_ID = Object.keys(MODEL_EFFORTS)[0] ?? "vendor/derived-fixture"
+assert(MODEL_COSTS[ARITHMETIC_MODEL_ID], "the derived arithmetic fixture must have a cost entry")
 
 function usage(
   input: number,

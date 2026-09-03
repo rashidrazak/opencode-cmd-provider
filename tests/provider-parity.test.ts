@@ -22,6 +22,8 @@ import {
 import { assert, assertEqual, rejects, run } from "./harness.js"
 import { calculateCommandCodeCost, costUsageFromAiSdkUsage } from "../src/provider/cost.js"
 import { MODEL_COSTS } from "../src/provider/pricing.js"
+import { MODEL_EFFORTS } from "../src/provider/reasoning.js"
+import { assert } from "./harness.js"
 
 type Model = ReturnType<ReturnType<typeof createCommandCode>["languageModel"]>
 
@@ -830,9 +832,13 @@ run([
       }
       const finishOf = (parts: Array<Record<string, unknown>>) =>
         parts.find((p) => p.type === "finish") as { usage?: unknown }
+      // The cost entry comes from the generated facts by derivation, not a
+      // pinned id (pricing-lint gate: tests/no-upstream-value-pins.test.ts).
+      const parityCostId = Object.keys(MODEL_EFFORTS)[0]
+      assert(parityCostId, "the generated efforts facts must not be empty")
       const costOf = (usage: unknown) => {
         const cu = costUsageFromAiSdkUsage(usage as never)
-        calculateCommandCodeCost({ cost: MODEL_COSTS["claude-sonnet-5"] }, cu)
+        calculateCommandCodeCost({ cost: MODEL_COSTS[parityCostId] }, cu)
         return cu.cost.total
       }
       // legacy

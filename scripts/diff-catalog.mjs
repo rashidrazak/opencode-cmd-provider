@@ -76,6 +76,8 @@ import { readFile } from "node:fs/promises"
  * @property {string} [beforeDate]         Last-refreshed date from the "before" side (e.g. FACTS_LAST_REFRESHED). Optional.
  * @property {string} [afterDate]          Last-refreshed date from the "after" side. Optional.
  * @property {string} [dateLabel]          Human label for the date pair (e.g. "FACTS_LAST_REFRESHED"). Defaults to "Last refreshed".
+ * @property {unknown} [beforeFacts]       The "before" facts payload (MODEL_COSTS / MODEL_EFFORTS) — the snapshot kind diffs base pricing and efforts when provided.
+ * @property {unknown} [afterFacts]        The "after" facts payload.
  */
 
 /**
@@ -84,6 +86,8 @@ import { readFile } from "node:fs/promises"
  * @property {string} [beforeDate]
  * @property {string} [afterDate]
  * @property {string} [dateLabel]
+ * @property {string} [beforeFactsPath]
+ * @property {string} [afterFactsPath]
  */
 
 const DEFAULT_LABELS = {
@@ -207,144 +211,220 @@ function peakOffPeakString(pop) {
     : `peak ${peakStr} · off-peak ${offStr}`
 }
 
+// ---------------------------------------------------------------------------
+// Markdown table rendering. Tables are the release-notes contract (issue:
+// "the auto-release must state which models were added, removed, and
+// changed — pricing, efforts, etc."). The renderer emits tables already in
+// Prettier's normal form — pipe-padded to the widest cell per column — so
+// the release pipeline's `format:check` passes on the emitted CHANGELOG
+// without a Prettier run inside the workflow. Verified against Prettier's
+// markdown table normalization: `| --- |` separators, no leading/trailing
+// pipes dropped, one space inside each cell border.
+// ---------------------------------------------------------------------------
+
 /**
- * Build the per-model diff lines for a `snapshot` kind. Reports
- * `name` and `contextLength` changes (id changes are reported as
- * add+remove, not as a per-field change).
+ * Renders rows as a padded Markdown table. `rows[0]` is the header.
+ * Deterministic: same rows → same bytes. An empty row list returns [].
  *
- * @param {string} id
- * @param {CatalogModel} before
- * @param {CatalogModel} after
+ * @param {string[][]} rows header + body rows; every row must have the
+ *   same column count as the header
  * @returns {string[]}
  */
-function snapshotModelDiffLines(id, before, after) {
-  const lines = []
-  if (before.name !== after.name) {
-    lines.push(`- \`${id}\`: name \`${before.name}\` → \`${after.name}\``)
+function renderTable(rows) {
+  if (rows.length === 0) return []
+  const columns = rows[0].length
+  const widths = []
+  for (const row of rows) {
+    if (row.length !== columns) {
+      throw new Error(
+        `renderTable: row has ${row.length} cells, expected ${columns}: ${JSON.stringify(row)}`,
+      )
+    }
+    for (let c = 0; c < columns; c++) {
+      widths[c] = Math.max(widths[c] ?? 0, row[c].length)
+    }
   }
-  if (before.contextLength !== after.contextLength) {
-    lines.push(
-      `- \`${id}\`: contextLength \`${before.contextLength}\` → \`${after.contextLength}\``,
-    )
+  const pad = (cell, width) => ` ${cell.padEnd(width)} `
+  const out = []
+  for (let r = 0; r < rows.length; r++) {
+    const cells = rows[r].map((cell, c) => pad(cell, widths[c]))
+    out.push(`|${cells.join("|")}|`)
+    if (r === 0) {
+      out.push(`|${widths.map((w) => ` ${"-".repeat(Math.max(w, 1))} `).join("|")}|`)
+    }
   }
-  return lines
+  return out
+}
+
+/**
+ * Formats a base-pricing entry (`MODEL_COSTS` shape) as
+ * `in X / out Y / cache Z / write W`. The `—` placeholder keeps the table
+ * column aligned when a side lacks the entry.
+ *
+ * @param {unknown} rates
+ * @returns {string}
+ */
+function baseCostString(rates) {
+  if (!rates || typeof rates !== "object") return "—"
+  const r = /** @type {Record<string, unknown>} */ (rates)
+  const parts = ["input", "output", "cacheRead", "cacheWrite"].map((key) =>
+    typeof r[key] === "number" ? `${key} ${r[key]}` : null,
+  )
+  const present = parts.filter((part) => part !== null)
+  return present.length > 0 ? present.join(" / ") : "—"
+}
+
+/**
+ * Normalizes a raw extracted facts payload into { missing, costs,
+ * efforts }. Accepts the cron's module-export wrapper keys and the bare
+ * names. A payload without either map is "missing".
+ *
+ * @param {unknown} value
+ * @returns {{ missing: boolean, costs: Record<string, unknown>, efforts: Record<string, string[]> }}
+ */
+function factsPayloadOf(value) {
+  const rec = asRecord(value)
+  if (!rec) return { missing: true, costs: {}, efforts: {} }
+  const costs = asRecord(rec.MODEL_COSTS ?? rec.costs) ?? {}
+  const efforts = asRecord(rec.MODEL_EFFORTS ?? rec.efforts) ?? {}
+  const missing =
+    (rec.MODEL_COSTS ?? rec.costs) === undefined && (rec.MODEL_EFFORTS ?? rec.efforts) === undefined
+  return { missing, costs, efforts: /** @type {Record<string, string[]>} */ (efforts) }
+}
+
+/**
+ * Build the change rows for a `snapshot` kind. Reports `name`,
+ * `contextLength`, base pricing (from the facts payload when provided),
+ * and efforts (likewise). Added/removed models are one row each with the
+ * full row visible on its new side.
+ *
+ * @param {Map<string, unknown>} beforeIndex
+ * @param {Map<string, unknown>} afterIndex
+ * @param {{ before: ReturnType<typeof factsPayloadOf>, after: ReturnType<typeof factsPayloadOf> }} facts
+ * @returns {{ rows: string[][], empty: boolean }}
+ */
+function snapshotChangeRows(beforeIndex, afterIndex, facts) {
+  const ids = [...new Set([...beforeIndex.keys(), ...afterIndex.keys()])].sort((a, b) =>
+    a.localeCompare(b),
+  )
+  const rows = []
+  for (const id of ids) {
+    const before = /** @type {CatalogModel | undefined} */ (beforeIndex.get(id))
+    const after = /** @type {CatalogModel | undefined} */ (afterIndex.get(id))
+    const nameOf = (model) => (model ? model.name : "—")
+    const ctxOf = (model) => (model ? String(model.contextLength) : "—")
+    const beforeCost = facts.before.costs[id]
+    const afterCost = facts.after.costs[id]
+    const beforeEfforts = facts.before.efforts[id]
+    const afterEfforts = facts.after.efforts[id]
+    const costChanged = JSON.stringify(beforeCost ?? null) !== JSON.stringify(afterCost ?? null)
+    const effortsChanged =
+      JSON.stringify(beforeEfforts ?? null) !== JSON.stringify(afterEfforts ?? null)
+    if (!before) {
+      rows.push([`\`${id}\``, "added", "—", `${nameOf(after)} · ${ctxOf(after)} ctx`])
+      continue
+    }
+    if (!after) {
+      rows.push([`\`${id}\``, "removed", `${nameOf(before)} · ${ctxOf(before)} ctx`, "—"])
+      continue
+    }
+    const nameChanged = before.name !== after.name
+    const ctxChanged = before.contextLength !== after.contextLength
+    if (nameChanged || ctxChanged) {
+      rows.push([
+        `\`${id}\``,
+        [nameChanged ? "renamed" : null, ctxChanged ? "context" : null]
+          .filter((part) => part !== null)
+          .join(" + "),
+        `${nameOf(before)} · ${ctxOf(before)} ctx`,
+        `${nameOf(after)} · ${ctxOf(after)} ctx`,
+      ])
+    }
+    if (costChanged) {
+      rows.push([`\`${id}\``, "pricing", baseCostString(beforeCost), baseCostString(afterCost)])
+    }
+    if (effortsChanged) {
+      rows.push([
+        `\`${id}\``,
+        "efforts",
+        beforeEfforts ? beforeEfforts.join(", ") : "—",
+        afterEfforts ? afterEfforts.join(", ") : "—",
+      ])
+    }
+  }
+  return { rows, empty: rows.length === 0 }
 }
 
 /**
  * Build the per-model diff lines for a `deals` kind. Reports every
  * field-level change. Ignores `id` (id changes are add+remove).
  *
- * @param {string} id
- * @param {ModelDeals} before
- * @param {ModelDeals} after
- * @returns {string[]}
+ * @param {Map<string, unknown>} beforeIndex
+ * @param {Map<string, unknown>} afterIndex
+ * @returns {{ rows: string[][], empty: boolean }}
  */
-function dealsModelDiffLines(id, before, after) {
-  const lines = []
-  if (before.tier !== after.tier) {
-    lines.push(`- \`${id}\`: tier \`${before.tier ?? "—"}\` → \`${after.tier ?? "—"}\``)
-  }
-  if (before.free !== after.free) {
-    lines.push(`- \`${id}\`: free \`${String(before.free)}\` → \`${String(after.free)}\``)
-  }
-  if (!ratesEqual(before.was, after.was)) {
-    lines.push(`- \`${id}\`: was ${rateString(before.was)} → ${rateString(after.was)}`)
-  }
-  if (!ratesEqual(before.now, after.now)) {
-    lines.push(`- \`${id}\`: now ${rateString(before.now)} → ${rateString(after.now)}`)
-  }
-  if (!discountEqual(before.discount, after.discount)) {
-    lines.push(
-      `- \`${id}\`: discount ${discountString(before.discount)} → ${discountString(after.discount)}`,
-    )
-  }
-  if (!allowanceEqual(before.allowance, after.allowance)) {
-    lines.push(
-      `- \`${id}\`: allowance ${allowanceString(before.allowance)} → ${allowanceString(after.allowance)}`,
-    )
-  }
-  if (!peakOffPeakEqual(before.peakOffPeak, after.peakOffPeak)) {
-    lines.push(
-      `- \`${id}\`: peakOffPeak ${peakOffPeakString(before.peakOffPeak)} → ${peakOffPeakString(after.peakOffPeak)}`,
-    )
-  }
-  if (!ratesEqual4(before.overContext, after.overContext)) {
-    lines.push(
-      `- \`${id}\`: overContext ${dealRatesString(before.overContext)} → ${dealRatesString(after.overContext)}`,
-    )
-  }
-  if (!benchmarkEqual(before.benchmark, after.benchmark)) {
-    const beforeStr = before.benchmark
-      ? `intelligence ${before.benchmark.intelligence ?? "—"}, tok/s ${before.benchmark.tokPerSec ?? "—"}`
-      : "—"
-    const afterStr = after.benchmark
-      ? `intelligence ${after.benchmark.intelligence ?? "—"}, tok/s ${after.benchmark.tokPerSec ?? "—"}`
-      : "—"
-    lines.push(`- \`${id}\`: benchmark ${beforeStr} → ${afterStr}`)
-  }
-  return lines
-}
-
-function ratesEqual(a, b) {
-  return (
-    (a === undefined && b === undefined) ||
-    (a !== undefined &&
-      b !== undefined &&
-      a.input === b.input &&
-      a.output === b.output &&
-      a.cacheRead === b.cacheRead)
+function dealsChangeRows(beforeIndex, afterIndex) {
+  const ids = [...new Set([...beforeIndex.keys(), ...afterIndex.keys()])].sort((a, b) =>
+    a.localeCompare(b),
   )
-}
-
-function ratesEqual4(a, b) {
-  return (
-    (a === undefined && b === undefined) ||
-    (a !== undefined &&
-      b !== undefined &&
-      a.input === b.input &&
-      a.output === b.output &&
-      a.cacheRead === b.cacheRead &&
-      a.cacheWrite === b.cacheWrite)
-  )
-}
-
-function discountEqual(a, b) {
-  if (a === undefined && b === undefined) return true
-  if (a === undefined || b === undefined) return false
-  return a.pct === b.pct && (a.endsAt ?? null) === (b.endsAt ?? null)
-}
-
-function allowanceEqual(a, b) {
-  if (a === undefined && b === undefined) return true
-  if (a === undefined || b === undefined) return false
-  const ak = Object.keys(a).sort()
-  const bk = Object.keys(b).sort()
-  if (ak.length !== bk.length) return false
-  for (let i = 0; i < ak.length; i++) {
-    if (ak[i] !== bk[i]) return false
-    if (a[ak[i]] !== b[bk[i]]) return false
+  const rows = []
+  for (const id of ids) {
+    const before = /** @type {ModelDeals | undefined} */ (beforeIndex.get(id))
+    const after = /** @type {ModelDeals | undefined} */ (afterIndex.get(id))
+    const tierOf = (deal) => `${deal?.tier ?? "—"}${deal?.free ? " (free)" : ""}`
+    if (!before) {
+      rows.push([`\`${id}\``, "added", "—", tierOf(after)])
+      continue
+    }
+    if (!after) {
+      rows.push([`\`${id}\``, "removed", tierOf(before), "—"])
+      continue
+    }
+    const fieldRows = [
+      ["tier", tierOf(before), tierOf(after)],
+      ["free", String(before.free), String(after.free)],
+      ["was rates", rateString(before.was), rateString(after.was)],
+      ["now rates", rateString(before.now), rateString(after.now)],
+      ["discount", discountString(before.discount), discountString(after.discount)],
+      ["allowance", allowanceString(before.allowance), allowanceString(after.allowance)],
+      ["peakOffPeak", peakOffPeakString(before.peakOffPeak), peakOffPeakString(after.peakOffPeak)],
+      ["overContext", dealRatesString(before.overContext), dealRatesString(after.overContext)],
+      ["benchmark", benchmarkString(before.benchmark), benchmarkString(after.benchmark)],
+    ]
+    for (const [field, beforeStr, afterStr] of fieldRows) {
+      if (beforeStr !== afterStr) {
+        rows.push([`\`${id}\``, field, beforeStr, afterStr])
+      }
+    }
   }
-  return true
+  return { rows, empty: rows.length === 0 }
 }
 
-function peakOffPeakEqual(a, b) {
-  if (a === undefined && b === undefined) return true
-  if (a === undefined || b === undefined) return false
-  return (
-    (a.windows ?? "") === (b.windows ?? "") &&
-    ratesEqual4(a.peak, b.peak) &&
-    ratesEqual4(a.offPeak, b.offPeak)
-  )
+/**
+ * Canonical `tier` string (the old prose renderer wrapped it in backticks;
+ * the table keeps plain text).
+ *
+ * @param {ModelDeals | undefined} deal
+ * @returns {string}
+ */
+function dealsTierString(deal) {
+  return deal?.tier ?? "—"
 }
 
-function benchmarkEqual(a, b) {
-  if (a === undefined && b === undefined) return true
-  if (a === undefined || b === undefined) return false
-  return (
-    (a.intelligence ?? null) === (b.intelligence ?? null) &&
-    (a.tokPerSec ?? null) === (b.tokPerSec ?? null)
-  )
+/**
+ * Canonical benchmark string.
+ *
+ * @param {ModelDeals["benchmark"]} benchmark
+ * @returns {string}
+ */
+function benchmarkString(benchmark) {
+  if (!benchmark || typeof benchmark !== "object") return "—"
+  const b = /** @type {Record<string, unknown>} */ (benchmark)
+  return `intelligence ${b.intelligence ?? "—"}, tok/s ${b.tokPerSec ?? "—"}`
 }
+
+// Field changes are detected by comparing the canonical strings (below)
+// — one comparison shape for every field, no per-field equality helpers.
 
 // ---------------------------------------------------------------------------
 // Classification diff (issue #112). Semantic sections rendered from
@@ -402,7 +482,7 @@ function classificationCategory(id, capability, efforts) {
 }
 
 function categoryLabel(category) {
-  if (category.kind === "efforts") return `efforts model (\`${category.levels.join(", ")}\`)`
+  if (category.kind === "efforts") return `efforts model (${category.levels.join(", ")})`
   if (category.kind === "reasoning") return "reasoning-without-efforts"
   return "non-reasoning"
 }
@@ -441,11 +521,12 @@ function classificationChangeLine(id, beforeCategory, afterCategory) {
 }
 
 /**
- * Builds the "Reasoning classification" section body (the part after the
- * header/date lines). Deterministic: ids sorted, same inputs → same bytes.
- * Present-in-both models render flips/promotions; a model present only on
- * the before side renders as retired (when it was reasoning); a model
- * present only on the after side renders as a new reasoning model.
+ * Builds the "Reasoning classification" section body as a fixed Markdown
+ * table (Model / Change / Before / After). Deterministic: ids sorted,
+ * same inputs → same bytes. Present-in-both models render flips and
+ * promotions; a model present only on the before side renders as retired
+ * (when it was reasoning); a model present only on the after side renders
+ * as a new reasoning model.
  *
  * @param {ClassificationPayload} before
  * @param {ClassificationPayload} after
@@ -458,30 +539,34 @@ function classificationSectionLines(before, after) {
   const beforeIds = new Set([...Object.keys(before.capability), ...Object.keys(before.efforts)])
   const afterIds = new Set([...Object.keys(after.capability), ...Object.keys(after.efforts)])
   const ids = [...new Set([...beforeIds, ...afterIds])].sort((a, b) => a.localeCompare(b))
-  const lines = []
+  const rows = []
   for (const id of ids) {
     const beforeCategory = classificationCategory(id, before.capability, before.efforts)
     const afterCategory = classificationCategory(id, after.capability, after.efforts)
     if (!afterIds.has(id)) {
       // Retired upstream — only a classification change if it was reasoning.
       if (beforeCategory.kind !== "none") {
-        lines.push(`- retired: \`${id}\` (was ${categoryLabel(beforeCategory)})`)
+        rows.push([`\`${id}\``, "retired", categoryLabel(beforeCategory), "—"])
       }
       continue
     }
     if (!beforeIds.has(id)) {
       // New upstream — only a classification change if it is reasoning.
       if (afterCategory.kind !== "none") {
-        lines.push(`- new reasoning model: \`${id}\` (${categoryLabel(afterCategory)})`)
+        rows.push([`\`${id}\``, "new", "—", categoryLabel(afterCategory)])
       }
       continue
     }
-    const line = classificationChangeLine(id, beforeCategory, afterCategory)
-    if (line) lines.push(line)
+    if (!categoryMoved(beforeCategory, afterCategory)) continue
+    rows.push([
+      `\`${id}\``,
+      "classification",
+      categoryLabel(beforeCategory),
+      categoryLabel(afterCategory),
+    ])
   }
-  if (lines.length === 0) return ["No changes.", ""]
-  lines.push("")
-  return lines
+  if (rows.length === 0) return ["No changes.", ""]
+  return [...renderTable([["Model", "Change", "Before", "After"], ...rows]), ""]
 }
 
 /**
@@ -544,7 +629,12 @@ export function classificationChanged({ before, after }) {
 }
 
 /**
- * Render the diff between two catalogs as a Markdown string.
+ * Render the diff between two catalogs as a Markdown string: a fixed
+ * Model / Change / Before / After table per kind (issue: "the release
+ * notes must state which models were added, removed, and changed —
+ * pricing, efforts, etc."). The snapshot kind additionally diffs base
+ * pricing and efforts when a facts payload is supplied via
+ * `beforeFacts` / `afterFacts` (MODEL_COSTS / MODEL_EFFORTS).
  *
  * @param {{kind: DiffKind} & DiffInput} args
  * @returns {string}
@@ -573,57 +663,19 @@ export function diffCatalogs(args) {
   const idOf = kind === "snapshot" ? snapshotIdOf : dealsIdOf
   const beforeIndex = indexCatalog(before, idOf)
   const afterIndex = indexCatalog(after, idOf)
-  const added = []
-  const removed = []
-  const changed = []
-  for (const id of beforeIndex.keys()) {
-    if (!afterIndex.has(id)) removed.push(id)
+  const facts = {
+    before: factsPayloadOf(args.beforeFacts ?? {}),
+    after: factsPayloadOf(args.afterFacts ?? {}),
   }
-  for (const id of afterIndex.keys()) {
-    if (!beforeIndex.has(id)) {
-      added.push(id)
-    } else {
-      const beforeEntry = beforeIndex.get(id)
-      const afterEntry = afterIndex.get(id)
-      const diffLines =
-        kind === "snapshot"
-          ? snapshotModelDiffLines(
-              id,
-              /** @type {CatalogModel} */ (beforeEntry),
-              /** @type {CatalogModel} */ (afterEntry),
-            )
-          : dealsModelDiffLines(
-              id,
-              /** @type {ModelDeals} */ (beforeEntry),
-              /** @type {ModelDeals} */ (afterEntry),
-            )
-      if (diffLines.length > 0) changed.push(...diffLines)
-    }
-  }
-  added.sort()
-  removed.sort()
-  if (added.length === 0 && removed.length === 0 && changed.length === 0) {
+  const changeRows =
+    kind === "snapshot"
+      ? snapshotChangeRows(beforeIndex, afterIndex, facts)
+      : dealsChangeRows(beforeIndex, afterIndex)
+  if (changeRows.empty) {
     sections.push("No changes.", "")
     return sections.join("\n")
   }
-  if (added.length > 0) {
-    sections.push(`### Added models (${added.length})`, "")
-    for (const id of added) sections.push(`- \`${id}\``)
-    sections.push("")
-  }
-  if (removed.length > 0) {
-    sections.push(`### Removed models (${removed.length})`, "")
-    for (const id of removed) sections.push(`- \`${id}\``)
-    sections.push("")
-  }
-  if (changed.length > 0) {
-    sections.push(
-      `### Changed models (${changed.length} field${changed.length === 1 ? "" : "s"})`,
-      "",
-    )
-    for (const line of changed) sections.push(line)
-    sections.push("")
-  }
+  sections.push(...renderTable([["Model", "Change", "Before", "After"], ...changeRows.rows]), "")
   return sections.join("\n")
 }
 
@@ -691,6 +743,17 @@ async function main() {
   // into the extracted classification payloads so the efforts category
   // renders with its levels. A missing facts file degrades to no efforts
   // data (the capability flag alone still renders).
+  // The snapshot kind reads the same facts files as its beforeFacts /
+  // afterFacts inputs so base pricing (MODEL_COSTS) and efforts diff
+  // alongside the snapshot models.
+  const readFacts = async (factsPath) => {
+    if (!factsPath) return undefined
+    try {
+      return JSON.parse(await readFile(factsPath, "utf-8"))
+    } catch {
+      return undefined
+    }
+  }
   if (kind === "classification") {
     const mergeFacts = async (payload, factsPath) => {
       if (!factsPath) return payload
@@ -703,6 +766,9 @@ async function main() {
     }
     before = await mergeFacts(before, options.beforeFactsPath)
     after = await mergeFacts(after, options.afterFactsPath)
+  } else if (kind === "snapshot") {
+    options.beforeFacts = await readFacts(options.beforeFactsPath)
+    options.afterFacts = await readFacts(options.afterFactsPath)
   }
   process.stdout.write(diffCatalogs({ kind, before, after, ...options }))
 }

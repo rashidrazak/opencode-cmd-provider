@@ -8,6 +8,27 @@
 import { classificationChanged, diffCatalogs } from "../scripts/diff-catalog.mjs"
 import { assert, assertEqual, run } from "./harness.js"
 
+/**
+ * Padding-agnostic table-row matcher: true when the markdown contains a
+ * table row whose cells (split on |, trimmed) start with the given
+ * values. Table cells are padded to column width by renderTable, so
+ * exact substrings are brittle.
+ *
+ * @param {string} md
+ * @param {...string} cells expected leading cell values
+ * @returns {boolean}
+ */
+function hasRow(md, ...cells) {
+  return md.split("\n").some((line) => {
+    if (!line.trimStart().startsWith("|")) return false
+    const values = line
+      .split("|")
+      .slice(1, -1)
+      .map((c) => c.trim())
+    return cells.every((cell, i) => values[i] === cell)
+  })
+}
+
 run([
   [
     "snapshot: identical input produces a 'no changes' message with no model lists",
@@ -19,18 +40,7 @@ run([
       const md = diffCatalogs({ kind: "snapshot", before: snapshot, after: snapshot })
       assert(md.includes("## Model catalog"), "must include the default label")
       assert(md.includes("No changes."), "must include the no-changes short-circuit")
-      assert(
-        !md.includes("Added models"),
-        "must not emit an Added models section when nothing changed",
-      )
-      assert(
-        !md.includes("Removed models"),
-        "must not emit a Removed models section when nothing changed",
-      )
-      assert(
-        !md.includes("Changed models"),
-        "must not emit a Changed models section when nothing changed",
-      )
+      assert(!md.includes("| Model"), "must not emit a change table when nothing changed")
     },
   ],
   [
@@ -42,9 +52,8 @@ run([
         { id: "gpt-5.6", name: "GPT-5.6", contextLength: 1000000 },
       ]
       const md = diffCatalogs({ kind: "snapshot", before, after })
-      assert(md.includes("### Added models (1)"), "must list the added-model count")
-      assert(md.includes("- `gpt-5.6`"), "must surface the added model id")
-      assert(!md.includes("Removed models"), "must not emit a Removed models section")
+      assert(hasRow(md, "`gpt-5.6`", "added"), `must surface the added model row, got: ${md}`)
+      assert(!md.includes("removed"), "must not emit a removed row")
     },
   ],
   [
@@ -56,8 +65,7 @@ run([
       ]
       const after = [{ id: "gpt-5.5", name: "GPT-5.5", contextLength: 400000 }]
       const md = diffCatalogs({ kind: "snapshot", before, after })
-      assert(md.includes("### Removed models (1)"), "must list the removed-model count")
-      assert(md.includes("- `gpt-5.6`"), "must surface the removed model id")
+      assert(hasRow(md, "`gpt-5.6`", "removed"), `must surface the removed model row, got: ${md}`)
     },
   ],
   [
@@ -66,10 +74,9 @@ run([
       const before = [{ id: "gpt-5.5", name: "GPT 5.5", contextLength: 400000 }]
       const after = [{ id: "gpt-5.5", name: "GPT-5.5", contextLength: 400000 }]
       const md = diffCatalogs({ kind: "snapshot", before, after })
-      assert(md.includes("### Changed models (1 field)"), "must report exactly one field change")
       assert(
-        md.includes("- `gpt-5.5`: name `GPT 5.5` → `GPT-5.5`"),
-        "must show the name change in the canonical form",
+        hasRow(md, "`gpt-5.5`", "renamed", "GPT 5.5 · 400000 ctx", "GPT-5.5 · 400000 ctx"),
+        `must surface the rename row with both names, got: ${md}`,
       )
     },
   ],
@@ -80,8 +87,8 @@ run([
       const after = [{ id: "gpt-5.5", name: "GPT-5.5", contextLength: 800000 }]
       const md = diffCatalogs({ kind: "snapshot", before, after })
       assert(
-        md.includes("- `gpt-5.5`: contextLength `400000` → `800000`"),
-        "must show the contextLength change in the canonical form",
+        hasRow(md, "`gpt-5.5`", "context", "GPT-5.5 · 400000 ctx", "GPT-5.5 · 800000 ctx"),
+        `must surface the context row, got: ${md}`,
       )
     },
   ],
@@ -136,12 +143,24 @@ run([
       }
       const md = diffCatalogs({ kind: "deals", before, after })
       assert(
-        md.includes("discount 30% off (ends 2026-12-31) → 50% off (ends 2026-12-31)"),
-        "must show the discount pct change in the canonical form",
+        hasRow(
+          md,
+          "`MiniMaxAI/MiniMax-M3`",
+          "discount",
+          "30% off (ends 2026-12-31)",
+          "50% off (ends 2026-12-31)",
+        ),
+        `must show the discount change as a table row, got: ${md}`,
       )
       assert(
-        md.includes("now in 0.42 / out 1.68 / cache 0.084 → in 0.3 / out 1.2 / cache 0.06"),
-        "must show the now-rate change in the canonical form",
+        hasRow(
+          md,
+          "`MiniMaxAI/MiniMax-M3`",
+          "now rates",
+          "in 0.42 / out 1.68 / cache 0.084",
+          "in 0.3 / out 1.2 / cache 0.06",
+        ),
+        `must show the now-rate change as a table row, got: ${md}`,
       )
     },
   ],
@@ -156,8 +175,8 @@ run([
       }
       const md = diffCatalogs({ kind: "deals", before, after })
       assert(
-        md.includes("allowance pro: 20 → pro: 30"),
-        "must show the allowance change in the canonical form",
+        hasRow(md, "`claude-sonnet-5`", "allowance", "pro: 20", "pro: 30"),
+        `must show the allowance change as a table row, got: ${md}`,
       )
     },
   ],
@@ -188,8 +207,8 @@ run([
       }
       const md = diffCatalogs({ kind: "deals", before, after })
       assert(
-        md.includes("peakOffPeak"),
-        "must surface a peakOffPeak change in the Changed models section",
+        hasRow(md, "`deepseek/deepseek-v4-pro`", "peakOffPeak"),
+        "must surface a peakOffPeak change as a table row",
       )
       assert(md.includes("peak in 1.5"), "must show the new peak input rate in the canonical form")
       assert(
@@ -198,6 +217,84 @@ run([
       )
     },
   ],
+  [
+    "snapshot: a pricing change renders as a pricing row when the facts payload is provided",
+    () => {
+      const snapshot = [{ id: "a/model", name: "A Model", contextLength: 1000000 }]
+      const before = {
+        MODEL_SNAPSHOT: snapshot,
+        MODEL_COSTS: { "a/model": { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 0 } },
+        MODEL_EFFORTS: {},
+      }
+      const after = {
+        MODEL_SNAPSHOT: snapshot,
+        MODEL_COSTS: { "a/model": { input: 1.5, output: 2, cacheRead: 0.1, cacheWrite: 0 } },
+        MODEL_EFFORTS: {},
+      }
+      const md = diffCatalogs({
+        kind: "snapshot",
+        before,
+        after,
+        beforeFacts: before,
+        afterFacts: after,
+      })
+      assert(
+        hasRow(
+          md,
+          "`a/model`",
+          "pricing",
+          "input 1 / output 2 / cacheRead 0.1 / cacheWrite 0",
+          "input 1.5 / output 2 / cacheRead 0.1 / cacheWrite 0",
+        ),
+        `must surface the pricing change as a table row, got: ${md}`,
+      )
+    },
+  ],
+  [
+    "snapshot: an efforts promotion renders as an efforts row when the facts payload is provided",
+    () => {
+      const snapshot = [{ id: "a/model", name: "A Model", contextLength: 1000000 }]
+      const md = diffCatalogs({
+        kind: "snapshot",
+        before: { MODEL_SNAPSHOT: snapshot, MODEL_EFFORTS: {} },
+        after: {
+          MODEL_SNAPSHOT: snapshot,
+          MODEL_EFFORTS: { "a/model": ["low", "medium", "high", "xhigh"] },
+        },
+        beforeFacts: { MODEL_EFFORTS: {} },
+        afterFacts: { MODEL_EFFORTS: { "a/model": ["low", "medium", "high", "xhigh"] } },
+      })
+      assert(
+        hasRow(md, "`a/model`", "efforts", "—", "low, medium, high, xhigh"),
+        `must surface the efforts promotion as a table row, got: ${md}`,
+      )
+    },
+  ],
+  [
+    "snapshot: the emitted table is Prettier-normal-form (format:check stability)",
+    async () => {
+      // The release pipeline runs format:check over the emitted CHANGELOG;
+      // renderTable must already pad to Prettier's table normal form.
+      const { execFile } = await import("node:child_process")
+      const { promisify } = await import("node:util")
+      const { mkdtemp, writeFile, rm } = await import("node:fs/promises")
+      const { tmpdir } = await import("node:os")
+      const { join } = await import("node:path")
+      const exec = promisify(execFile)
+      const before = [{ id: "a/very-long-model-id", name: "Long", contextLength: 1000 }]
+      const after = [...before, { id: "x", name: "X", contextLength: 2 }]
+      const md = diffCatalogs({ kind: "snapshot", before, after })
+      const dir = await mkdtemp(join(tmpdir(), "cc-table-prettier-"))
+      try {
+        const file = join(dir, "table.md")
+        await writeFile(file, md)
+        await exec("npx", ["prettier", "--parser", "markdown", "--check", file])
+      } finally {
+        await rm(dir, { recursive: true, force: true })
+      }
+    },
+  ],
+
   [
     "deals: DEAL_LAST_REFRESHED is surfaced when both dates are provided",
     () => {
@@ -235,10 +332,9 @@ run([
       }
       const md = diffCatalogs({ kind: "snapshot", before, after })
       assert(
-        md.includes("### Added models (1)"),
-        "must unwrap MODEL_SNAPSHOT and report the added model",
+        hasRow(md, "`gpt-5.6`", "added"),
+        `must unwrap MODEL_SNAPSHOT and report the added model, got: ${md}`,
       )
-      assert(md.includes("- `gpt-5.6`"), "must surface the unwrapped added model id")
     },
   ],
   [
@@ -255,10 +351,9 @@ run([
       }
       const md = diffCatalogs({ kind: "deals", before, after })
       assert(
-        md.includes("### Added models (1)"),
-        "must unwrap MODEL_DEALS and report the added model",
+        hasRow(md, "`gpt-5.6`", "added"),
+        `must unwrap MODEL_DEALS and report the added model, got: ${md}`,
       )
-      assert(md.includes("- `gpt-5.6`"), "must surface the unwrapped added model id")
     },
   ],
   [
@@ -275,9 +370,9 @@ run([
       const md1 = diffCatalogs({ kind: "snapshot", before, after })
       const md2 = diffCatalogs({ kind: "snapshot", before, after })
       assertEqual(md1, md2, "diffCatalogs must be deterministic for the same input")
-      // The Changed-models line must surface the z-1 contextLength change.
+      // The table must surface the z-1 contextLength change.
       assert(
-        md1.includes("- `z-1`: contextLength `1` → `2`"),
+        hasRow(md1, "`z-1`", "context", "Z · 1 ctx", "Z · 2 ctx"),
         "must report the z-1 contextLength change",
       )
     },
@@ -315,10 +410,14 @@ run([
       const md = diffCatalogs({ kind: "classification", before, after })
       assert(md.includes("## Reasoning classification"), "must use the classification label")
       assert(
-        md.includes(
-          "- `moonshotai/Kimi-K3`: reasoning-without-efforts → efforts model (`low, high, max`)",
+        hasRow(
+          md,
+          "`moonshotai/Kimi-K3`",
+          "classification",
+          "reasoning-without-efforts",
+          "efforts model (low, high, max)",
         ),
-        `must render the flip in plain language, got: ${md}`,
+        `must render the flip as a table row, got: ${md}`,
       )
     },
   ],
@@ -332,8 +431,14 @@ run([
       const after = { capability: { "a/model": true }, efforts: {} }
       const md = diffCatalogs({ kind: "classification", before, after })
       assert(
-        md.includes("- `a/model`: efforts model (`low, high`) → reasoning-without-efforts"),
-        `must render the reverse flip, got: ${md}`,
+        hasRow(
+          md,
+          "`a/model`",
+          "classification",
+          "efforts model (low, high)",
+          "reasoning-without-efforts",
+        ),
+        `must render the reverse flip as a table row, got: ${md}`,
       )
     },
   ],
@@ -344,8 +449,8 @@ run([
       const after = { capability: { "a/model": true }, efforts: {} }
       const md = diffCatalogs({ kind: "classification", before, after })
       assert(
-        md.includes("- `a/model`: new reasoning model (reasoning-without-efforts)"),
-        `must render the promotion, got: ${md}`,
+        hasRow(md, "`a/model`", "classification", "non-reasoning", "reasoning-without-efforts"),
+        `must render the promotion as a table row, got: ${md}`,
       )
     },
   ],
@@ -356,8 +461,8 @@ run([
       const after = { capability: { "new/model": true }, efforts: { "new/model": ["high"] } }
       const md = diffCatalogs({ kind: "classification", before, after })
       assert(
-        md.includes("- new reasoning model: `new/model` (efforts model (`high`))"),
-        `must render the added reasoning model, got: ${md}`,
+        hasRow(md, "`new/model`", "new", "—", "efforts model (high)"),
+        `must render the added reasoning model as a table row, got: ${md}`,
       )
     },
   ],
@@ -371,12 +476,12 @@ run([
       const after = { capability: {}, efforts: {} }
       const md = diffCatalogs({ kind: "classification", before, after })
       assert(
-        md.includes("- retired: `gone/reasoning` (was reasoning-without-efforts)"),
-        `must render the retired reasoning model, got: ${md}`,
+        hasRow(md, "`gone/reasoning`", "retired", "reasoning-without-efforts", "—"),
+        `must render the retired reasoning model as a table row, got: ${md}`,
       )
       assert(
-        md.includes("- retired: `gone/efforts` (was efforts model (`low`))"),
-        `must render the retired efforts model, got: ${md}`,
+        hasRow(md, "`gone/efforts`", "retired", "efforts model (low)", "—"),
+        `must render the retired efforts model as a table row, got: ${md}`,
       )
       assert(
         !md.includes("gone/plain"),
@@ -391,8 +496,8 @@ run([
       const after = { capability: { "a/model": false }, efforts: {} }
       const md = diffCatalogs({ kind: "classification", before, after })
       assert(
-        md.includes("- `a/model`: no longer reasoning (was reasoning-without-efforts)"),
-        `must render the demotion, got: ${md}`,
+        hasRow(md, "`a/model`", "classification", "reasoning-without-efforts", "non-reasoning"),
+        `must render the demotion as a table row, got: ${md}`,
       )
     },
   ],
@@ -592,10 +697,20 @@ run([
           "2026-09-03",
         ])
         assert(
-          stdout.includes(
-            "- `moonshotai/Kimi-K3`: reasoning-without-efforts → efforts model (`low, high, max`)",
-          ),
-          `CLI must render the flip, got: ${stdout}`,
+          stdout.split("\n").some((line) => {
+            if (!line.trimStart().startsWith("|")) return false
+            const cells = line
+              .split("|")
+              .slice(1, -1)
+              .map((c) => c.trim())
+            return (
+              cells[0] === "`moonshotai/Kimi-K3`" &&
+              cells[1] === "classification" &&
+              cells[2] === "reasoning-without-efforts" &&
+              cells[3] === "efforts model (low, high, max)"
+            )
+          }),
+          `CLI must render the flip as a table row, got: ${stdout}`,
         )
         assert(
           stdout.includes("- **CLASSIFICATION_LAST_REFRESHED**: `2026-09-02` → `2026-09-03`"),
