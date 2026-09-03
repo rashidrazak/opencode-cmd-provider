@@ -1,3 +1,32 @@
+## 1.6.4 - 2026-09-03
+
+### Model catalog
+
+## Model catalog
+
+- **FACTS_LAST_REFRESHED**: `2026-09-02` → `2026-09-03`
+
+| Model                             | Change  | Before | After                    |
+| --------------------------------- | ------- | ------ | ------------------------ |
+| `meta/muse-spark-1.1`             | efforts | —      | low, medium, high, xhigh |
+| `meta/muse-spark-1.2`             | efforts | —      | low, medium, high, xhigh |
+| `meta/muse-spark-1.2-contributor` | efforts | —      | low, medium, high, xhigh |
+| `meta/muse-spark-1.3`             | efforts | —      | low, medium, high, xhigh |
+| `meta/muse-spark-1.3-contributor` | efforts | —      | low, medium, high, xhigh |
+
+### Reasoning classification
+
+## Reasoning classification
+
+- **CLASSIFICATION_LAST_REFRESHED**: `2026-09-02` → `2026-09-03`
+
+| Model                             | Change         | Before                    | After                                    |
+| --------------------------------- | -------------- | ------------------------- | ---------------------------------------- |
+| `meta/muse-spark-1.1`             | classification | reasoning-without-efforts | efforts model (low, medium, high, xhigh) |
+| `meta/muse-spark-1.2`             | classification | reasoning-without-efforts | efforts model (low, medium, high, xhigh) |
+| `meta/muse-spark-1.2-contributor` | classification | reasoning-without-efforts | efforts model (low, medium, high, xhigh) |
+| `meta/muse-spark-1.3`             | classification | reasoning-without-efforts | efforts model (low, medium, high, xhigh) |
+| `meta/muse-spark-1.3-contributor` | classification | reasoning-without-efforts | efforts model (low, medium, high, xhigh) |
 ## 1.6.3 - 2026-09-02
 
 ### Model catalog
