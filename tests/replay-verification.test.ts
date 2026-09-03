@@ -356,12 +356,20 @@ run([
             join(dir, "facts-after.json"),
           ])
           for (const [id, levels] of EFFORTS_PROMOTIONS) {
+            const row = section
+              .split("\n")
+              .find((line) => line.trimStart().startsWith("|") && line.includes(`\`${id}\``))
             assert(
-              section.includes(
-                `- \`${id}\`: reasoning-without-efforts → efforts model (\`${levels}\`)`,
-              ),
-              `the PR body must render the ${id} promotion, got: ${section}`,
+              row,
+              `the PR body must render the ${id} promotion as a table row, got: ${section}`,
             )
+            const cells = row
+              .split("|")
+              .slice(1, -1)
+              .map((c) => c.trim())
+            assertEqual(cells[1], "classification", row)
+            assertEqual(cells[2], "reasoning-without-efforts", row)
+            assertEqual(cells[3], `efforts model (${levels})`, row)
           }
         } finally {
           await rm(dir, { recursive: true, force: true })
@@ -437,8 +445,16 @@ run([
             join(dir, "after.json"),
           ])
           assert(
-            dealsSection.includes(`- \`${GEMINI_ID}\`: discount 50% off`),
-            `the PR body must render the deal end, got: ${dealsSection}`,
+            dealsSection
+              .split("\n")
+              .some(
+                (line) =>
+                  line.trimStart().startsWith("|") &&
+                  line.includes(`\`${GEMINI_ID}\``) &&
+                  /\|\s*discount\s*\|/.test(line) &&
+                  /50% off/.test(line),
+              ),
+            `the PR body must render the deal end as a discount table row, got: ${dealsSection}`,
           )
           const beforeSnapshot = (
             (await import(pathToFileURL(join(before, "src/catalog/snapshot.ts")).href)) as {
@@ -460,9 +476,15 @@ run([
             join(dir, "snapshot-after.json"),
           ])
           assert(
-            snapshotSection.includes("### Removed models (1)") &&
-              snapshotSection.includes(`- \`${RETIRED_FREE_VARIANT}\``),
-            `the PR body must render the retirement, got: ${snapshotSection}`,
+            snapshotSection
+              .split("\n")
+              .some(
+                (line) =>
+                  line.trimStart().startsWith("|") &&
+                  line.includes(`\`${RETIRED_FREE_VARIANT}\``) &&
+                  line.split("|").some((c) => c.trim() === "removed"),
+              ),
+            `the PR body must render the retirement as a table row, got: ${snapshotSection}`,
           )
         } finally {
           await rm(dir, { recursive: true, force: true })
@@ -603,16 +625,24 @@ run([
             "",
             "### Model catalog",
             "",
+            "- **FACTS_LAST_REFRESHED**: `2026-09-01` → `2026-09-02`",
             "No changes.",
             "",
             "### Reasoning classification",
             "",
             "- **CLASSIFICATION_LAST_REFRESHED**: `2026-09-01` → `2026-09-02`",
-            "- `moonshotai/Kimi-K3`: reasoning-without-efforts → efforts model (`low, medium, high`)",
+            "",
+            "| Model               | Change         | Before                    | After                           |",
+            "| ------------------- | -------------- | ------------------------- | ------------------------------- |",
+            "| `moonshotai/Kimi-K3` | classification | reasoning-without-efforts | efforts model (low, medium, high) |",
             "",
             "### Deals intelligence",
             "",
-            `- \`${GEMINI_ID}\`: discount 50% off → —`,
+            "- **DEAL_LAST_REFRESHED**: `2026-09-01` → `2026-09-02`",
+            "",
+            "| Model    | Change   | Before              | After |",
+            "| -------- | -------- | ------------------- | ----- |",
+            `| \`${GEMINI_ID}\` | discount | 50% off (deal ended) | —     |`,
             "",
             "---",
             "",
@@ -671,14 +701,31 @@ run([
           `expected the release section first, got: ${changelog.slice(0, 60)}`,
         )
         assert(
-          changelog.includes(
-            "- `moonshotai/Kimi-K3`: reasoning-without-efforts → efforts model (`low, medium, high`)",
-          ),
-          "the CHANGELOG must carry the PR's semantic classification section",
+          changelog.split("\n").some((line) => {
+            if (!line.trimStart().startsWith("|")) return false
+            const cells = line
+              .split("|")
+              .slice(1, -1)
+              .map((c) => c.trim())
+            return (
+              cells[0] === "`moonshotai/Kimi-K3`" &&
+              cells[1] === "classification" &&
+              cells[2] === "reasoning-without-efforts" &&
+              cells[3] === "efforts model (low, medium, high)"
+            )
+          }),
+          "the CHANGELOG must carry the PR's semantic classification table",
         )
         assert(
-          changelog.includes(`- \`${GEMINI_ID}\`: discount 50% off → —`),
-          "the CHANGELOG must carry the PR's semantic deals section",
+          changelog
+            .split("\n")
+            .some(
+              (line) =>
+                line.trimStart().startsWith("|") &&
+                line.includes(`\`${GEMINI_ID}\``) &&
+                line.includes("50% off"),
+            ),
+          "the CHANGELOG must carry the PR's semantic deals table",
         )
         assert(!changelog.includes("Changed files"), "non-semantic sections must be dropped")
         const { stdout: refs } = await exec("git", ["-C", work, "ls-remote", "origin"])
