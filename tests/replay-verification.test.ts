@@ -739,6 +739,12 @@ run([
         assert(release.includes('tags: ["v*"]'), release)
         assert(release.includes("npm publish"), release)
         assert(release.includes("stale catalog snapshot or facts"), release)
+        // The release pipeline's changelog extractor must only stop at a
+        // version-shaped heading — the refresh sections embed `## Model
+        // catalog` H2s, and treating any `##` as a terminator truncated
+        // the v1.6.3/v1.6.4 release notes to the first heading (both runs
+        // shipped 5-line notes with no change tables).
+        assert(release.includes("/^## [0-9]+\\.[0-9]+\\.[0-9]+ - /"), release)
       } finally {
         await rm(base, { recursive: true, force: true })
       }

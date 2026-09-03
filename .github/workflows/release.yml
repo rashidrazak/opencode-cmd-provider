@@ -71,9 +71,16 @@ jobs:
         run: |
           version="$(node -p "require('./package.json').version")"
           pattern="$(printf '%s' "$version" | sed 's/\./\\./g')"
+          # Only a version-shaped heading (`## X.Y.Z - date`) terminates the
+          # section. The catalog-refresh sections legitimately embed `##`
+          # H2 headings from diff-catalog.mjs output ("## Model catalog",
+          # "## Deals intelligence"); treating any `##` as a terminator
+          # truncated the v1.6.3 and v1.6.4 GitHub Release notes to the
+          # first heading, dropping the change tables the notes exist to
+          # carry. This awk fragment is locked by tests/auto-release.test.ts.
           awk -v re="^## ${pattern} - " '
             $0 ~ re { found = 1 }
-            found && $0 ~ /^## / && $0 !~ re { exit }
+            found && $0 ~ /^## [0-9]+\.[0-9]+\.[0-9]+ - / && $0 !~ re { exit }
             found { print }
           ' CHANGELOG.md > /tmp/release-notes.md
           if [ -s /tmp/release-notes.md ]; then
