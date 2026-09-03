@@ -240,6 +240,40 @@ run([
     },
   ],
   [
+    "buildChangelogSection: output is Prettier-stable after CHANGELOG concatenation",
+    () => {
+      // The workflow concatenates the emitted section against the existing
+      // CHANGELOG (`{ cat release-notes.md; cat CHANGELOG.md; }`). A section
+      // ending in a table must leave exactly one blank line before the
+      // next `## X.Y.Z` heading, or format:check fails on the bump commit
+      // (the v1.6.4 release run). This locks the concatenation shape, not
+      // just the standalone emitter output.
+      const section = buildChangelogSection({
+        version: "1.6.4",
+        date: "2026-09-03",
+        prBody: PR_BODY,
+      })
+      const previous = ["## 1.6.3 - 2026-09-02", "", "- previous release."].join("\n")
+      const concatenated = section + previous
+      const lines = concatenated.split("\n")
+      const nextHeading = lines.findIndex((line, i) => i > 0 && line.startsWith("## 1.6.3"))
+      assert(nextHeading > 0, "the previous section heading must be present")
+      assertEqual(
+        lines[nextHeading - 1],
+        "",
+        "exactly one blank line must separate the emitted section from the next heading",
+      )
+      // And the whole concatenation must be a fixed point of Prettier's
+      // normal form: no doubled blanks anywhere.
+      for (let i = 1; i < lines.length; i++) {
+        assert(
+          !(lines[i] === "" && lines[i - 1] === ""),
+          `doubled blank line at concatenated line ${i + 1}`,
+        )
+      }
+    },
+  ],
+  [
     "release fragment: merging a refresh PR cuts the bot-authored patch release",
     async () => {
       const repo = await setupRepo()

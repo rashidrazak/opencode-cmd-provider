@@ -27,6 +27,7 @@
 | `meta/muse-spark-1.2-contributor` | classification | reasoning-without-efforts | efforts model (low, medium, high, xhigh) |
 | `meta/muse-spark-1.3`             | classification | reasoning-without-efforts | efforts model (low, medium, high, xhigh) |
 | `meta/muse-spark-1.3-contributor` | classification | reasoning-without-efforts | efforts model (low, medium, high, xhigh) |
+
 ## 1.6.3 - 2026-09-02
 
 ### Model catalog

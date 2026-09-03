@@ -95,7 +95,6 @@ export function buildChangelogSection({ version, date, prBody }) {
   out.push("")
   return collapseBlankLines(out)
 }
-
 /**
  * Collapses runs of blank lines to a single blank line, strips
  * leading/trailing blanks, and separates list blocks from following
@@ -135,7 +134,15 @@ function collapseBlankLines(lines) {
     }
     out.push(line)
   }
-  while (out.length > 0 && out[out.length - 1] === "") out.pop()
+  // The workflow concatenates this output directly against the existing
+  // CHANGELOG (`{ cat release-notes.md; cat CHANGELOG.md; }`), so a section
+  // ending in a table would land flush against the next `## X.Y.Z` heading
+  // — Prettier requires a blank line between a table and a following
+  // heading and the release pipeline's format:check fails on the bump
+  // commit (the v1.6.4 release run). End the output with a single trailing
+  // blank line: `join` ends the last content line with \n, so one extra \n
+  // yields exactly one empty line, and Prettier normalizes away any surplus
+  // if the existing CHANGELOG also leads with blanks.
   return out.join("\n") + "\n"
 }
 
