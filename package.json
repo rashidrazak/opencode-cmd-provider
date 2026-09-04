@@ -1,6 +1,6 @@
 {
   "name": "opencode-cmd-provider",
-  "version": "1.6.4",
+  "version": "1.6.5",
   "description": "Command Code provider + plugin for opencode",
   "type": "module",
   "main": "./dist/index.js",
