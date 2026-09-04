@@ -211,6 +211,26 @@ if (missingModalities.length > 0) {
 const modalities = Object.fromEntries(
   Object.entries(parsedModalities.modalities).filter(([id]) => snapshotIds.has(id)),
 )
+// models.md can run ahead of the API (a row for a model the catalog
+// endpoint doesn't serve yet — or anymore). Facts for non-snapshot ids
+// would break the catalog-metadata suite (facts ⊆ snapshot), so drop
+// them here — the same filtering the modalities already get above. The
+// reverse direction (a snapshot model with no facts row) stays loud via
+// that suite's per-model cost coverage check.
+const droppedFacts = Object.keys(costs).filter((id) => !snapshotIds.has(id))
+if (droppedFacts.length > 0) {
+  console.log(
+    `refresh-snapshot: dropping ${droppedFacts.length} facts not in the API snapshot: ${droppedFacts.join(", ")}`,
+  )
+}
+const snapshotEfforts = Object.fromEntries(
+  Object.entries(efforts).filter(([id]) => snapshotIds.has(id)),
+)
+const snapshotCosts = Object.fromEntries(
+  Object.entries(costs).filter(([id]) => snapshotIds.has(id)),
+)
+if (Object.keys(snapshotCosts).length === 0)
+  fail("Command Code catalog facts contain no cost rows for the snapshot models")
 
 await mkdir(dirname(out), { recursive: true })
 await writeFile(out, renderSnapshot(models), "utf-8")
@@ -222,12 +242,12 @@ await writeFile(
     modalitiesSourceUrl: modalitiesUrl,
     packageVersion: latest,
     lastRefreshed: new Date().toISOString().split("T")[0],
-    efforts,
-    costs,
+    efforts: snapshotEfforts,
+    costs: snapshotCosts,
     modalities,
   }),
   "utf-8",
 )
 console.log(
-  `refresh-snapshot: wrote facts (${Object.keys(efforts).length} efforts, ${Object.keys(costs).length} costs) for command-code@${latest} to ${factsOut}`,
+  `refresh-snapshot: wrote facts (${Object.keys(snapshotEfforts).length} efforts, ${Object.keys(snapshotCosts).length} costs) for command-code@${latest} to ${factsOut}`,
 )

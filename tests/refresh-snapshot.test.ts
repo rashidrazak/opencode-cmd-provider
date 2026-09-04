@@ -135,6 +135,69 @@ run([
   ],
 
   [
+    "refresh-snapshot drops facts rows for models outside the API snapshot",
+    async () => {
+      // Upstream skew (run 33922321678): the npm models.md carried a
+      // gpt-6-astra row the catalog endpoint no longer served, and the
+      // unfiltered facts broke the catalog-metadata suite (facts ⊆
+      // snapshot). Facts for non-snapshot ids must be dropped, loudly.
+      const dir = await mkdtemp(join(tmpdir(), "cc-facts-ahead-"))
+      const out = join(dir, "snapshot.ts")
+      const factsOut = join(dir, "facts.ts")
+      const aheadMd =
+        "## Open Source\n\n" +
+        "| Id | Name | Context | Efforts | $/1M in/out · cache read | Min plan | Best for |\n" +
+        "|---|---|---|---|---|---|---|\n" +
+        "| `claude-sonnet-5` | Claude Sonnet 5 | 1M | low, medium, high, xhigh, max | $2/$10 · cache $0.2 (write $2.5) | Pro and above | best |\n" +
+        "| `gpt-6-astra` | GPT 6 Astra | 1M | low, medium, high | $1/$2 · cache $0.1 | Pro and above | best |\n"
+      const mock = await startMockCc({
+        models: {
+          object: "list",
+          data: [{ id: "claude-sonnet-5", name: "Claude Sonnet 5", context_length: 200000 }],
+        },
+        registry: { "dist-tags": { latest: "1.28.1" } },
+        factsMd: aheadMd,
+        modalitiesBundle:
+          'const models={SONNET:{name:"Claude Sonnet 5",id:"claude-sonnet-5",inputModalities:["text","image"],contextWindow:2e5},' +
+          'ASTRA:{name:"GPT 6 Astra",id:"gpt-6-astra",inputModalities:["text"],contextWindow:1e6}}',
+      })
+      try {
+        const result = await runScript(
+          ["scripts/refresh-snapshot.mjs", "--out", out, "--facts-out", factsOut],
+          {
+            ...process.env,
+            COMMANDCODE_API_BASE: mock.url,
+            COMMANDCODE_REGISTRY_URL: `${mock.url}/registry`,
+            COMMANDCODE_FACTS_URL: `${mock.url}/models.md`,
+            COMMANDCODE_MODALITIES_URL: `${mock.url}/cli.mjs`,
+          },
+        )
+        assert(result.status === 0, result.stderr || result.stdout)
+        assert(
+          result.stdout.includes("gpt-6-astra"),
+          `expected the dropped model to be named in stdout, got: ${result.stdout}`,
+        )
+        const mod = await import(factsOut)
+        // Object-equality style (as in the facts test above): the ahead
+        // row must be absent from every map while the snapshot row is kept
+        // with its parsed values.
+        assertEqual(mod.MODEL_COSTS, {
+          "claude-sonnet-5": { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 },
+        })
+        assertEqual(mod.MODEL_EFFORTS, {
+          "claude-sonnet-5": ["low", "medium", "high", "xhigh", "max"],
+        })
+        assertEqual(mod.MODEL_INPUT_MODALITIES, {
+          "claude-sonnet-5": ["text", "image"],
+        })
+      } finally {
+        await mock.close()
+        await rm(dir, { recursive: true, force: true })
+      }
+    },
+  ],
+
+  [
     "refresh-snapshot fails loudly when the registry body is not JSON",
     async () => {
       const dir = await mkdtemp(join(tmpdir(), "cc-registry-parse-"))
