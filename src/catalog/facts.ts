@@ -5,10 +5,10 @@
 // modalities parsed from its CLI bundle (dist/cli.mjs). Regenerate
 // with `npm run refresh:snapshot`.
 
-export const FACTS_SOURCE_URL = "https://unpkg.com/command-code@1.46.0/dist/bundled/command-code-knowledge/reference/models.md"
-export const MODALITIES_SOURCE_URL = "https://unpkg.com/command-code@1.46.0/dist/cli.mjs"
-export const FACTS_PACKAGE_VERSION = "1.46.0"
-export const FACTS_LAST_REFRESHED = "2026-09-03"
+export const FACTS_SOURCE_URL = "https://unpkg.com/command-code@1.47.0/dist/bundled/command-code-knowledge/reference/models.md"
+export const MODALITIES_SOURCE_URL = "https://unpkg.com/command-code@1.47.0/dist/cli.mjs"
+export const FACTS_PACKAGE_VERSION = "1.47.0"
+export const FACTS_LAST_REFRESHED = "2026-09-04"
 
 export const MODEL_EFFORTS: Readonly<Record<string, readonly string[]>> = {
   "deepseek/deepseek-v4-pro": ["high","max"],
@@ -174,6 +174,7 @@ export const MODEL_INPUT_MODALITIES: Readonly<
   "thinkingmachines/inkling": ["text","image"],
   "thinkingmachines/inkling-small": ["text","image"],
   "xai/grok-4.5": ["text","image"],
+  "xai/grok-4.6": ["text","image"],
   "xiaomi/mimo-v2.5": ["text","image"],
   "z-ai/glm-5.3-flash": ["text","image"],
 }
