@@ -13,11 +13,16 @@ A provider and plugin for [OpenCode](https://opencode.ai) that connects to the [
 opencode plugin opencode-cmd-provider
 ```
 
-Update an existing install:
+Update an existing install — OpenCode caches the plugin package and reuses it
+on every startup without checking for a newer version, so updating means
+deleting the cache:
 
 ```sh
-opencode plugin opencode-cmd-provider --force
+rm -rf ~/.cache/opencode/packages/opencode-cmd-provider*
 ```
+
+Restart OpenCode afterwards. The plugin is re-downloaded, so that first launch
+takes a little longer than usual; subsequent startups are fast again.
 
 Install globally (available in every project):
 
@@ -117,7 +122,9 @@ Delivery is zero-step: the package exports both a `server` and a `tui` target
 opencode-cmd-provider` writes both `opencode.json(c)` and `tui.json` from one
 spec. The sidebar is a TUI plugin loaded from `tui.json` — which is why
 installs made before the `./tui` export only wrote the server target and never
-showed a sidebar. Re-run with `--force` to add `tui.json`.
+showed a sidebar. Re-run `opencode plugin opencode-cmd-provider --force` to add
+`tui.json` (this only rewrites the config entry — see
+[Update and remove](#update-and-remove) for refreshing the cached package).
 
 When the Deals catalog is empty (the upstream fetch failed or the RSC shape
 changed), the feature degrades visibly rather than silently: the sidebar shows
@@ -135,7 +142,9 @@ paid model (e.g. the MiniMax M3 free tier) get a `(free)` suffix —
 `[CMD] MiniMax M3 (free)` — so the two are distinguishable in the model
 picker. The suffix is derived from the bundled pricing table: a model is
 labeled free only when the catalog carries an explicit zero-cost entry. Model
-availability changes when the package is updated. You can still declare your
+availability changes when the package is updated — but note that OpenCode's
+plugin cache can hold a stale copy after a release if new models don't appear
+(see [Update and remove](#update-and-remove)). You can still declare your
 own `provider.commandcode` entry; your declarations always win and the
 snapshot fills in only what's missing (`whitelist`/`blacklist` on a declared
 entry filter the auto-registered models too).
@@ -232,7 +241,37 @@ Models missing from that table display zero cost in OpenCode. This does **not** 
 
 ## Update and remove
 
-Update the installed package, or remove it from the `plugin` array in your `opencode.json` (the auto-registered `provider.commandcode` entry is injected by the plugin, so there is no config block to remove). The npm package is cached under OpenCode's plugin cache (`~/.cache/opencode/packages/`); remove the cached directory to fully uninstall.
+### Updating
+
+OpenCode caches the plugin package (`~/.cache/opencode/packages/`) and reuses
+the cached copy on every startup without checking for a newer version — so a
+new release won't appear until you delete the cache:
+
+```sh
+rm -rf ~/.cache/opencode/packages/opencode-cmd-provider*
+```
+
+Then restart OpenCode. The plugin is re-downloaded, so that first launch takes
+a little longer than usual; subsequent startups are fast again. If new Command
+Code models stop appearing in `/models` after a release, a stale cache entry is
+the most likely cause.
+
+- **OpenChamber users:** click **Reload OpenCode** in OpenChamber's settings
+  instead of restarting manually — the running OpenCode server keeps the old
+  plugin loaded until it is restarted.
+- **No re-authentication needed.** Your API key is stored by OpenCode's
+  `/connect` flow in OpenCode's auth store (and mirrored to
+  `~/.commandcode/auth.json`), not inside the plugin package — the plugin reads
+  it from there (or the `COMMANDCODE_API_KEY` env var) at request time, so
+  deleting the plugin cache does not affect your login.
+
+### Removing
+
+Remove it from the `plugin` array in your `opencode.json` (the auto-registered
+`provider.commandcode` entry is injected by the plugin, so there is no config
+block to remove). The npm package is cached under OpenCode's plugin cache
+(`~/.cache/opencode/packages/`); remove the cached directory to fully
+uninstall.
 
 ## Development
 
