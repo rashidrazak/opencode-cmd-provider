@@ -21,12 +21,14 @@
 import { readFileSync } from "node:fs"
 import { extractPlanPageRsc, extractPricingLimitsRsc } from "../scripts/parse-rsc.mjs"
 import {
+  buildRscInputs,
   discountFor,
   emitDealsModuleFromRsc,
   missingDealsModelsFromRsc,
   modelDealEntry,
   peakOffPeakFor,
 } from "../scripts/refresh-deals.mjs"
+import { snapshotIndex } from "../scripts/snapshot-index.mjs"
 import { assert, assertEqual, run } from "./harness.js"
 
 const RSC_PRICING = readFileSync(
@@ -405,6 +407,61 @@ run([
         kimiLine.includes('"goat":20') && kimiLine.includes('"pro":30'),
         `Kimi K3 must carry RSC allowances (got: ${kimiLine})`,
       )
+    },
+  ],
+  [
+    "buildRscInputs drops per-plan slug records outside the snapshot (docs-ahead skew)",
+    () => {
+      // Docs-ahead-of-API skew (catalog-refresh run 33924108227): the
+      // per-plan pages carry a record the snapshot lacks. The builder
+      // must drop it — never emit it — while resolving every snapshot
+      // model it can. Synthetic ids (never in the generated catalogs,
+      // so the no-upstream-value-pins gate stays green).
+      const slugPayload = (records) => `2:${JSON.stringify(records)}\n`
+      const slug = (id, name) => ({
+        slug: id.split("/").pop(),
+        id,
+        name,
+        vendor: id.split("/")[0],
+        category: "opensource",
+        minPlanName: "Go",
+        tiers: [{ rates: { input: 1, output: 2, cacheRead: 0.1 } }],
+        caps: {},
+        reasoning: true,
+      })
+      const { byId } = snapshotIndex()
+      const [firstId, firstName] = [...byId.entries()][0]
+      const goatRsc = slugPayload([
+        slug(firstId, firstName),
+        slug("vendor/synthetic-future", "Synthetic Future"),
+      ])
+      // Minimal pricing-limits payload: one availability record for the
+      // snapshot model so the extractor finds its arrays (the
+      // docs-ahead slug record is absent here, exercising the
+      // per-plan-only merge path — the same shape the cron hit).
+      const pricingLimitsRsc = `1:${JSON.stringify({
+        models: [
+          {
+            id: firstId,
+            name: firstName,
+            tiers: [{ rates: { input: 1, output: 2, cacheRead: 0.1 } }],
+            caps: {},
+            category: "opensource",
+          },
+        ],
+        rows: [{ id: firstId, name: firstName, planAllowanceUsd: { goat: 1 } }],
+      })}\n`
+      const { bySnapshotId, goatBySnapshot } = buildRscInputs({
+        pricingLimitsRsc,
+        goatRsc,
+        proRsc: "",
+      })
+      assert(
+        !bySnapshotId.has("vendor/synthetic-future"),
+        "the docs-ahead slug record must be dropped",
+      )
+      assert(bySnapshotId.has(firstId), "the snapshot slug record must still resolve")
+      assertEqual(goatBySnapshot.get(firstId), 1, "the snapshot allowance must still resolve")
     },
   ],
   [

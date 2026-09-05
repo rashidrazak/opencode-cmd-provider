@@ -179,6 +179,35 @@ run([
     },
   ],
   [
+    "emitClassificationModuleFromRsc drops extra records beyond full snapshot coverage",
+    async () => {
+      // Docs-ahead-of-API skew (catalog-refresh run 33924108227): the
+      // per-plan pages carry a record the snapshot lacks. With every
+      // snapshot model covered, the coverage gate passes and the extra
+      // must be dropped from the module — never emitted, never failing
+      // the gate. Synthetic payloads throughout (never upstream's
+      // current values); the id is synthetic so it can never collide
+      // with the generated catalogs (no-upstream-value-pins gate).
+      const base = JSON.parse(fullCoveragePayload(new Map()).slice(2))
+      const extra = slugRecord("vendor/synthetic-future", "Synthetic Future", true)
+      const payload = slugPayload([...base, extra])
+      const { module, entryCount } = emitClassificationModuleFromRsc({
+        goatRsc: payload,
+        proRsc: payload,
+        lastRefreshed: "2026-09-03",
+      })
+      const { byId } = snapshotIndex()
+      assertEqual(entryCount, byId.size, "only snapshot models are emitted")
+      assert(
+        !module.includes("vendor/synthetic-future"),
+        "the docs-ahead record must be dropped from the module",
+      )
+      for (const id of byId.keys()) {
+        assert(module.includes(`"${id}":`), `${id} must keep its capability entry`)
+      }
+    },
+  ],
+  [
     "refresh-classification fails loudly when the reasoning flag is absent (shape gate)",
     async () => {
       const dir = await mkdtemp(join(tmpdir(), "cc-classification-shape-"))
