@@ -564,23 +564,42 @@ async function resolveRowLadders(row, { previousSnapshot, rscSlugRecords, models
 
 // Modalities: parsed from the CLI bundle, then bridged through the issue
 // #132 modalities ladder — CLI inputModalities → models page Caps Vision →
-// text-only fallback. The CLI is the primary source (a CLI-ahead id is
-// enrichment data for a model that does not ship); a package row the CLI
-// omits is a pending-modalities report, never a failure: the models page
-// Caps Vision bit may still promote it to image, and the text-only
-// fallback keeps it usable either way. Every resolved model carries its
-// provenance (`modalitySource`) so the refresh log explains the step.
+// text-only fallback. The CLI bundle is **enrichment** (issue #133): a
+// fetch failure (network / 5xx / 4xx) degrades to an empty bundle with a
+// pending note — membership still ships, every row falls back to
+// text-only (possibly promoted by the page Vision bit). The 4xx degrade
+// is deliberate: the CLI URL is derived from the registry dist-tag
+// (unpkg.com/command-code@<version>/dist/cli.mjs), never user
+// configuration, so a 404 means the published package lacks the bundle
+// (upstream timing), not a local config error. A *parse* failure of a
+// successfully-fetched bundle stays loud (parser shape change). The
+// CLI is consulted for modalities only (a CLI-ahead id is enrichment data
+// for a model that does not ship); a package row the CLI omits is a
+// pending-modalities report, never a failure: the models page Caps Vision
+// bit may still promote it to image, and the text-only fallback keeps it
+// usable either way. Every resolved model carries its provenance
+// (`modalitySource`) so the refresh log explains the step.
 const { parseInputModalities } = await import("./parse-modalities.mjs")
-const modalitiesSource = await (
-  await fetchOrFail(modalitiesUrl, { headers: { accept: "text/javascript" } })
-).text()
+const modalitiesSource = await fetchEnrichmentText(modalitiesUrl, {
+  headers: { accept: "text/javascript" },
+})
 let parsedModalities
-try {
-  parsedModalities = parseInputModalities(modalitiesSource)
-} catch (error) {
-  fail(
-    `could not parse ${modalitiesUrl}: ${error instanceof Error ? error.message : String(error)}`,
+if (modalitiesSource === null) {
+  // Enrichment outage: no CLI data at all. Every package row is
+  // CLI-omitted, so the ladder below logs the pending report and every
+  // row falls back to text-only (or the page Vision bit).
+  console.log(
+    `refresh-snapshot: modalities pending — CLI bundle unreachable (${modalitiesUrl}); using text-only fallbacks`,
   )
+  parsedModalities = { modelIds: new Set(), modalities: {}, contextWindows: {} }
+} else {
+  try {
+    parsedModalities = parseInputModalities(modalitiesSource)
+  } catch (error) {
+    fail(
+      `could not parse ${modalitiesUrl}: ${error instanceof Error ? error.message : String(error)}`,
+    )
+  }
 }
 const missingModalities = rows
   .filter((row) => !parsedModalities.modelIds.has(row.id))

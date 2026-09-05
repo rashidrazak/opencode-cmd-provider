@@ -49,9 +49,9 @@ run([
     () => {
       // The RSC's per-plan (goat, pro) slug records are the source of truth
       // for the snapshot id (the alias is applied inside extractPlanPageRsc).
-      // Records that don't resolve to a snapshot id are docs-ahead-of-API
+      // Records that don't resolve to a snapshot id are docs-ahead-of-membership
       // skew (catalog-refresh run 33924108227: the docs shipped gpt-6-astra
-      // before the API catalog did) — the generators drop them by design
+      // before the package table did) — the generators drop them by design
       // (the !snapshotIds.has(sid) guards in buildRscInputs /
       // deriveCapabilityMap, locked by synthetic drop tests), so they must
       // not fail the suite. The reverse direction — a snapshot model with

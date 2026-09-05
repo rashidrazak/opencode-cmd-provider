@@ -81,12 +81,13 @@ public.
   `npm run refresh:deals -- --fixtures`), commit the changed
   `src/catalog/{snapshot,facts,deals}.ts` (and `tests/fixtures/*.html` if you
   re-captured docs pages), land on main via PR, then re-tag.
-- **The refresh cannot generate facts** ("CLI modality catalog is missing API
-  models" or "could not parse ... cli.mjs") — nothing shipped. Unlike a stale
+- **The refresh cannot generate facts** ("could not parse ... cli.mjs" or an
+  unshippable-row failure) — nothing shipped. Unlike a stale
   snapshot, this cannot be fixed by refreshing locally: `npm run
-refresh:snapshot` fails the same way. It means the API catalog lists a model
-  the CLI bundle does not carry yet (upstream timing), or the bundle shape
-  changed and `scripts/parse-modalities.mjs` needs updating. Resolve that on
+refresh:snapshot` fails the same way. It means the CLI bundle shape
+  changed and `scripts/parse-modalities.mjs` needs updating, or a package
+  row is unshippable after the full enrichment ladders. (A CLI _outage_
+  degrades to pending notes, never a failure.) Resolve that on
   main via PR, then re-tag.
 - **Publish fails** — nothing shipped (npm rejects before writing) → fix, then
   `gh run rerun <run-id>`.

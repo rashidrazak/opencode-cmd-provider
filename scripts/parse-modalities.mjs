@@ -86,8 +86,10 @@ function parseModalities(node, modelId) {
 /**
  * Parse every model object carrying inputModalities from the CLI bundle.
  *
- * `modelIds` includes text-only entries so the refresh step can assert that
- * every API snapshot model was represented in the CLI bundle. `modalities`
+ * `modelIds` includes text-only entries so the refresh step can report
+ * which package-membership models lack CLI evidence (a pending report,
+ * never a failure since issue #133 — the CLI bundle is enrichment).
+ * `modalities`
  * contains only image-capable entries, matching the provider's existing
  * text-only fallback behavior.
  *

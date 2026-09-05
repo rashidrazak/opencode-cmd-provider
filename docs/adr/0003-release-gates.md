@@ -2,6 +2,19 @@
 
 Status: accepted
 
+> **Status note (issue #133).** The "fails if an API snapshot model is
+> absent from the CLI modality catalog" contract recorded in the facts
+> amendment below is **re-pointed** since #133: the npm package models.md
+> table is the sole membership authority, the listing API is a pure
+> divergence reporter (set-diff notes, both directions, zero gating
+> power), and the CLI bundle is modalities enrichment — a package row the
+> CLI omits (or a CLI outage) is a pending report with a text-only
+> fallback, never a failure. Only two loud failure classes survive
+> anywhere (an unshippable ship-bar row after the full enrichment ladder,
+> and a parser shape change). The formal supersede-note and glossary
+> rewrite land in issue #135; this ADR keeps its original text so the
+> decision history stays readable.
+
 Supersedes the "re-triggering snapshot refresh" behavior of [ADR 0002](0002-tag-driven-releases.md). The trigger stays: pushing a `vX.Y.Z` tag starts the release pipeline. Two gates now decide whether it may publish.
 
 The tag's commit must be an ancestor of `origin/main`, and the tag must match `package.json` (existing guard). The first gate exists because the pipeline runs on the tag's tree, not on main: without it, tagging an unmerged or stale commit publishes a version whose source never reached main — the version bump and CHANGELOG entry ship while `main` still carries the old version, and the published artifact is not reproducible from the branch. Pushing a tag while the bump is still in review, or tagging an old commit, fails with an explicit error instead of releasing.
