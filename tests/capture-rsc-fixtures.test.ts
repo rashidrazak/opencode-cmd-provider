@@ -17,6 +17,8 @@ const RSC_PRICING = readFileSync(
 )
 const RSC_GOAT = readFileSync(new URL("./fixtures/rsc-goat.txt", import.meta.url), "utf-8")
 const RSC_PRO = readFileSync(new URL("./fixtures/rsc-pro.txt", import.meta.url), "utf-8")
+const MODELS_PAGE =
+  "<html><body><table><tr><th>Model</th><th>Context</th></tr></table></body></html>"
 
 function runScript(args, env): Promise<{ status: number | null; stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
@@ -35,17 +37,19 @@ const RSC_ENV = (mock: { url: string }) => ({
   COMMANDCODE_RSC_PRICING_URL: `${mock.url}/docs/resources/pricing-limits`,
   COMMANDCODE_RSC_GOAT_URL: `${mock.url}/docs/plans/goat`,
   COMMANDCODE_RSC_PRO_URL: `${mock.url}/docs/plans/pro`,
+  COMMANDCODE_MODELS_PAGE_URL: `${mock.url}/models-page.html`,
 })
 
 run([
   [
-    "capture-rsc-fixtures writes the three RSC payloads to the fixtures dir",
+    "capture-rsc-fixtures writes the three RSC payloads plus the models page to the fixtures dir",
     async () => {
       const dir = await mkdtemp(join(tmpdir(), "cc-capture-rsc-"))
       const mock = await startMockCc({
         rscPricing: RSC_PRICING,
         rscGoat: RSC_GOAT,
         rscPro: RSC_PRO,
+        modelsPageHtml: MODELS_PAGE,
       })
       try {
         const result = await runScript(
@@ -67,6 +71,11 @@ run([
           await readFile(join(dir, "rsc-pro.txt"), "utf-8"),
           RSC_PRO,
           "pro payload must be captured verbatim",
+        )
+        assertEqual(
+          await readFile(join(dir, "models-page.html"), "utf-8"),
+          MODELS_PAGE,
+          "models page must be captured verbatim",
         )
       } finally {
         await mock.close()
@@ -94,6 +103,37 @@ run([
         assert(
           result.stderr.includes("HTTP 404") || result.stderr.includes("returned HTTP"),
           `stderr must attribute the 4xx, got: ${result.stderr}`,
+        )
+        const files = await readdir(dir)
+        assertEqual(files.length, 0, `no fixture file may be written, got: ${files.join(", ")}`)
+      } finally {
+        await mock.close()
+        await rm(dir, { recursive: true, force: true })
+      }
+    },
+  ],
+  [
+    "capture-rsc-fixtures is all-or-nothing: a models-page 4xx aborts and writes nothing",
+    async () => {
+      const dir = await mkdtemp(join(tmpdir(), "cc-capture-models-404-"))
+      // All RSC pages succeed; only the models page 404s (option unset).
+      const mock = await startMockCc({
+        rscPricing: RSC_PRICING,
+        rscGoat: RSC_GOAT,
+        rscPro: RSC_PRO,
+      })
+      try {
+        const result = await runScript(
+          ["scripts/capture-rsc-fixtures.mjs", "--fixtures-dir", dir],
+          RSC_ENV(mock),
+        )
+        assert(
+          result.status !== 0,
+          `a models-page 4xx must abort the capture, got status ${result.status}: ${result.stdout} ${result.stderr}`,
+        )
+        assert(
+          result.stderr.includes("models page returned HTTP 404"),
+          `stderr must attribute the models-page 4xx, got: ${result.stderr}`,
         )
         const files = await readdir(dir)
         assertEqual(files.length, 0, `no fixture file may be written, got: ${files.join(", ")}`)

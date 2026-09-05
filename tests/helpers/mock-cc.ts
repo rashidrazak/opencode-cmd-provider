@@ -63,6 +63,8 @@ export interface MockCcOptions {
   rscGoat?: string
   /** RSC body served at GET /docs/plans/pro; 404 when unset. */
   rscPro?: string
+  /** HTML served at GET /models-page.html (the models page index, issue #131); 404 when unset. */
+  modelsPageHtml?: string
   /** status served by all three RSC endpoints when set (e.g. 500 to exercise the 5xx → fixtures fallback). */
   rscStatus?: number
   /** called with the headers of each GET /docs/resources/pricing-limits request */
@@ -82,6 +84,7 @@ export interface MockCcHits {
   rscPricing: number
   rscGoat: number
   rscPro: number
+  modelsPage: number
 }
 
 export function startMockCc(
@@ -96,6 +99,7 @@ export function startMockCc(
     rscPricing: 0,
     rscGoat: 0,
     rscPro: 0,
+    modelsPage: 0,
   }
   /**
    * Serves an error response for an endpoint: status + error body with an
@@ -346,6 +350,17 @@ export function startMockCc(
         }
         res.writeHead(200, { "content-type": "text/x-component" })
         res.end(options.rscPro)
+        return
+      }
+      if (req.url === "/models-page.html" && req.method === "GET") {
+        hits.modelsPage++
+        if (options.modelsPageHtml === undefined) {
+          res.writeHead(404)
+          res.end("not found")
+          return
+        }
+        res.writeHead(200, { "content-type": "text/html" })
+        res.end(options.modelsPageHtml)
         return
       }
       res.writeHead(404)

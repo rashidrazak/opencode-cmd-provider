@@ -148,7 +148,7 @@ jobs:
           git add src/catalog/snapshot.ts src/catalog/facts.ts src/catalog/classification.ts \
               src/deals/catalog.ts \
               tests/fixtures/rsc-pricing-limits.txt tests/fixtures/rsc-goat.txt \
-              tests/fixtures/rsc-pro.txt
+              tests/fixtures/rsc-pro.txt tests/fixtures/models-page.html
           date="$(date -u +%Y-%m-%d)"
           git commit -m "chore: catalog refresh — ${date}"
 

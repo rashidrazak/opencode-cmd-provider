@@ -29,9 +29,10 @@ decisions in `docs/adr/`.
 `scripts/refresh-deals.mjs`). Regenerate with `npm run refresh` — the
 snapshot comes from the npm package's bundled models.md table (the sole
 membership authority since #130; the listing API is annotate-only); the
-RSC fixtures (`tests/fixtures/rsc-*.txt`) are re-captured from the live docs
-pages (`scripts/capture-rsc-fixtures.mjs`, all-or-nothing, loud on any
-failure); the classification module and the deals catalog are regenerated
+RSC fixtures (`tests/fixtures/rsc-*.txt`) and the models-page index fixture
+(`tests/fixtures/models-page.html`, issue #131) are re-captured from the
+live docs pages (`scripts/capture-rsc-fixtures.mjs`, all-or-nothing, loud on
+any failure); the classification module and the deals catalog are regenerated
 from the freshly captured fixtures, so fixtures, catalogs, and the
 fixture-based unit tests stay in lockstep. The cron commits the fixtures
 alongside the catalogs when upstream moved. Standalone live regeneration:

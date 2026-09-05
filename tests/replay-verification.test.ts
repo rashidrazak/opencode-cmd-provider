@@ -169,6 +169,27 @@ function apiModelsPayload(world: WorldOptions): unknown {
   }
 }
 
+/**
+ * Minimal models-page HTML for the replay ladder: one row per snapshot id,
+ * name-link slug = the last path segment of the id (the same shape the
+ * parser's tests use). The capture step only stores it verbatim — the
+ * ladder never parses it in this ticket (#132 wires the consumers).
+ */
+function modelsPageHtml(world: WorldOptions): string {
+  const rows = snapshotWorldIds(world)
+    .map(([id, name]) => {
+      const slug = id.includes("/") ? id.split("/").pop() : id
+      return `<tr>
+<td><a href="/models/${slug}">${name}</a></td>
+<td><span>1M</span></td><td>52.0</td><td>—</td>
+<td><span>$1</span></td><td><span>$2</span></td><td><span>$0.1</span></td><td><span>—</span></td>
+<td><button type="button" aria-label="Capabilities: Text input, Vision, Reasoning"></button></td>
+</tr>`
+    })
+    .join("\n")
+  return `<table><thead><tr><th>Model</th><th>Context</th><th>Intelligence</th><th>Tok/s</th><th>Input</th><th>Output</th><th>Cache read</th><th>Cache write</th><th>Caps</th></tr></thead><tbody>${rows}</tbody></table>`
+}
+
 // ---------------------------------------------------------------------------
 // The refresh ladder, against a mock upstream world, into a workspace.
 // ---------------------------------------------------------------------------
@@ -183,6 +204,7 @@ async function runLadder(world: WorldOptions, ws: string): Promise<void> {
     rscPricing: rsc.pricing,
     rscGoat: rsc.goat,
     rscPro: rsc.pro,
+    modelsPageHtml: modelsPageHtml(world),
   })
   const env = {
     ...process.env,
@@ -193,6 +215,7 @@ async function runLadder(world: WorldOptions, ws: string): Promise<void> {
     COMMANDCODE_RSC_PRICING_URL: `${mock.url}/docs/resources/pricing-limits`,
     COMMANDCODE_RSC_GOAT_URL: `${mock.url}/docs/plans/goat`,
     COMMANDCODE_RSC_PRO_URL: `${mock.url}/docs/plans/pro`,
+    COMMANDCODE_MODELS_PAGE_URL: `${mock.url}/models-page.html`,
   }
   try {
     await mkdir(join(ws, "src", "catalog"), { recursive: true })
