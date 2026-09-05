@@ -1,17 +1,20 @@
 // src/plugin/models.ts — snapshot → config auto-registration (issue #16)
 import type { Config, ProviderConfig } from "@opencode-ai/sdk/v2"
 import type { CatalogModel } from "../catalog/snapshot.js"
-import {
-  MODEL_COSTS,
-  ZERO_MODEL_COST,
-  isFreeModelCost,
-  type CommandCodeModelCost,
-} from "../provider/pricing.js"
+import { isFreeModelCost } from "../provider/pricing.js"
 import { reasoningVariantsForModel, isReasoningModel } from "../provider/reasoning.js"
 import { inputModalitiesForModel } from "../provider/modalities.js"
 
 const DEFAULT_MAX_OUTPUT_TOKENS = 65_536
 export const DEFAULT_DISPLAY_PREFIX = "[CMD] "
+// Context advertised for a snapshot row whose models.md Context cell is
+// missing ("—"): the row ships as pending-context (issue #130) and the
+// fallback ladder lands in #132. OpenCode requires a numeric limit, so a
+// conservative placeholder keeps the model usable — it is deliberately
+// NOT the listing API's value (the API wins no ship-bar field) and NOT
+// any carried-forward number: a reviewer sees the real gap in the
+// refresh log's "context pending" note and the #132 ladder resolves it.
+const PENDING_CONTEXT_LENGTH = 128_000
 
 type ConfigModel = NonNullable<NonNullable<ProviderConfig["models"]>[string]>
 type ConfigVariants = NonNullable<ConfigModel["variants"]>
@@ -116,21 +119,34 @@ export function augmentConfigCommandCodeModels(config: Config): void {
  * prefixed display name, context/output limits with output capped at
  * 65_536, and metadata enriched from the reasoning, modality, and pricing
  * tables.
+ *
+ * Ship-bar fields come from the snapshot row itself (issue #130: the
+ * models.md row is the authority; the listing API wins no field):
+ *  - contextLength null (the models.md Context cell was "—") falls back to
+ *    the OpenCode default context — never 0, never a fabricated API value;
+ *  - cost null (the price cell was "—") advertises NO cost entry — missing
+ *    never zero-fills (only an explicit all-zero cell means free).
  */
 function configModelFor(model: CatalogModel, prefix = DEFAULT_DISPLAY_PREFIX): ConfigModel {
   const variants = reasoningVariantsForModel(model.id)
-  const costs: CommandCodeModelCost = MODEL_COSTS[model.id] ?? ZERO_MODEL_COST
-  // Upstream names the paid and free MiniMax variants identically
-  // (`MiniMax M3` / `MiniMax M2.7`); append `(free)` to the picker entry so
-  // users can tell them apart. Data-driven from the zero cost table — a model
-  // is only "free" when the catalog has an actual zero-cost entry (an absent
-  // entry falls back to ZERO_MODEL_COST and is NOT free).
-  const freeSuffix = MODEL_COSTS[model.id] !== undefined && isFreeModelCost(costs) ? " (free)" : ""
+  // The row's own parsed price is the ship-bar authority. A null cost
+  // (missing models.md price cell) advertises no cost entry — the
+  // zero-cost defensive fallback (ZERO_MODEL_COST) is deliberately not
+  // used here: a missing price must never read as a $0 model (the parent
+  // spec's "missing never zero-fills").
+  const rowCost = model.cost
+  const freeSuffix = rowCost !== null && isFreeModelCost(rowCost) ? " (free)" : ""
+  // OpenCode requires a numeric context limit. A package row whose Context
+  // cell is missing ships as pending-context (issue #130) and must not read
+  // as 0 — that would advertise a broken model. PENDING_CONTEXT_LENGTH is
+  // a conservative placeholder for such a row until the ladder (issue
+  // #132) resolves it.
+  const contextLength = model.contextLength ?? PENDING_CONTEXT_LENGTH
   return {
     name: `${prefix}${model.name}${freeSuffix}`,
     limit: {
-      context: model.contextLength,
-      output: Math.min(model.contextLength, DEFAULT_MAX_OUTPUT_TOKENS),
+      context: contextLength,
+      output: Math.min(contextLength, DEFAULT_MAX_OUTPUT_TOKENS),
     },
     reasoning: isReasoningModel(model.id) ? true : undefined,
     variants: variants as ConfigVariants | undefined,
@@ -143,12 +159,16 @@ function configModelFor(model: CatalogModel, prefix = DEFAULT_DISPLAY_PREFIX): C
     modalities: {
       input: [...inputModalitiesForModel(model.id)],
     },
-    cost: {
-      input: costs.input,
-      output: costs.output,
-      cache_read: costs.cacheRead,
-      cache_write: costs.cacheWrite,
-    },
+    ...(rowCost !== null
+      ? {
+          cost: {
+            input: rowCost.input,
+            output: rowCost.output,
+            cache_read: rowCost.cacheRead,
+            cache_write: rowCost.cacheWrite,
+          },
+        }
+      : {}),
     status: "active",
   }
 }

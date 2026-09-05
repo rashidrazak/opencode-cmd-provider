@@ -67,6 +67,7 @@ export const MODEL_DEALS: Readonly<Record<string, ModelDeals>> = {
   "gpt-5.6-luna": { tier: "opensource", benchmark: {"intelligence":52.3,"tokPerSec":124.1}, overContext: {"input":0.4,"output":1.8,"cacheRead":0.04,"cacheWrite":0.5}, free: false, allowance: {"goat":20,"pro":30} },
   "gpt-5.6-sol": { tier: "opensource", benchmark: {"intelligence":60.9,"tokPerSec":69.6}, overContext: {"input":10,"output":45,"cacheRead":1,"cacheWrite":12.5}, free: false, allowance: {"goat":70,"pro":80} },
   "gpt-5.6-terra": { tier: "premium", benchmark: {"intelligence":56.6,"tokPerSec":112.8}, overContext: {"input":4,"output":18,"cacheRead":0.4,"cacheWrite":5}, free: false, allowance: {"goat":20,"pro":20} },
+  "gpt-6-astra": { tier: "premium", overContext: {"input":20,"output":75,"cacheRead":2,"cacheWrite":25}, free: false, allowance: {"goat":20,"pro":20} },
   "meituan/LongCat-2.0:free": { tier: "opensource", free: true },
   "meta/muse-spark-1.1": { tier: "premium", benchmark: {"intelligence":53.2}, free: false, allowance: {"goat":20,"pro":20} },
   "meta/muse-spark-1.2": { tier: "opensource", benchmark: {"intelligence":56.8}, free: false, allowance: {"goat":20,"pro":30} },
@@ -122,5 +123,5 @@ export const PLAN_CATALOG: Readonly<Record<PlanId, PlanInfo>> = {
 }
 
 export const DEAL_SOURCE_URL = "https://commandcode.ai/docs/resources/pricing-limits"
-export const DEAL_LAST_REFRESHED = "2026-09-04"
+export const DEAL_LAST_REFRESHED = "2026-09-05"
 export const DEAL_PACKAGE_VERSION = "docs"

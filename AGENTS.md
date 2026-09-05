@@ -26,7 +26,9 @@ decisions in `docs/adr/`.
 `src/catalog/snapshot.ts`, `src/catalog/facts.ts`,
 `src/catalog/classification.ts`, and `src/deals/catalog.ts` are generated
 (`scripts/refresh-snapshot.mjs`, `scripts/refresh-classification.mjs`,
-`scripts/refresh-deals.mjs`). Regenerate with `npm run refresh` — snapshot from the live models API; the
+`scripts/refresh-deals.mjs`). Regenerate with `npm run refresh` — the
+snapshot comes from the npm package's bundled models.md table (the sole
+membership authority since #130; the listing API is annotate-only); the
 RSC fixtures (`tests/fixtures/rsc-*.txt`) are re-captured from the live docs
 pages (`scripts/capture-rsc-fixtures.mjs`, all-or-nothing, loud on any
 failure); the classification module and the deals catalog are regenerated
