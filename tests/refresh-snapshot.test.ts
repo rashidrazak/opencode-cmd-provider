@@ -57,12 +57,19 @@ function runScript(args, env): Promise<{ status: number | null; stdout: string; 
 }
 
 function scriptEnv(mock: { url: string }) {
+  // Every enrichment source is pointed at the mock (which 404s unless the
+  // test provides a body) so a ladder needing a source degrades hermetically
+  // — a refresh test must never touch the live Command Code site.
   return {
     ...process.env,
     COMMANDCODE_API_BASE: mock.url,
     COMMANDCODE_REGISTRY_URL: `${mock.url}/registry`,
     COMMANDCODE_FACTS_URL: `${mock.url}/models.md`,
     COMMANDCODE_MODALITIES_URL: `${mock.url}/cli.mjs`,
+    COMMANDCODE_RSC_GOAT_URL: `${mock.url}/docs/plans/goat`,
+    COMMANDCODE_RSC_PRO_URL: `${mock.url}/docs/plans/pro`,
+    COMMANDCODE_MODELS_PAGE_URL: `${mock.url}/models-page.html`,
+    COMMANDCODE_MODELS_DETAIL_URL: `${mock.url}/model-detail`,
   }
 }
 
@@ -102,15 +109,19 @@ run([
             id: "claude-sonnet-5",
             name: "Claude Sonnet 5",
             contextLength: 1000000,
+            contextSource: "models.md",
             efforts: ["low", "medium", "high", "xhigh", "max"],
             cost: { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 },
+            costSource: "models.md",
           },
           {
             id: "gpt-6-astra",
             name: "GPT-6 Astra",
             contextLength: 1050000,
+            contextSource: "models.md",
             efforts: ["low", "medium", "high", "xhigh", "max"],
             cost: { input: 10, output: 50, cacheRead: 1, cacheWrite: 12.5 },
+            costSource: "models.md",
           },
         ])
         // The facts shim derives the maps from the package rows.
@@ -245,9 +256,13 @@ run([
   ],
 
   [
-    "a missing Context cell ships as contextLength null with a pending note (fallback ladder lands in #132)",
+    "a missing Context cell resolves through the ordered ladder: models.md (—) → CLI contextWindow, with per-step annotation",
     async () => {
-      const dir = await mkdtemp(join(tmpdir(), "cc-ctx-pending-"))
+      // Issue #132: a row whose models.md Context cell is "—" is no longer
+      // pending — the ordered ladder resolves it. Here the RSC pages are
+      // unavailable (mock 404s degrade to notes), so the CLI bundle's
+      // contextWindow (200000) resolves the row and the log names the step.
+      const dir = await mkdtemp(join(tmpdir(), "cc-ctx-ladder-"))
       const out = join(dir, "snapshot.ts")
       const mock = await startMockCc({
         models: API_MODELS,
@@ -267,11 +282,12 @@ run([
         )
         assert(result.status === 0, result.stderr || result.stdout)
         assert(
-          result.stdout.includes("context pending") && result.stdout.includes("zai-org/GLM-5.1"),
-          `expected a context-pending note naming the row, got stdout: ${result.stdout}`,
+          result.stdout.includes("context zai-org/GLM-5.1: 200000 (from CLI contextWindow)"),
+          `expected a per-step context annotation naming the CLI source, got stdout: ${result.stdout}`,
         )
         const mod = await import(out)
-        assertEqual(mod.MODEL_SNAPSHOT[0].contextLength, null)
+        assertEqual(mod.MODEL_SNAPSHOT[0].contextLength, 200000)
+        assertEqual(mod.MODEL_SNAPSHOT[0].contextSource, "cli")
         assertEqual(mod.MODEL_SNAPSHOT[0].name, "GLM-5.1")
         assertEqual(mod.MODEL_SNAPSHOT[0].cost, {
           input: 1.4,
@@ -287,9 +303,13 @@ run([
   ],
 
   [
-    "a missing price cell ships with cost null and a pending note; missing never zero-fills",
+    "a missing price cell fails loudly after the full cost ladder when no source has rates (costs never carry forward)",
     async () => {
-      const dir = await mkdtemp(join(tmpdir(), "cc-cost-pending-"))
+      // Issue #132 cost ladder: models.md (—) → models page index → detail
+      // page → RSC rates. With none of the enrichment sources configured the
+      // row is unshippable — a LOUD failure naming it, never a zero-fill and
+      // never a pending note. Missing must never read as free.
+      const dir = await mkdtemp(join(tmpdir(), "cc-cost-ladder-fail-"))
       const out = join(dir, "snapshot.ts")
       const mock = await startMockCc({
         models: API_MODELS,
@@ -307,17 +327,23 @@ run([
           ["scripts/refresh-snapshot.mjs", "--out", out, "--facts-out", join(dir, "facts.ts")],
           scriptEnv(mock),
         )
-        assert(result.status === 0, result.stderr || result.stdout)
+        assert(result.status !== 0, `expected non-zero exit, got ${result.status}`)
         assert(
-          result.stdout.includes("cost pending") && result.stdout.includes("a/model"),
-          `expected a cost-pending note naming the row, got stdout: ${result.stdout}`,
+          result.stderr.includes("a/model") &&
+            result.stderr.includes("no cost after the full fallback ladder"),
+          `expected a loud unshippable-row failure naming the model, got stderr: ${result.stderr}`,
         )
-        const mod = await import(out)
-        assertEqual(mod.MODEL_SNAPSHOT[0].cost, null)
-        const factsMod = await import(join(dir, "facts.ts"))
-        // Missing must never read as free: the row is absent from the
-        // facts cost map rather than present as all-zero.
-        assert(factsMod.MODEL_COSTS["a/model"] === undefined, "missing cost must not zero-fill")
+        assert(
+          /costs never carry forward/i.test(result.stderr),
+          `the loud failure must state that costs never carry forward, got: ${result.stderr}`,
+        )
+        let wrote = true
+        try {
+          await readFile(out, "utf-8")
+        } catch {
+          wrote = false
+        }
+        assert(!wrote, "no module must be written for an unshippable row")
       } finally {
         await mock.close()
         await rm(dir, { recursive: true, force: true })
@@ -459,16 +485,28 @@ run([
   ],
 
   [
-    "a double-missing row (Context AND price cells missing) ships with both pending signals, loudly noted",
+    "a double-missing row (Context AND price cells missing) resolves context via RSC and fails loudly on cost when no source has rates",
     async () => {
-      // The parent spec's unshippable-row loud failure engages only after
-      // the full fallback ladder (issue #132). In this ticket a row with
-      // both ship-bar cells missing ships with contextLength:null and
-      // cost:null, both pending notes logged — and is absent from the
-      // facts cost map (never zero-filled).
+      // The context ladder resolves the missing Context cell via the RSC
+      // slug records (the RSC step precedes CLI/LKG). The cost ladder finds
+      // no rates anywhere (page/detail/RSC absent) and fails loudly —
+      // unshippable row, never zero-filled.
       const dir = await mkdtemp(join(tmpdir(), "cc-double-missing-"))
       const out = join(dir, "snapshot.ts")
       const factsOut = join(dir, "facts.ts")
+      const slugPayload = (records) => `2:${JSON.stringify(records)}\n`
+      const rscRecord = {
+        slug: "double-missing",
+        id: "double/missing",
+        name: "Double Missing",
+        vendor: "double",
+        category: "opensource",
+        minPlanName: "Go",
+        contextWindow: 333000,
+        tiers: [],
+        caps: {},
+        reasoning: false,
+      }
       const mock = await startMockCc({
         models: API_MODELS,
         registry: { "dist-tags": { latest: "1.49.1" } },
@@ -479,30 +517,28 @@ run([
           "| `double/missing` | Double Missing | — | — | — | Go and above | best |\n",
         modalitiesBundle:
           'const models={DM:{name:"Double Missing",id:"double/missing",inputModalities:["text"],contextWindow:1e6}}',
+        rscGoat: slugPayload([rscRecord]),
+        rscPro: slugPayload([rscRecord]),
       })
       try {
+        const env = {
+          ...scriptEnv(mock),
+          COMMANDCODE_RSC_GOAT_URL: `${mock.url}/docs/plans/goat`,
+          COMMANDCODE_RSC_PRO_URL: `${mock.url}/docs/plans/pro`,
+        }
         const result = await runScript(
           ["scripts/refresh-snapshot.mjs", "--out", out, "--facts-out", factsOut],
-          scriptEnv(mock),
+          env,
         )
-        assert(result.status === 0, `expected success with notes, got stderr: ${result.stderr}`)
+        assert(result.status !== 0, `expected non-zero exit, got ${result.status}`)
         assert(
-          result.stdout.includes("context pending") && result.stdout.includes("double/missing"),
-          `expected context-pending note, got stdout: ${result.stdout}`,
+          result.stdout.includes("context double/missing: 333000 (from RSC contextWindow)"),
+          `expected the RSC context step to resolve first, got stdout: ${result.stdout}`,
         )
         assert(
-          result.stdout.includes("cost pending") && result.stdout.includes("double/missing"),
-          `expected cost-pending note, got stdout: ${result.stdout}`,
-        )
-        const mod = await import(out)
-        const row = mod.MODEL_SNAPSHOT.find((m) => m.id === "double/missing")
-        assert(row, "double-missing row must ship (membership is unconditional)")
-        assertEqual(row.contextLength, null)
-        assertEqual(row.cost, null)
-        const factsMod = await import(factsOut)
-        assert(
-          factsMod.MODEL_COSTS["double/missing"] === undefined,
-          "a missing cost must never zero-fill into the facts map",
+          result.stderr.includes("double/missing") &&
+            result.stderr.includes("no cost after the full fallback ladder"),
+          `expected a loud cost failure naming the row, got stderr: ${result.stderr}`,
         )
       } finally {
         await mock.close()

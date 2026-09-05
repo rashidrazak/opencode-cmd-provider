@@ -37,10 +37,11 @@ windows, and GOAT/Pro monthly allowances. Bundled in `src/deals/catalog.ts`
 and regenerated via `npm run refresh:deals` (live, with 5xx/network fallback
 to the committed `tests/fixtures/rsc-*.txt` fixtures and loud 4xx failure;
 offline via `-- --fixtures`).
-The refresh **fails loudly (exit 1) when the RSC/fixture records lack a
-snapshot model**, so a partial catalog can never be emitted silently — the
-fixtures are re-captured from the live docs pages on every `npm run refresh`
-and by the daily catalog-refresh cron, so they stay in sync with the snapshot.
+Deals are a **subset of membership** (issue #132): a snapshot model with no
+RSC/deals record ships core-only — enrichment skipped, a `deals pending —`
+report logged, never an exit-1. The fixtures are re-captured on every
+`npm run refresh` and by the daily catalog-refresh cron so they stay in sync
+with the snapshot.
 _Avoid_: pricing table, deal feed
 
 **Deals intelligence**:

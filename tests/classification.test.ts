@@ -8,6 +8,7 @@ import { MODEL_SNAPSHOT } from "../src/catalog/snapshot.js"
 import {
   CLASSIFICATION_OVERRIDES,
   MODEL_REASONING_CAPABILITY,
+  MODEL_REASONING_PENDING,
 } from "../src/catalog/classification.js"
 import {
   CLASSIFICATION_OVERRIDES as overridesSource,
@@ -22,24 +23,40 @@ const MODULE_TEXT = readFileSync(
 
 run([
   [
-    "every Snapshot model has a classification entry (release-time staleness gate)",
+    "every Snapshot model is either classified or listed as pending (sparse map, issue #132)",
     () => {
+      // Issue #132: the capability map is sparse — only models with
+      // evidence (efforts / RSC flag / page Reasoning bit) get an entry.
+      // A model with NO evidence must be listed in MODEL_REASONING_PENDING
+      // (never silently absent). This is the release-time staleness gate:
+      // when the Snapshot gains a model and classification was not
+      // regenerated, npm test fails loudly here.
+      const snapshotIds = new Set(MODEL_SNAPSHOT.map((model) => model.id))
+      const pending = new Set(MODEL_REASONING_PENDING)
+      const classified = new Set(Object.keys(MODEL_REASONING_CAPABILITY))
       const missing = MODEL_SNAPSHOT.filter(
-        (model) => typeof MODEL_REASONING_CAPABILITY[model.id] !== "boolean",
-      )
+        (model) => !classified.has(model.id) && !pending.has(model.id),
+      ).map((model) => model.id)
       assertEqual(
-        missing.map((model) => model.id),
+        missing,
         [] as string[],
-        `classification module is stale — regenerate with \`npm run refresh\` (or \`npm run refresh:classification -- --fixtures\`)`,
+        `classification module is stale — every snapshot model must be classified or pending; ` +
+          `regenerate with \`npm run refresh\` (or \`npm run refresh:classification -- --fixtures\`)`,
       )
     },
   ],
   [
-    "classification has no entries outside the Snapshot (no stale derived ids)",
+    "classification has no entries or pending ids outside the Snapshot (no stale derived ids)",
     () => {
       const snapshotIds = new Set(MODEL_SNAPSHOT.map((model) => model.id))
       const stale = Object.keys(MODEL_REASONING_CAPABILITY).filter((id) => !snapshotIds.has(id))
       assertEqual(stale, [] as string[], "stale classification entries must be regenerated away")
+      const stalePending = MODEL_REASONING_PENDING.filter((id) => !snapshotIds.has(id))
+      assertEqual(
+        stalePending,
+        [] as string[],
+        "stale pending ids must be regenerated away (pending is a snapshot subset)",
+      )
     },
   ],
   [

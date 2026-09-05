@@ -3,6 +3,7 @@
 // coarse Context string, Caps bits, slug list + banded-pricing notes.
 import {
   parseCapsLabel,
+  parseModelDetailRates,
   parseModelsPage,
   parseRateCell,
   SLUG_TO_SNAPSHOT_ID,
@@ -312,6 +313,49 @@ run([
           `parse-models-page: pending slugs not yet in SLUG_TO_SNAPSHOT_ID: ${pending.join(", ")}`,
         )
       }
+    },
+  ],
+])
+
+// --------------------------------------------------------------------------
+// Model detail page parser (issue #132 — the cost ladder's third step).
+// --------------------------------------------------------------------------
+
+const DETAIL_PAGE = `<div class="grid grid-cols-2 rail-2 rail-lg-noleft">
+<div class="border-b border-border/60 px-5 py-[18px] odd:border-r odd:border-border/60"><div class="flex items-center gap-1.5 font-mono text-[10px] tracking-[0.1em] uppercase text-muted-foreground">Input<button type="button" aria-label="Input — Price per 1M input (prompt) tokens." class="relative flex size-[15px] cursor-help items-center justify-center border border-border text-[11px] leading-none text-muted-foreground/70 transition-colors hover:text-foreground focus:outline-none focus-visible:text-foreground focus-visible:ring-1 focus-visible:ring-current after:absolute after:-inset-[14.5px] after:content-[&#x27;&#x27;]" data-state="closed">i</button></div><div class="mt-1 text-[21px] font-semibold tabular-nums">$2.50<!-- --> <span class="text-xs font-normal text-muted-foreground/70">/M</span></div></div>
+<div class="border-b border-border/60 px-5 py-[18px] odd:border-r odd:border-border/60"><div class="flex items-center gap-1.5 font-mono text-[10px] tracking-[0.1em] uppercase text-muted-foreground">Output<button type="button" aria-label="Output — Price per 1M output (generated) tokens." class="relative flex size-[15px] cursor-help items-center justify-center border border-border text-[11px] leading-none text-muted-foreground/70 transition-colors hover:text-foreground focus:outline-none focus-visible:text-foreground focus-visible:ring-1 focus-visible:ring-current after:absolute after:-inset-[14.5px] after:content-[&#x27;&#x27;]" data-state="closed">i</button></div><div class="mt-1 text-[21px] font-semibold tabular-nums">$15<!-- --> <span class="text-xs font-normal text-muted-foreground/70">/M</span></div></div>
+<div class="border-b border-border/60 px-5 py-[18px] odd:border-r odd:border-border/60"><div class="flex items-center gap-1.5 font-mono text-[10px] tracking-[0.1em] uppercase text-muted-foreground">Cache read<button type="button" aria-label="Cache read — Price per 1M cached input tokens re-read from context — far cheaper than fresh input." class="relative flex size-[15px] cursor-help items-center justify-center border border-border text-[11px] leading-none text-muted-foreground/70 transition-colors hover:text-foreground focus:outline-none focus-visible:text-foreground focus-visible:ring-1 focus-visible:ring-current after:absolute after:-inset-[14.5px] after:content-[&#x27;&#x27;]" data-state="closed">i</button></div><div class="mt-1 text-[21px] font-semibold tabular-nums">$0.25<!-- --> <span class="text-xs font-normal text-muted-foreground/70">/M</span></div></div>
+</div>`
+
+run([
+  [
+    "parseModelDetailRates reads Input/Output/Cache read and leaves absent Cache write null",
+    () => {
+      const rates = parseModelDetailRates(DETAIL_PAGE)
+      assertEqual(rates, { input: 2.5, output: 15, cacheRead: 0.25, cacheWrite: null })
+    },
+  ],
+  [
+    "parseModelDetailRates returns null rates when no pricing rows exist",
+    () => {
+      assertEqual(parseModelDetailRates("<html><body></body></html>"), {
+        input: null,
+        output: null,
+        cacheRead: null,
+        cacheWrite: null,
+      })
+    },
+  ],
+  [
+    "parseModelDetailRates fails loudly when a present Input row lacks a price cell",
+    () => {
+      // An Input label present but with no `$n /M` cell is a shape change —
+      // the cost ladder must never guess a price from a half-parsed page.
+      const broken = DETAIL_PAGE.replace(
+        '<div class="mt-1 text-[21px] font-semibold tabular-nums">$2.50',
+        '<div class="mt-1 text-[21px] font-semibold tabular-nums">',
+      )
+      throws(() => parseModelDetailRates(broken), /row present without a price cell/)
     },
   ],
 ])

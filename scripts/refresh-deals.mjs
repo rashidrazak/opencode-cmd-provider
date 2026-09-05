@@ -47,16 +47,16 @@ export const DEFAULT_RSC_PRO_URL = RSC_PAGES.pro.defaultUrl
 const DEFAULT_OUT = resolve(import.meta.dirname, "..", "src", "deals", "catalog.ts")
 
 // Coverage gate for the RSC path. Re-exported under its historical name:
-// the gate itself lives in the shared record source so the classification
+// The gate itself lives in the shared record source so the classification
 // generator reuses it without importing from the Deals generator
 // (issue #109). `bySnapshotId` is the Map built by `buildRscInputs` (the
 // records are already snapshot-keyed by extractPlanPageRsc, which applies
-// the slug-id alias). A partial catalog silently drops the TUI sidebar
-// "Command Code" section for the missing models, so refresh must fail
-// loudly instead of emitting a partial catalog (issue: Ox Alpha /
-// DeepSeek V4 Flash Vision (exp) showed no section because the fixtures
-// predated them). `--allow-partial` overrides for tooling that must not
-// exit non-zero (e.g. the release pipeline's non-blocking deals check).
+// the slug-id alias). Since issue #132 the gate is a pending-report
+// primitive (missingSnapshotModels), never an abort: deals are a subset
+// of membership, a missing record ships the model core-only with a
+// `deals pending` report, and `--allow-partial` remains an accepted no-op
+// for tooling that passed it historically (e.g. the release pipeline's
+// non-blocking deals check).
 export { missingSnapshotModels as missingDealsModelsFromRsc } from "./rsc-source.mjs"
 
 function argValue(name) {
@@ -385,7 +385,7 @@ async function main() {
   const out = argValue("--out") ?? DEFAULT_OUT
   let module
   try {
-    // Build the inputs once — the coverage gate consumes
+    // Build the inputs once — the pending report consumes
     // bySnapshotId, and the emit step consumes the same map plus
     // the allowance maps.
     const { bySnapshotId, goatBySnapshot, proBySnapshot } = buildRscInputs({
@@ -393,24 +393,21 @@ async function main() {
       goatRsc,
       proRsc,
     })
-    // Coverage gate: a partial catalog silently drops the TUI sidebar
-    // "Command Code" section for the missing models. The RSC path
-    // keys records by snapshot id directly (extractPlanPageRsc
-    // applies the alias), so the gate is a direct id-set comparison
-    // via the shared missingSnapshotModels gate.
-    if (!process.argv.includes("--allow-partial")) {
-      const { missing, covered } = missingSnapshotModels(bySnapshotId)
-      if (missing.length > 0) {
-        console.error(
-          `refresh-deals: aborting — ${missing.length} snapshot model(s) have no RSC record ` +
-            `(${covered}/${covered + missing.length} covered): ${missing.join(", ")}. ` +
-            `The docs may have added models without exposing them in the RSC, or the ` +
-            `RSC fixtures are stale. Re-run against live docs or refresh the RSC fixtures ` +
-            `before regenerating; the generated catalog would silently hide the Command Code ` +
-            `sidebar section for these models.`,
-        )
-        process.exit(1)
-      }
+    // Deals are a subset of membership (issue #132): a snapshot model with
+    // no RSC record simply skips enrichment — the picker/sidebar keep the
+    // core entry and the missing record is reported as a pending line,
+    // NEVER an abort. (The old coverage gate exited 1 here; the parent
+    // spec #129's only loud classes are an unshippable ship-bar row and a
+    // parser shape change.) `--allow-partial` remains an accepted no-op for
+    // callers that passed it historically.
+    const { missing, covered } = missingSnapshotModels(bySnapshotId)
+    if (missing.length > 0) {
+      console.log(
+        `refresh-deals: deals pending — ${missing.length} snapshot model(s) have no RSC record ` +
+          `(${covered}/${covered + missing.length} covered): ${missing.join(", ")}. ` +
+          `These models ship core-only (enrichment skipped) until the docs/RSC ` +
+          `fixtures carry them.`,
+      )
     }
     module = buildDealsModule({
       bySnapshotId,

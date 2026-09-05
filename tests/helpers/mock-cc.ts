@@ -65,6 +65,8 @@ export interface MockCcOptions {
   rscPro?: string
   /** HTML served at GET /models-page.html (the models page index, issue #131); 404 when unset. */
   modelsPageHtml?: string
+  /** HTML served at GET /model-detail/<slug> (model detail pages, issue #132 cost ladder); 404 when unset. */
+  modelDetailPages?: Record<string, string>
   /** status served by all three RSC endpoints when set (e.g. 500 to exercise the 5xx → fixtures fallback). */
   rscStatus?: number
   /** called with the headers of each GET /docs/resources/pricing-limits request */
@@ -350,6 +352,18 @@ export function startMockCc(
         }
         res.writeHead(200, { "content-type": "text/x-component" })
         res.end(options.rscPro)
+        return
+      }
+      if (req.url?.startsWith("/model-detail/") && req.method === "GET") {
+        const slug = req.url.slice("/model-detail/".length)
+        const body = options.modelDetailPages?.[slug]
+        if (body === undefined) {
+          res.writeHead(404)
+          res.end("not found")
+          return
+        }
+        res.writeHead(200, { "content-type": "text/html" })
+        res.end(body)
         return
       }
       if (req.url === "/models-page.html" && req.method === "GET") {

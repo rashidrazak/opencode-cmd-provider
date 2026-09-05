@@ -324,3 +324,93 @@ export function slugToSnapshotId(slug) {
     `could not resolve models-page slug "${String(slug)}": unmapped (add a SLUG_TO_SNAPSHOT_ID entry or pin the shape)`,
   )
 }
+
+// ---------------------------------------------------------------------------
+// Model detail page parser (issue #132 — the cost ladder's third step). The
+// detail page (`https://commandcode.ai/models/<slug>`) is live-fetch-only:
+// never pinned as a fixture (issue #129 decision), parsed purely when the
+// cost ladder needs it. The page renders a 2×2 pricing grid whose rows are
+// self-contained `border-b border-border/60` divs:
+//
+//   <div class="border-b ..."><div class="... uppercase ...">Input<button
+//     type="button" aria-label="Input — Price per 1M input (prompt)
+//     tokens." ...>i</button></div>
+//   <div class="mt-1 text-[21px] font-semibold tabular-nums">$2.50<!-- -->
+//     <span ...>/M</span></div></div>
+//
+// Verified live 2026-09-05 against /models/gpt-5-4 and /models/gpt-6-astra:
+// every label's price cell is the `/M` $n cell in the SAME row div, and
+// **Cache write is never a row on real detail pages** (those models carry
+// only Input/Output/Cache read; the index's per-row `cacheWrite` often
+// renders as "—"). So the parser reads Input/Output/Cache read and leaves
+// cacheWrite null-unless-present.
+//
+// Degradation contract (the refresh cost ladder consumes this): a page with
+// NO parseable pricing rows yields all-null (a detail page that did not
+// render a price table — the ladder moves to the RSC step). A page whose
+// pricing grid has SOME rows but a *malformed* cell (a label whose row has
+// no `$n /M` cell) is a loud shape failure — the cost ladder must never
+// guess a price from a half-parsed page.
+// ---------------------------------------------------------------------------
+
+const DETAIL_ROW_RE =
+  /<div class="border-b border-border\/60 px-5 py-\[18px\][\s\S]*?<\/div><\/div>/g
+
+const DETAIL_LABEL_RE =
+  /uppercase text-muted-foreground">(Input|Output|Cache read|Cache write)<button/
+const DETAIL_PRICE_RE = /text-\[21px\] font-semibold tabular-nums">\$([0-9.]+)/
+
+/**
+ * Parses the pricing grid of a model detail page into per-1M rates.
+ * Pure: no network, no file I/O.
+ *
+ * - A rate the page does not render (cache write is nearly always absent)
+ *   parses to null.
+ * - A page with NO pricing rows yields all-null — the caller treats that
+ *   as "the detail page carries no price table" and walks on.
+ * - A page whose grid has at least one row where a label lacks its `$n /M`
+ *   cell is a loud shape failure (throws, naming the label) — never a
+ *   silently guessed price.
+ *
+ * @param {string} html the detail page HTML
+ * @returns {{ input: number|null, output: number|null, cacheRead: number|null, cacheWrite: number|null }}
+ */
+export function parseModelDetailRates(html) {
+  const out = { input: null, output: null, cacheRead: null, cacheWrite: null }
+  // Isolate each pricing row div, then read its own label + price cell.
+  // A row div that does not carry one of the four labels is unrelated
+  // content (benchmark tiles etc) and is skipped.
+  let sawPricingRow = false
+  for (const rowMatch of html.matchAll(DETAIL_ROW_RE)) {
+    const row = rowMatch[0]
+    const labelMatch = row.match(DETAIL_LABEL_RE)
+    if (!labelMatch) continue
+    sawPricingRow = true
+    const label = labelMatch[1]
+    const priceMatch = row.match(DETAIL_PRICE_RE)
+    if (!priceMatch) {
+      throw new Error(
+        `could not parse model detail rates: "${label}" row present without a price cell`,
+      )
+    }
+    const value = Number(priceMatch[1])
+    if (!Number.isFinite(value) || value < 0) {
+      throw new Error(`could not parse model detail rates: non-numeric "${label}" price`)
+    }
+    out[
+      label === "Input"
+        ? "input"
+        : label === "Output"
+          ? "output"
+          : label === "Cache read"
+            ? "cacheRead"
+            : "cacheWrite"
+    ] = value
+  }
+  // A page that has pricing rows but no Input row is a shape change too
+  // (the Input row is the one stable row across every real model).
+  if (sawPricingRow && out.input === null) {
+    throw new Error("could not parse model detail rates: no Input row found")
+  }
+  return out
+}
