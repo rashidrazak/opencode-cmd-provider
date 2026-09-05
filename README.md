@@ -193,7 +193,9 @@ Actions cron
 (`.github/workflows/catalog-refresh.yml`, 06:00 UTC, also manually
 triggerable via `workflow_dispatch`) runs the same pipeline: when upstream
 moved it opens a `chore: catalog refresh` PR whose body is the human-readable
-diff from `scripts/diff-catalog.mjs` — model catalog, reasoning
+diff from `scripts/diff-catalog.mjs` — model catalog (change table plus
+removed-models, pending-enrichment, carried-forward-context, cost-fallback,
+API-divergence, and banded-pricing subsections), reasoning
 classification (flips, new reasoning models, retirements, active overrides),
 and deals sections; when nothing meaningful drifted it exits silently (a
 run whose only change is the refreshed-date stamps opens no PR).
