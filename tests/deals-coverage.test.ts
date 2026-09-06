@@ -53,7 +53,7 @@ run([
       // skew (catalog-refresh run 33924108227: the docs shipped gpt-6-astra
       // before the package table did) — the generators drop them by design
       // (the !snapshotIds.has(sid) guards in buildRscInputs /
-      // deriveCapabilityMap, locked by synthetic drop tests), so they must
+      // deriveCapability, locked by synthetic drop tests), so they must
       // not fail the suite. The reverse direction — a snapshot model with
       // no record — stays loud via the generators' coverage gates
       // (missingSnapshotModels) and the MODEL_DEALS-entry test above.

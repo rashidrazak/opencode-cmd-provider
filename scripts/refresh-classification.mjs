@@ -216,18 +216,6 @@ export function deriveCapability(bySnapshotId, options = {}) {
 }
 
 /**
- * Backward-compatible single-source derivation (RSC records only). Kept for
- * callers/tests that predate the any-true channels: RSC-only evidence.
- *
- * @param {Map<string, Record<string, unknown>>} bySnapshotId
- * @param {Record<string, { capability: boolean, justification: string }>} [overrides]
- * @returns {Record<string, boolean>}
- */
-export function deriveCapabilityMap(bySnapshotId, overrides = CLASSIFICATION_OVERRIDES) {
-  return deriveCapability(bySnapshotId, { overrides }).capability
-}
-
-/**
  * Builds the classification module text from the evidence channels.
  *
  * @param {{ goatRsc: string, proRsc: string, lastRefreshed: string, effortsById?: Record<string, string[]>, modelsPageHtml?: string, overrides?: Record<string, { capability: boolean, justification: string }> }} args
