@@ -2,6 +2,15 @@
 
 Status: accepted
 
+> **Status note (issue #135).** The membership half of this decision is
+> **superseded by [ADR-0008](0008-models-md-primary-catalog.md)**: the
+> Snapshot's membership comes from the npm package models.md table (every
+> row ships), not the provider listing API. The mechanism halves stand
+> unchanged — config-hook injection, declared-model merge semantics (user
+> entries win and survive, including retired models), the `[CMD]` display
+> prefix, and the `COMMANDCODE_API_KEY` env declaration. This ADR keeps
+> its original text so the decision history stays readable.
+
 OpenCode only fires a plugin's `provider.models` hook for providers present in its
 models.dev catalog, and `commandcode` is not in that catalog — so users had to declare
 every model by hand in `opencode.json`, which was the plugin's biggest UX wart. We decided
