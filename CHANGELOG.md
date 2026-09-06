@@ -1,3 +1,58 @@
+## 1.7.0 - 2026-09-06
+
+### Model catalog: models.md-primary with enrichment that never blocks shipping
+
+The Model catalog's membership authority flipped: the npm `command-code`
+package's bundled models.md table is now the sole authority — every row
+ships in the Snapshot on the next refresh, even when the provider listing
+API lags (day-1 models like `gpt-6-astra` appear immediately). The listing
+API is demoted to a pure divergence reporter (annotate-only, zero gating
+power, zero field writes), and every other source — RSC slug records, the
+CLI bundle, the Command Code models page — is enrichment that fills gaps
+but never decides membership, never wins a ship-bar field, and never gates
+the refresh (see ADR-0008 and the rewritten glossary in `CONTEXT.md`).
+
+- **Ship-bar parsing** — `scripts/parse-facts.mjs` converts coarse Context
+  tokens through a pinned decimal table; a missing Context cell ships as
+  `null` (pending, resolved by the fallback ladder), a missing price cell
+  ships cost-less (never zero-filled, missing never reads as free), and
+  unparseable cells fail loudly. `facts.ts` is now a re-export shim over
+  the snapshot rows, keeping the consumer contract stable.
+- **Enrichment fallback ladders** — context resolves models.md → RSC
+  `contextWindow` → CLI bundle → carried-forward last-known-good (each
+  step annotated, provenance recorded on the row); costs resolve models
+  page index → model detail page → RSC rates (never carried forward, so a
+  model going free is never billed at its old rate); modalities fall back
+  CLI bundle → models page Caps Vision bit → text-only. Total absence of
+  context or cost is a loud failure (unshippable ship-bar row) — one of
+  the two surviving loud failure classes.
+- **Sparse classification** — reasoning derives any-true-wins across
+  models.md efforts, the RSC `reasoning` flag, and the models page Caps
+  Reasoning bit; models with no evidence anywhere ship in a visible
+  pending bucket and behave as non-reasoning until evidence arrives.
+- **Models page index** — `scripts/parse-models-page.mjs` parses display
+  rates, Context strings, and Caps bits from the Command Code models page
+  (shape-strict rows, pinned Caps labels, footnote/banded-pricing notes),
+  with a pinned 68-entry slug-to-id join map and a re-captured
+  `tests/fixtures/models-page.html`.
+- **Richer refresh diffs** — a package-table row removal prunes the
+  Snapshot immediately with a loud Removed-models section; the Model
+  catalog diff gains five enrichment subsections (pending enrichment per
+  model, carried-forward context, cost-fallback provenance, API
+  divergence, banded-pricing notes); identical catalogs still
+  short-circuit to No changes.
+- **Catalog refresh** — snapshot refreshed to `command-code@1.49.1` (68
+  models); classification 68 entries, deals 71 entries, coverage gate OK.
+- **Fixes** — facts rows filtered to snapshot ids (an ahead-of-API
+  models.md row broke the cron's stale-entry check); RSC fixture
+  assertions tolerate docs-ahead-of-API records.
+
+### Follow-ups
+
+- Open issues carried forward: #136 (reasoning text rendered as normal
+  output), #102 (TUI/server init via npm package name), #90 (expired-deal
+  filtering).
+
 ## 1.6.5 - 2026-09-04
 
 Automated catalog refresh.
