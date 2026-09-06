@@ -78,6 +78,22 @@ import { readFile } from "node:fs/promises"
  * @property {string} [dateLabel]          Human label for the date pair (e.g. "FACTS_LAST_REFRESHED"). Defaults to "Last refreshed".
  * @property {unknown} [beforeFacts]       The "before" facts payload (MODEL_COSTS / MODEL_EFFORTS) — the snapshot kind diffs base pricing and efforts when provided.
  * @property {unknown} [afterFacts]        The "after" facts payload.
+ * @property {SnapshotEnrichment} [enrichment]  Refresh-time enrichment for the snapshot kind (issue #134): pending lists, ladder provenance, API divergence, banded notes. Rendered as subsections after the change table.
+ */
+
+/**
+ * @typedef {Object} SnapshotEnrichment
+ * The refresh-time input for the snapshot kind's six #134 sections. Built
+ * by `scripts/build-enrichment.mjs` from the "after" extracts + refresh
+ * log; every field is optional and every missing/empty field omits its
+ * subsection. All lists are sorted for deterministic output.
+ * @property {string[]} [pendingClassification]  Snapshot ids in MODEL_REASONING_PENDING.
+ * @property {string[]} [pendingDeals]           Snapshot ids with no MODEL_DEALS record.
+ * @property {string[]} [pendingModalities]      Snapshot ids with a modalities-pending log report.
+ * @property {Array<{id: string, contextLength: number}>} [carriedForward]  Rows whose contextSource is "carried-forward".
+ * @property {Array<{id: string, source: string}>} [costFallbacks]  Rows whose costSource is not "models.md".
+ * @property {{ inMembershipNotApi?: string[], inApiNotMembership?: string[], skipped?: boolean }} [apiDivergence]  The annotate-only divergence notes (both directions, or the skipped/matches state).
+ * @property {string[]} [bandedNotes]            The models-page verification notes.
  */
 
 /**
@@ -481,6 +497,198 @@ function classificationCategory(id, capability, efforts) {
   return { kind: "none" }
 }
 
+/**
+ * The "Removed models" loud section (issue #134): one bullet per model
+ * present on the before side but absent after (a package-table row
+ * removal prunes the Snapshot immediately). Derived from before/after
+ * alone — no enrichment input needed. Empty when nothing was removed
+ * (added-only worlds stay quiet).
+ *
+ * @param {Map<string, unknown>} beforeIndex
+ * @param {Map<string, unknown>} afterIndex
+ * @returns {string[]}
+ */
+function removedSectionLines(beforeIndex, afterIndex) {
+  const removed = [...beforeIndex.keys()]
+    .filter((id) => !afterIndex.has(id))
+    .sort((a, b) => a.localeCompare(b))
+  if (removed.length === 0) return []
+  const lines = [`### Removed models (${removed.length})`, ""]
+  for (const id of removed) {
+    const before = /** @type {CatalogModel | undefined} */ (beforeIndex.get(id))
+    const name = before && typeof before.name === "string" ? before.name : "—"
+    const ctx =
+      before && typeof before.contextLength === "number" ? ` · ${before.contextLength} ctx` : ""
+    lines.push(`- \`${id}\`: ${name}${ctx} — package row removed, pruned from the Snapshot`)
+  }
+  lines.push("")
+  return lines
+}
+
+/**
+ * Normalizes a `SnapshotEnrichment` input: every list sorted + unique,
+ * every missing field an empty list. Divergence is "known" when the
+ * `apiDivergence` key is present at all (empty lists + skipped false =
+ * the API matches membership); an absent key renders no section, so a
+ * refresh without captured enrichment stays backward compatible.
+ *
+ * @param {SnapshotEnrichment | undefined} enrichment
+ * @returns {{ pendingClassification: string[], pendingDeals: string[], pendingModalities: string[], carriedForward: Array<{id: string, contextLength: number}>, costFallbacks: Array<{id: string, source: string}>, apiDivergence: { inMembershipNotApi: string[], inApiNotMembership: string[], skipped: boolean, known: boolean } | null, bandedNotes: string[] }}
+ */
+function enrichmentOf(enrichment) {
+  const sorted = (ids) =>
+    [...new Set((Array.isArray(ids) ? ids : []).filter((id) => typeof id === "string"))].sort(
+      (a, b) => a.localeCompare(b),
+    )
+  const rec = enrichment !== null && typeof enrichment === "object" ? enrichment : {}
+  const divergence =
+    rec.apiDivergence !== null && typeof rec.apiDivergence === "object" ? rec.apiDivergence : null
+  const inMembershipNotApi = sorted(divergence?.inMembershipNotApi)
+  const inApiNotMembership = sorted(divergence?.inApiNotMembership)
+  const skipped = divergence?.skipped === true
+  // Presence of the key is the signal: build-enrichment.mjs always emits
+  // it when the refresh log carried a divergence line (either direction,
+  // the matches line, or the skipped line). An absent key means the
+  // refresh never captured divergence — render nothing.
+  const known = divergence !== null
+  return {
+    pendingClassification: sorted(rec.pendingClassification),
+    pendingDeals: sorted(rec.pendingDeals),
+    pendingModalities: sorted(rec.pendingModalities),
+    carriedForward: (Array.isArray(rec.carriedForward) ? rec.carriedForward : [])
+      .filter(
+        (entry) =>
+          entry !== null &&
+          typeof entry === "object" &&
+          typeof entry.id === "string" &&
+          typeof entry.contextLength === "number",
+      )
+      .sort((a, b) => a.id.localeCompare(b.id)),
+    costFallbacks: (Array.isArray(rec.costFallbacks) ? rec.costFallbacks : [])
+      .filter(
+        (entry) =>
+          entry !== null &&
+          typeof entry === "object" &&
+          typeof entry.id === "string" &&
+          typeof entry.source === "string",
+      )
+      .sort((a, b) => a.id.localeCompare(b.id)),
+    apiDivergence:
+      divergence === null ? null : { inMembershipNotApi, inApiNotMembership, skipped, known },
+    bandedNotes: [...new Set(Array.isArray(rec.bandedNotes) ? rec.bandedNotes : [])].sort((a, b) =>
+      a.localeCompare(b),
+    ),
+  }
+}
+
+/**
+ * The "Pending enrichment" subsection (issue #134): one bullet per model
+ * with a pending reason, reasons in fixed order (classification /
+ * modalities / deals) so the output is deterministic.
+ *
+ * @param {{ pendingClassification: string[], pendingDeals: string[], pendingModalities: string[] }} pending
+ * @returns {string[]}
+ */
+function pendingEnrichmentSectionLines({ pendingClassification, pendingDeals, pendingModalities }) {
+  const classSet = new Set(pendingClassification)
+  const modSet = new Set(pendingModalities)
+  const dealsSet = new Set(pendingDeals)
+  const ids = [...new Set([...classSet, ...modSet, ...dealsSet])].sort((a, b) => a.localeCompare(b))
+  if (ids.length === 0) return []
+  const lines = [`### Pending enrichment (${ids.length})`, ""]
+  for (const id of ids) {
+    const reasons = []
+    if (classSet.has(id)) reasons.push("classification pending")
+    if (modSet.has(id)) reasons.push("modalities pending")
+    if (dealsSet.has(id)) reasons.push("deals pending")
+    lines.push(`- \`${id}\`: ${reasons.join(", ")}`)
+  }
+  lines.push("")
+  return lines
+}
+
+/**
+ * The "Carried-forward context" subsection (issue #134): one bullet per
+ * row whose context ladder resolved at the carried-forward LKG step.
+ *
+ * @param {Array<{id: string, contextLength: number}>} carriedForward
+ * @returns {string[]}
+ */
+function carriedForwardSectionLines(carriedForward) {
+  if (carriedForward.length === 0) return []
+  const lines = [`### Carried-forward context (${carriedForward.length})`, ""]
+  for (const entry of carriedForward) {
+    lines.push(`- \`${entry.id}\`: ${entry.contextLength} (carried forward from previous snapshot)`)
+  }
+  lines.push("")
+  return lines
+}
+
+/**
+ * The "Cost-fallback provenance" subsection (issue #134): one bullet per
+ * row whose cost ladder resolved past the models.md cell.
+ *
+ * @param {Array<{id: string, source: string}>} costFallbacks
+ * @returns {string[]}
+ */
+function costFallbackSectionLines(costFallbacks) {
+  if (costFallbacks.length === 0) return []
+  const lines = [`### Cost-fallback provenance (${costFallbacks.length})`, ""]
+  for (const entry of costFallbacks) {
+    lines.push(`- \`${entry.id}\`: cost from ${entry.source}`)
+  }
+  lines.push("")
+  return lines
+}
+
+/**
+ * The "API divergence" subsection (issue #134): the annotate-only
+ * set-diff notes in both directions, or the matches line when the API
+ * matches membership, or the skipped line when the API was unreachable.
+ * Null (unknown) renders nothing — a missing enrichment input stays
+ * backward compatible.
+ *
+ * @param {{ inMembershipNotApi: string[], inApiNotMembership: string[], skipped: boolean, known: boolean } | null} divergence
+ * @returns {string[]}
+ */
+function apiDivergenceSectionLines(divergence) {
+  if (divergence === null || !divergence.known) return []
+  const lines = ["### API divergence", ""]
+  if (divergence.skipped) {
+    lines.push("- Divergence note skipped (listing API unreachable or unparseable)", "")
+    return lines
+  }
+  if (divergence.inMembershipNotApi.length === 0 && divergence.inApiNotMembership.length === 0) {
+    lines.push("- Listing API matches package membership", "")
+    return lines
+  }
+  for (const id of divergence.inMembershipNotApi) {
+    lines.push(`- \`${id}\`: in package membership but not served by the listing API`)
+  }
+  for (const id of divergence.inApiNotMembership) {
+    lines.push(`- \`${id}\`: served by the listing API but not in package membership`)
+  }
+  lines.push("")
+  return lines
+}
+
+/**
+ * The "Banded pricing" subsection (issue #134): the models-page
+ * verification notes verbatim (base rate shipped, verify against RSC).
+ *
+ * @param {string[]} bandedNotes
+ * @returns {string[]}
+ */
+function bandedPricingSectionLines(bandedNotes) {
+  if (bandedNotes.length === 0) return []
+  const lines = [`### Banded pricing (${bandedNotes.length})`, ""]
+  for (const note of bandedNotes) {
+    lines.push(`- ${note}`)
+  }
+  lines.push("")
+  return lines
+}
+
 function categoryLabel(category) {
   if (category.kind === "efforts") return `efforts model (${category.levels.join(", ")})`
   if (category.kind === "reasoning") return "reasoning-without-efforts"
@@ -634,7 +842,10 @@ export function classificationChanged({ before, after }) {
  * notes must state which models were added, removed, and changed —
  * pricing, efforts, etc."). The snapshot kind additionally diffs base
  * pricing and efforts when a facts payload is supplied via
- * `beforeFacts` / `afterFacts` (MODEL_COSTS / MODEL_EFFORTS).
+ * `beforeFacts` / `afterFacts` (MODEL_COSTS / MODEL_EFFORTS), and
+ * renders the issue #134 sections when `enrichment` is supplied: the
+ * loud removed-section plus pending enrichment, carried-forward context,
+ * cost-fallback provenance, API divergence, and banded-pricing notes.
  *
  * @param {{kind: DiffKind} & DiffInput} args
  * @returns {string}
@@ -663,6 +874,21 @@ export function diffCatalogs(args) {
   const idOf = kind === "snapshot" ? snapshotIdOf : dealsIdOf
   const beforeIndex = indexCatalog(before, idOf)
   const afterIndex = indexCatalog(after, idOf)
+  // The loud removed-section (issue #134) is derived from before/after
+  // alone — it renders whenever the snapshot kind loses a model, even
+  // with no enrichment input.
+  const removedLines = kind === "snapshot" ? removedSectionLines(beforeIndex, afterIndex) : []
+  const enrichment = kind === "snapshot" ? enrichmentOf(args.enrichment) : null
+  const enrichmentLines =
+    enrichment === null
+      ? []
+      : [
+          ...pendingEnrichmentSectionLines(enrichment),
+          ...carriedForwardSectionLines(enrichment.carriedForward),
+          ...costFallbackSectionLines(enrichment.costFallbacks),
+          ...apiDivergenceSectionLines(enrichment.apiDivergence),
+          ...bandedPricingSectionLines(enrichment.bandedNotes),
+        ]
   const facts = {
     before: factsPayloadOf(args.beforeFacts ?? {}),
     after: factsPayloadOf(args.afterFacts ?? {}),
@@ -672,10 +898,16 @@ export function diffCatalogs(args) {
       ? snapshotChangeRows(beforeIndex, afterIndex, facts)
       : dealsChangeRows(beforeIndex, afterIndex)
   if (changeRows.empty) {
+    // Pure date churn still short-circuits to "No changes." — the
+    // enrichment subsections describe the after-state, not a change, so
+    // they render only alongside a non-empty change table. (Otherwise
+    // every refresh would carry a divergence section and no release
+    // could ever short-circuit its Model catalog part.)
     sections.push("No changes.", "")
     return sections.join("\n")
   }
   sections.push(...renderTable([["Model", "Change", "Before", "After"], ...changeRows.rows]), "")
+  sections.push(...removedLines, ...enrichmentLines)
   return sections.join("\n")
 }
 
@@ -687,7 +919,12 @@ export function diffCatalogs(args) {
 // carry MODEL_EFFORTS, needed for the efforts category) are merged in via
 // --before-facts / --after-facts when provided.
 //
-// Reads the two JSON files, diffs them, and prints the Markdown to
+// For the `snapshot` kind the issue #134 enrichment input (pending lists,
+// ladder provenance, API divergence, banded notes — built by
+// `scripts/build-enrichment.mjs`) is passed via --enrichment
+// enrichment.json. A missing/unreadable file degrades to no subsections,
+// never a failure.
+//// Reads the two JSON files, diffs them, and prints the Markdown to
 // stdout. The cron workflow uses this for the PR body (ticket #85).
 async function main() {
   const args = process.argv.slice(2)
@@ -695,7 +932,7 @@ async function main() {
     console.error(
       "usage: node scripts/diff-catalog.mjs <snapshot|deals|classification> <before.json> <after.json> " +
         "[--before-date YYYY-MM-DD] [--after-date YYYY-MM-DD] [--label Title] [--date-label Label] " +
-        "[--before-facts before-facts.json] [--after-facts after-facts.json]",
+        "[--before-facts before-facts.json] [--after-facts after-facts.json] [--enrichment enrichment.json]",
     )
     process.exit(2)
   }
@@ -738,6 +975,7 @@ async function main() {
     else if (args[i] === "--before-facts" && i + 1 < args.length)
       options.beforeFactsPath = args[++i]
     else if (args[i] === "--after-facts" && i + 1 < args.length) options.afterFactsPath = args[++i]
+    else if (args[i] === "--enrichment" && i + 1 < args.length) options.enrichmentPath = args[++i]
   }
   // The classification kind merges the generated facts (MODEL_EFFORTS)
   // into the extracted classification payloads so the efforts category
@@ -769,6 +1007,10 @@ async function main() {
   } else if (kind === "snapshot") {
     options.beforeFacts = await readFacts(options.beforeFactsPath)
     options.afterFacts = await readFacts(options.afterFactsPath)
+    // The enrichment input (issue #134) degrades to no subsections when
+    // the file is missing — a refresh without captured enrichment still
+    // renders the change table and the removed-section.
+    options.enrichment = await readFacts(options.enrichmentPath)
   }
   process.stdout.write(diffCatalogs({ kind, before, after, ...options }))
 }

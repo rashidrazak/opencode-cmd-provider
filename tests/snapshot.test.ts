@@ -28,10 +28,27 @@ run([
   ],
 
   [
-    "snapshot context lengths are positive",
+    "snapshot context lengths are positive (or null for pending rows whose models.md Context cell is missing)",
     () => {
       for (const model of MODEL_SNAPSHOT) {
-        assert(Number.isFinite(model.contextLength) && model.contextLength > 0, model.id)
+        assert(
+          model.contextLength === null ||
+            (Number.isFinite(model.contextLength) && model.contextLength > 0),
+          model.id,
+        )
+      }
+    },
+  ],
+
+  [
+    "snapshot rows carry ship-bar cost and efforts fields (models.md is the membership authority, issue #130)",
+    () => {
+      for (const model of MODEL_SNAPSHOT) {
+        // A row may carry cost: null (missing price cell — the cost ladder
+        // lands in #132) or efforts: null ("—" = model decides its own
+        // depth), but the fields must exist on every row.
+        assert("cost" in model, `${model.id}: missing cost field`)
+        assert("efforts" in model, `${model.id}: missing efforts field`)
       }
     },
   ],

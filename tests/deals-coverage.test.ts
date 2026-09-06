@@ -1,7 +1,11 @@
-// tests/deals-coverage.test.ts — every snapshot model must have a deals
-// record so the TUI sidebar "Command Code" section renders for every model
-// (issue: Ox Alpha / DeepSeek V4 Flash Vision (exp) showed no section because
-// the docs fixtures predated them).
+// tests/deals-coverage.test.ts — deals are a SUBSET of membership (issue
+// #132): every MODEL_DEALS record resolves to a snapshot model, and a
+// snapshot model with no deals record is a visible pending report — never
+// a red suite. The old "every snapshot model must have a deals record so
+// the TUI sidebar renders" gate is inverted: a missing deals record skips
+// enrichment (the core picker entry and sidebar render regardless) instead
+// of blocking the refresh (issue #129). The free-flag agreement between
+// the deals catalog and the facts zero-cost table stays pinned.
 import { readFileSync } from "node:fs"
 import { MODEL_SNAPSHOT } from "../src/catalog/snapshot.js"
 import { MODEL_COSTS } from "../src/catalog/facts.js"
@@ -16,12 +20,11 @@ const RSC_PRO = readFileSync(new URL("./fixtures/rsc-pro.txt", import.meta.url),
 
 run([
   [
-    "every snapshot model has a MODEL_DEALS entry",
+    "every MODEL_DEALS entry resolves to a snapshot model (deals ⊆ membership)",
     () => {
-      const missing = MODEL_SNAPSHOT.filter((model) => !(model.id in MODEL_DEALS)).map(
-        (model) => model.id,
-      )
-      assertEqual(missing, [], `models missing deals data: ${missing.join(", ")}`)
+      const snapshotIds = new Set(MODEL_SNAPSHOT.map((model) => model.id))
+      const stale = Object.keys(MODEL_DEALS).filter((id) => !snapshotIds.has(id))
+      assertEqual(stale, [], `deals entries outside the snapshot: ${stale.join(", ")}`)
     },
   ],
 
@@ -46,11 +49,11 @@ run([
     () => {
       // The RSC's per-plan (goat, pro) slug records are the source of truth
       // for the snapshot id (the alias is applied inside extractPlanPageRsc).
-      // Records that don't resolve to a snapshot id are docs-ahead-of-API
+      // Records that don't resolve to a snapshot id are docs-ahead-of-membership
       // skew (catalog-refresh run 33924108227: the docs shipped gpt-6-astra
-      // before the API catalog did) — the generators drop them by design
+      // before the package table did) — the generators drop them by design
       // (the !snapshotIds.has(sid) guards in buildRscInputs /
-      // deriveCapabilityMap, locked by synthetic drop tests), so they must
+      // deriveCapability, locked by synthetic drop tests), so they must
       // not fail the suite. The reverse direction — a snapshot model with
       // no record — stays loud via the generators' coverage gates
       // (missingSnapshotModels) and the MODEL_DEALS-entry test above.

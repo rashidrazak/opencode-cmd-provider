@@ -5,11 +5,11 @@ Plugin + provider package that lets OpenCode use Command Code as a model provide
 ## Language
 
 **Model catalog**:
-The list of models Command Code offers (id, name, context length), as served by its provider API.
+The list of models Command Code offers, as published in the command-code npm package's bundled models.md table (id, name, Context, Efforts, price) — the sole membership authority; every row ships.
 _Avoid_: models list, model endpoint, offerings
 
 **Snapshot**:
-A copy of the model catalog bundled inside the plugin package; the runtime source of truth for which Command Code models exist.
+A copy of the Model catalog's membership bundled inside the plugin package, each row carrying its ship-bar fields (id, name, context length, costs, efforts); the runtime source of truth for which Command Code models exist.
 _Avoid_: embedded catalog, static catalog, shipped list
 
 **Auto-registration**:
@@ -21,7 +21,7 @@ Models the user explicitly lists under `provider.commandcode.models` in `opencod
 _Avoid_: user models, custom models, overrides
 
 **Catalog refresh**:
-Updating the snapshot to match the live model catalog; happens on plugin release, never at runtime.
+Updating the snapshot to match the Model catalog's membership (the models.md table); a package-table row removal prunes the snapshot immediately. Happens on plugin release, never at runtime.
 _Avoid_: model sync, catalog update, live refresh
 
 **Core**:
@@ -37,10 +37,11 @@ windows, and GOAT/Pro monthly allowances. Bundled in `src/deals/catalog.ts`
 and regenerated via `npm run refresh:deals` (live, with 5xx/network fallback
 to the committed `tests/fixtures/rsc-*.txt` fixtures and loud 4xx failure;
 offline via `-- --fixtures`).
-The refresh **fails loudly (exit 1) when the RSC/fixture records lack a
-snapshot model**, so a partial catalog can never be emitted silently — the
-fixtures are re-captured from the live docs pages on every `npm run refresh`
-and by the daily catalog-refresh cron, so they stay in sync with the snapshot.
+Deals are a **subset of membership** (issue #132): a snapshot model with no
+RSC/deals record ships core-only — enrichment skipped, a `deals pending —`
+report logged, never an exit-1. The fixtures are re-captured on every
+`npm run refresh` and by the daily catalog-refresh cron so they stay in sync
+with the snapshot.
 _Avoid_: pricing table, deal feed
 
 **Deals intelligence**:
@@ -49,23 +50,36 @@ _Avoid_: deals feature, pricing UI
 
 **Classification**:
 The per-model reasoning capability (reasoning-capable or not, and whether
-with explicit efforts), derived once from the `reasoning` flag on the docs'
-RSC slug records and generated into `src/catalog/classification.ts`; the
-runtime's reasoning metadata derives from it (efforts precedence by
-construction). Human input is limited to the classification override map —
-used only when upstream's own surfaces contradict each other, every entry
-carrying a written justification, rendered into the refresh PR body. See
-ADR-0006.
+with explicit efforts), derived any-true-wins across the models.md efforts
+entry, the `reasoning` flag on the docs' RSC slug records, and the models
+page Caps Reasoning bit, and generated into `src/catalog/classification.ts`;
+the runtime's reasoning metadata derives from it. Models with no evidence
+anywhere ship in the visible `classification pending` bucket and behave as
+non-reasoning until evidence arrives. Human input is limited to the
+classification override map — used only when upstream's own surfaces
+contradict each other, every entry carrying a written justification,
+rendered into the refresh PR body. See ADR-0006 and ADR-0008.
 _Avoid_: reasoning set, hand classification, capability set
 
 **Capability facts**:
-The generated per-model capability data parsed from the command-code npm
-package's bundled models.md and CLI bundle — reasoning efforts, per-1M-token
-rates, and input modalities — bundled in `src/catalog/facts.ts` and
-regenerated via `npm run refresh:snapshot`. Classification is deliberately
-not a capability fact: it comes from the docs' RSC records, not the npm
-package.
+The generated per-model capability data for the Snapshot rows — reasoning
+efforts and per-1M-token rates parsed from the models.md table (missing
+cells resolved through the ordered enrichment ladders, each row carrying
+its provenance), plus input modalities parsed from the command-code CLI
+bundle — bundled in `src/catalog/facts.ts` and regenerated via
+`npm run refresh:snapshot`. Classification is deliberately not a
+capability fact: it is derived any-true-wins across three evidence
+channels (see Classification), not parsed from the npm package alone.
 _Avoid_: model metadata, feature flags, model config
+
+**Enrichment source**:
+The provider listing API, the docs' RSC slug records, the CLI bundle, and
+the Command Code models page: supportive data that fills gaps and confirms
+facts but never decides Snapshot membership, never wins a ship-bar field,
+and never gates the refresh. Missing enrichment degrades to a visible
+pending fallback (never a failure); a shipped row always traces to one
+row of the source-authority table (see ADR-0008).
+_Avoid_: fallback source, secondary catalog, metadata feed
 
 **Release**:
 A versioned publication of the package: a git tag `vX.Y.Z` matching the `package.json` version, a GitHub Release, and an npm publish. The catalog snapshot is regenerated before every release — a release never ships a stale snapshot.

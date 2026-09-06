@@ -8,6 +8,10 @@ import type { AddressInfo } from "node:net"
 
 export interface MockCcOptions {
   models?: unknown
+  /** status served by GET /provider/v1/models when set (e.g. 500 to exercise the note-only divergence path) */
+  modelsStatus?: number
+  /** body served by GET /provider/v1/models as-is (e.g. non-JSON to exercise the note-only divergence path) */
+  modelsRaw?: string
   /** events to emit for POST /alpha/generate; last event wins for infinite repetition */
   stream?: Array<Record<string, unknown> | "end">
   status?: number
@@ -42,7 +46,8 @@ export interface MockCcOptions {
   registryRaw?: string
   /** served at GET /models.md (raw command-code models.md text) */
   factsMd?: string
-  /** served at GET /cli.mjs (raw command-code CLI bundle) */
+  /** served at GET /cli.mjs (raw command-code CLI bundle); empty when set-but-empty */
+  cliStatus?: number
   modalitiesBundle?: string
   /** JSON body served at GET /alpha/whoami (plan detection); 404 when unset */
   whoami?: unknown
@@ -63,6 +68,10 @@ export interface MockCcOptions {
   rscGoat?: string
   /** RSC body served at GET /docs/plans/pro; 404 when unset. */
   rscPro?: string
+  /** HTML served at GET /models-page.html (the models page index, issue #131); 404 when unset. */
+  modelsPageHtml?: string
+  /** HTML served at GET /model-detail/<slug> (model detail pages, issue #132 cost ladder); 404 when unset. */
+  modelDetailPages?: Record<string, string>
   /** status served by all three RSC endpoints when set (e.g. 500 to exercise the 5xx → fixtures fallback). */
   rscStatus?: number
   /** called with the headers of each GET /docs/resources/pricing-limits request */
@@ -82,6 +91,7 @@ export interface MockCcHits {
   rscPricing: number
   rscGoat: number
   rscPro: number
+  modelsPage: number
 }
 
 export function startMockCc(
@@ -96,6 +106,7 @@ export function startMockCc(
     rscPricing: 0,
     rscGoat: 0,
     rscPro: 0,
+    modelsPage: 0,
   }
   /**
    * Serves an error response for an endpoint: status + error body with an
@@ -127,6 +138,20 @@ export function startMockCc(
     req.on("end", () => {
       if (req.url === "/provider/v1/models") {
         hits.models++
+        // The listing API is annotate-only for the refresh pipeline
+        // (issue #133): the mock can serve failure modes (status / raw
+        // body) so tests can pin that the refresh degrades to a note and
+        // still ships membership with exit 0.
+        if (options.modelsRaw !== undefined) {
+          res.writeHead(options.modelsStatus ?? 200, { "content-type": "text/plain" })
+          res.end(options.modelsRaw)
+          return
+        }
+        if (options.modelsStatus !== undefined && options.modelsStatus >= 400) {
+          res.writeHead(options.modelsStatus, { "content-type": "application/json" })
+          res.end(JSON.stringify({ error: { message: "mock models error" } }))
+          return
+        }
         res.writeHead(200, { "content-type": "application/json" })
         res.end(JSON.stringify(options.models ?? { object: "list", data: [] }))
         return
@@ -288,6 +313,14 @@ export function startMockCc(
         return
       }
       if (req.url === "/cli.mjs" && req.method === "GET") {
+        // `cliStatus` lets tests exercise the enrichment-outage degrade
+        // (issue #133: the CLI bundle is modalities enrichment, never a
+        // membership gate — an outage must fall back, not exit non-zero).
+        if (options.cliStatus !== undefined && options.cliStatus >= 400) {
+          res.writeHead(options.cliStatus, { "content-type": "text/javascript" })
+          res.end("")
+          return
+        }
         res.writeHead(200, { "content-type": "text/javascript" })
         res.end(options.modalitiesBundle ?? "")
         return
@@ -346,6 +379,29 @@ export function startMockCc(
         }
         res.writeHead(200, { "content-type": "text/x-component" })
         res.end(options.rscPro)
+        return
+      }
+      if (req.url?.startsWith("/model-detail/") && req.method === "GET") {
+        const slug = req.url.slice("/model-detail/".length)
+        const body = options.modelDetailPages?.[slug]
+        if (body === undefined) {
+          res.writeHead(404)
+          res.end("not found")
+          return
+        }
+        res.writeHead(200, { "content-type": "text/html" })
+        res.end(body)
+        return
+      }
+      if (req.url === "/models-page.html" && req.method === "GET") {
+        hits.modelsPage++
+        if (options.modelsPageHtml === undefined) {
+          res.writeHead(404)
+          res.end("not found")
+          return
+        }
+        res.writeHead(200, { "content-type": "text/html" })
+        res.end(options.modelsPageHtml)
         return
       }
       res.writeHead(404)

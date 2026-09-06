@@ -2,6 +2,16 @@
 
 Status: accepted
 
+> **Status note (issue #132, formalized in #135).** The coverage-gate contract recorded below
+> ("fails loudly when a snapshot model has no RSC record") is **superseded
+> by [ADR-0008](0008-models-md-primary-catalog.md)** since #132: deals are
+> a subset of membership, a missing record ships the model core-only with
+> a `deals pending` report and exit 0, and only two loud failure classes
+> survive anywhere (an unshippable ship-bar row after the full enrichment
+> ladder, and a parser shape change). The RSC surface, fetch semantics,
+> fixture lockstep, data seams, and cron mechanics stand unchanged; this
+> ADR keeps its original text so the decision history stays readable.
+
 The deals catalog is generated from the Command Code docs site's **React
 Server Components (RSC) flight payload** instead of scraped HTML tables, and a
 **daily GitHub Actions cron** keeps the bundled catalogs in step with upstream

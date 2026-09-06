@@ -86,10 +86,20 @@ function parseModalities(node, modelId) {
 /**
  * Parse every model object carrying inputModalities from the CLI bundle.
  *
- * `modelIds` includes text-only entries so the refresh step can assert that
- * every API snapshot model was represented in the CLI bundle. `modalities`
+ * `modelIds` includes text-only entries so the refresh step can report
+ * which package-membership models lack CLI evidence (a pending report,
+ * never a failure since issue #133 — the CLI bundle is enrichment).
+ * `modalities`
  * contains only image-capable entries, matching the provider's existing
  * text-only fallback behavior.
+ *
+ * `contextWindows` maps every catalog id that carries a `contextWindow`
+ * literal to its value (1e6 etc). This is the context ladder's second step
+ * (issue #132: models.md Context cell → RSC contextWindow → CLI
+ * contextWindow → carried-forward LKG). Some catalog entries omit it
+ * (verified live: GLM-5.1, MiniMax M2.7, the Qwen 3.6 pair carry
+ * `reasoning` but no `contextWindow`); absent entries simply do not
+ * appear in the map.
  */
 export function parseInputModalities(bundleSource) {
   let ast
@@ -107,6 +117,7 @@ export function parseInputModalities(bundleSource) {
 
   const constants = collectStringConstants(ast)
   const byId = new Map()
+  const contextWindows = {}
   walk(ast, (node) => {
     if (node.type !== "ObjectExpression") return
     const idProperty = getProperty(node, "id")
@@ -127,6 +138,20 @@ export function parseInputModalities(bundleSource) {
     // below still fails if an actual catalog model is missing from the bundle.
     const id = resolveString(idProperty.value, constants)
     if (!id) return
+    // Collect the catalog entry's contextWindow literal (issue #132 — the
+    // context ladder's second step). A second conflicting entry for the same
+    // id is a loud shape failure (same rule as conflicting modalities).
+    const contextProperty = getProperty(node, "contextWindow")
+    if (contextProperty) {
+      const value = resolveContextWindow(contextProperty.value, constants)
+      if (value !== undefined) {
+        const existing = contextWindows[id]
+        if (existing !== undefined && existing !== value) {
+          throw new Error(`conflicting contextWindow entries for ${id}`)
+        }
+        contextWindows[id] = value
+      }
+    }
     const modalities = parseModalities(modalitiesProperty.value, id)
     const existing = byId.get(id)
     if (existing && JSON.stringify(existing) !== JSON.stringify(modalities)) {
@@ -144,5 +169,31 @@ export function parseInputModalities(bundleSource) {
       .filter(([, values]) => values.includes("image"))
       .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
   )
-  return { modelIds: new Set(byId.keys()), modalities }
+  return { modelIds: new Set(byId.keys()), modalities, contextWindows }
+}
+
+// contextWindow literals parse as numbers (1e6, 105e4, 200000) — never as
+// identifiers/aliases. A catalog entry whose contextWindow is not a numeric
+// literal is a shape change (loud), never a silent skip.
+function resolveContextWindow(node, constants) {
+  if (!node) return undefined
+  if (node.type === "Literal" && typeof node.value === "number") return node.value
+  if (node.type === "Identifier") {
+    const resolved = constants.get(node.name)
+    if (typeof resolved === "string") {
+      const numeric = Number(resolved)
+      if (Number.isFinite(numeric)) return numeric
+    }
+    throw new Error(
+      `could not parse contextWindow: expected a numeric literal or constant, got identifier "${node.name}"`,
+    )
+  }
+  if (
+    node.type === "UnaryExpression" &&
+    node.operator === "-" &&
+    node.argument.type === "Literal"
+  ) {
+    throw new Error("could not parse contextWindow: negative window")
+  }
+  throw new Error(`could not parse contextWindow: expected a numeric literal, got ${node.type}`)
 }

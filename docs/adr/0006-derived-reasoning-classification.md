@@ -2,6 +2,20 @@
 
 Status: accepted
 
+> **Status note (issue #132, formalized in #135).** The "Snapshot model with no RSC record —
+> shared coverage gate fails the refresh" contract recorded below is
+> **superseded by [ADR-0008](0008-models-md-primary-catalog.md)** since
+> #132: classification is any-true-wins across models.md efforts, the RSC
+> `reasoning` flag, and the models page Caps Reasoning bit; the capability
+> map is sparse, and a model with no evidence anywhere ships in
+> `MODEL_REASONING_PENDING` (behaves non-reasoning, flips with zero code
+> when evidence arrives) — never an exit-1. Only two loud failure classes
+> survive anywhere (an unshippable ship-bar row after the full enrichment
+> ladder, and a parser shape change). The RSC `reasoning` flag stays a
+> _required_ slug-record field. The derived-data mechanism, the override
+> seam, and the cron/release integration stand unchanged; this ADR keeps
+> its original text so the decision history stays readable.
+
 Which Command Code models are reasoning-capable used to be a hand-typed set in
 `src/provider/reasoning.ts`. Every upstream classification change (a model
 gaining explicit efforts, a retirement, a new reasoning model) collided with

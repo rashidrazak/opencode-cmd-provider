@@ -81,8 +81,17 @@ jobs:
       # (acceptance criterion: "parser error, network failure, schema
       # mismatch → exit non-zero with a clearly-attributed error
       # message").
+      #
+      # The refresh log is captured to `refresh.log` (via `tee`) so the
+      # PR-body step can parse the annotate-only signals the generated
+      # modules don't carry (API divergence notes, modalities-pending
+      # reports, models-page banded-pricing notes — issue #134). `set -o
+      # pipefail` keeps the tee from masking a refresh failure: the
+      # pipe's exit is the refresh's exit, not tee's.
       - name: Regenerate catalogs
-        run: npm run refresh
+        run: |
+          set -o pipefail
+          npm run refresh 2>&1 | tee refresh.log
 
       # Build (tsc + bun TUI bundle) before testing: the pack contract
       # test needs dist/tui.js present, and typechecking the regenerated
@@ -148,7 +157,7 @@ jobs:
           git add src/catalog/snapshot.ts src/catalog/facts.ts src/catalog/classification.ts \
               src/deals/catalog.ts \
               tests/fixtures/rsc-pricing-limits.txt tests/fixtures/rsc-goat.txt \
-              tests/fixtures/rsc-pro.txt
+              tests/fixtures/rsc-pro.txt tests/fixtures/models-page.html
           date="$(date -u +%Y-%m-%d)"
           git commit -m "chore: catalog refresh — ${date}"
 
@@ -180,7 +189,14 @@ jobs:
           # classification kind consumes MODEL_REASONING_CAPABILITY +
           # CLASSIFICATION_OVERRIDES + CLASSIFICATION_LAST_REFRESHED
           # (from classification.ts) plus MODEL_EFFORTS (from facts.ts,
-          # needed for the efforts category) — issue #112.
+          # needed for the efforts category) — issue #112. The snapshot
+          # kind also consumes the pending bucket
+          # (MODEL_REASONING_PENDING, from classification.ts) plus the
+          # snapshot rows' own contextSource/costSource provenance and
+          # the refresh log — `scripts/build-enrichment.mjs` joins them
+          # into the enrichment input for the issue #134 subsections
+          # (pending enrichment, carried-forward context, cost-fallback
+          # provenance, API divergence, banded-pricing notes).
           extract() {
             local ts_path="$1"
             local out_path="$2"
@@ -209,6 +225,14 @@ jobs:
             # `tests/catalog-refresh-extract.test.ts`, which
             # spawns this exact heredoc against a bare-relative
             # fixture.
+            #
+            # The output always includes any *-LAST_REFRESHED date the
+            # module exports — plus the fields the enrichment builder
+            # needs: snapshot rows carry their own contextSource /
+            # costSource provenance (issue #134), the classification
+            # module contributes MODEL_REASONING_PENDING, and the deals
+            # module contributes MODEL_DEALS (pending = snapshot ids
+            # with no deals record).
             abs_ts_path="$(realpath "${ts_path}")"
             npx tsx --input-type=module -e "
               const mod = await import(${abs_ts_path@Q});
@@ -218,6 +242,7 @@ jobs:
               if (mod.MODEL_EFFORTS)  out.MODEL_EFFORTS  = mod.MODEL_EFFORTS;
               if (mod.MODEL_COSTS)    out.MODEL_COSTS    = mod.MODEL_COSTS;
               if (mod.MODEL_REASONING_CAPABILITY) out.MODEL_REASONING_CAPABILITY = mod.MODEL_REASONING_CAPABILITY;
+              if (mod.MODEL_REASONING_PENDING) out.MODEL_REASONING_PENDING = mod.MODEL_REASONING_PENDING;
               if (mod.CLASSIFICATION_OVERRIDES) out.CLASSIFICATION_OVERRIDES = mod.CLASSIFICATION_OVERRIDES;
               if (mod.FACTS_LAST_REFRESHED) out.FACTS_LAST_REFRESHED = mod.FACTS_LAST_REFRESHED;
               if (mod.DEAL_LAST_REFRESHED)  out.DEAL_LAST_REFRESHED  = mod.DEAL_LAST_REFRESHED;
@@ -265,7 +290,21 @@ jobs:
           #    "no changes" / "first refresh" message in that
           #    case. The JSON names are role-based (see the
           #    capture loops above).
+          #
+          #    The snapshot diff also receives the issue #134 enrichment
+          #    input (pending enrichment per model, carried-forward
+          #    context, cost-fallback provenance, API divergence,
+          #    banded-pricing notes), built from the "after" extracts
+          #    plus the captured refresh log. A missing refresh.log
+          #    degrades to no subsections — the builder never fails.
           date="$(date -u +%Y-%m-%d)"
+          node scripts/build-enrichment.mjs \
+            --snapshot /tmp/after/snapshot.json \
+            --classification /tmp/after/classification.json \
+            --deals /tmp/after/deals.json \
+            --log refresh.log \
+            --out /tmp/after/enrichment.json \
+            || printf '{}\n' > /tmp/after/enrichment.json
           {
             echo "## Catalog refresh — ${date}"
             echo ""
@@ -285,10 +324,14 @@ jobs:
             # (MODEL_COSTS) and efforts (MODEL_EFFORTS) render in the
             # Model catalog table — the release notes are only as complete
             # as this diff (issue: auto-release notes must state pricing/
-            # efforts changes).
+            # efforts changes). The enrichment input feeds the issue #134
+            # subsections (removed-section needs no input; pending,
+            # carried-forward, cost provenance, divergence, and banded
+            # notes do).
             node scripts/diff-catalog.mjs snapshot /tmp/before/snapshot.json /tmp/after/snapshot.json \
               --before-date "${before_date}" --after-date "${after_date}" \
               --before-facts /tmp/before/facts.json --after-facts /tmp/after/facts.json \
+              --enrichment /tmp/after/enrichment.json \
               || echo "_snapshot diff unavailable_"
             echo ""
             echo "### Reasoning classification"

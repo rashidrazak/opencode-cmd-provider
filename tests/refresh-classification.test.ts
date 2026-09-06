@@ -143,11 +143,16 @@ run([
     },
   ],
   [
-    "refresh-classification fails loudly when a snapshot model has no RSC record (coverage gate)",
+    "refresh-classification emits snapshot models with no RSC record into the pending bucket (gate inversion, issue #132)",
     async () => {
+      // Issue #132 inverts the old coverage gate: a snapshot model with no
+      // RSC record (and no efforts / page evidence) is NOT a loud failure —
+      // it ships in MODEL_REASONING_PENDING. Only a parser shape change is
+      // loud. This test drives the CLI against a synthetic world where just
+      // one model has an RSC record; every other snapshot model must land
+      // in the pending export, and the module must still be written.
       const dir = await mkdtemp(join(tmpdir(), "cc-classification-coverage-"))
       const out = join(dir, "classification.ts")
-      // One synthetic model only — every other snapshot model is missing.
       const payload = slugPayload([slugRecord("moonshotai/Kimi-K3", "Kimi K3", true)])
       const mock = await startMockCc({ rscGoat: payload, rscPro: payload })
       try {
@@ -155,23 +160,22 @@ run([
           ...process.env,
           COMMANDCODE_RSC_GOAT_URL: `${mock.url}/docs/plans/goat`,
           COMMANDCODE_RSC_PRO_URL: `${mock.url}/docs/plans/pro`,
+          COMMANDCODE_MODELS_PAGE_URL: `${mock.url}/models-page.html`,
         })
-        assert(result.status !== 0, `expected non-zero exit, got ${result.status}`)
+        assertEqual(result.status, 0, result.stderr || result.stdout)
+        const contents = await readFile(out, "utf-8")
         assert(
-          result.stderr.includes("claude-sonnet-5"),
-          `coverage failure must name a missing model, got: ${result.stderr}`,
+          contents.includes("MODEL_REASONING_PENDING"),
+          "the module must export the pending bucket",
         )
         assert(
-          /no RSC record/.test(result.stderr),
-          `coverage failure must state the reason, got: ${result.stderr}`,
+          contents.includes('"claude-sonnet-5"'),
+          `a snapshot model without evidence must be listed as pending, got: ${contents.slice(-400)}`,
         )
-        let wrote = true
-        try {
-          await readFile(out, "utf-8")
-        } catch {
-          wrote = false
-        }
-        assert(!wrote, "no module must be written when the coverage gate fails")
+        assert(
+          contents.includes('"moonshotai/Kimi-K3": true'),
+          "the model WITH an RSC record keeps its capability entry",
+        )
       } finally {
         await mock.close()
         await rm(dir, { recursive: true, force: true })
@@ -333,13 +337,21 @@ run([
   [
     "buildClassificationModule is deterministic (same inputs → same bytes)",
     () => {
-      const records = new Map([
-        ["moonshotai/Kimi-K3", slugRecord("moonshotai/Kimi-K3", "Kimi K3", true)],
-        ["moonshotai/Kimi-K2.6", slugRecord("moonshotai/Kimi-K2.6", "Kimi K2.6", false)],
-        ["claude-sonnet-5", slugRecord("claude-sonnet-5", "Claude Sonnet 5", true)],
+      const payload = slugPayload([
+        slugRecord("moonshotai/Kimi-K3", "Kimi K3", true),
+        slugRecord("moonshotai/Kimi-K2.6", "Kimi K2.6", false),
+        slugRecord("claude-sonnet-5", "Claude Sonnet 5", true),
       ])
-      const a = buildClassificationModule({ bySnapshotId: records, lastRefreshed: "2026-09-03" })
-      const b = buildClassificationModule({ bySnapshotId: records, lastRefreshed: "2026-09-03" })
+      const a = buildClassificationModule({
+        goatRsc: payload,
+        proRsc: payload,
+        lastRefreshed: "2026-09-03",
+      })
+      const b = buildClassificationModule({
+        goatRsc: payload,
+        proRsc: payload,
+        lastRefreshed: "2026-09-03",
+      })
       assertEqual(a, b)
       // Sorted output, per-model lines.
       const kimiLine = a.indexOf('"moonshotai/Kimi-K2.6": false')
@@ -350,11 +362,10 @@ run([
   [
     "buildClassificationModule applies an override at generation time",
     () => {
-      const records = new Map([
-        ["moonshotai/Kimi-K3", slugRecord("moonshotai/Kimi-K3", "Kimi K3", true)],
-      ])
+      const payload = slugPayload([slugRecord("moonshotai/Kimi-K3", "Kimi K3", true)])
       const out = buildClassificationModule({
-        bySnapshotId: records,
+        goatRsc: payload,
+        proRsc: payload,
         lastRefreshed: "2026-09-03",
         overrides: {
           "moonshotai/Kimi-K3": {
@@ -378,13 +389,12 @@ run([
   [
     "buildClassificationModule rejects a note-less override at generation time",
     () => {
-      const records = new Map([
-        ["moonshotai/Kimi-K3", slugRecord("moonshotai/Kimi-K3", "Kimi K3", true)],
-      ])
+      const payload = slugPayload([slugRecord("moonshotai/Kimi-K3", "Kimi K3", true)])
       let message = ""
       try {
         buildClassificationModule({
-          bySnapshotId: records,
+          goatRsc: payload,
+          proRsc: payload,
           lastRefreshed: "2026-09-03",
           overrides: { "moonshotai/Kimi-K3": { capability: false } },
         })
@@ -394,6 +404,43 @@ run([
       assert(
         message.includes("moonshotai/Kimi-K3") && /justification/.test(message),
         `expected a loud justification failure, got: ${message}`,
+      )
+    },
+  ],
+  [
+    "any-true: a snapshot model with ONLY models-page Reasoning evidence classifies reasoning and flips with zero code",
+    async () => {
+      // Issue #132: reasoning = any of models.md efforts, RSC flag, page
+      // Reasoning bit. A day-1 model with no RSC record and no efforts but
+      // a page Reasoning bit must classify true; dropping the bit moves it
+      // to pending. Synthetic ids over a synthetic snapshot set — never
+      // upstream values.
+      const { deriveCapability } = await import("../scripts/refresh-classification.mjs")
+      const ID = "vendor/page-reasoning"
+      const byId = new Set([ID])
+      const withBit = deriveCapability(new Map(), {
+        effortsById: {},
+        pageById: new Map([[ID, { reasoning: true }]]),
+        byId,
+        overrides: {},
+      })
+      assertEqual(withBit.capability[ID], true, "page Reasoning bit alone must classify reasoning")
+      assertEqual(withBit.pending, [], "with the page bit there is evidence — not pending")
+      const withoutBit = deriveCapability(new Map(), {
+        effortsById: {},
+        pageById: new Map(), // no page evidence at all
+        byId,
+        overrides: {},
+      })
+      assertEqual(
+        withoutBit.capability[ID],
+        undefined,
+        "no evidence anywhere must omit the model from the map",
+      )
+      assertEqual(
+        withoutBit.pending,
+        [ID],
+        "no-evidence model must be pending (flips with zero code)",
       )
     },
   ],

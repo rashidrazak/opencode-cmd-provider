@@ -15,7 +15,6 @@ import {
   reasoningVariantsForModel,
 } from "../src/provider/reasoning.js"
 import { inputModalitiesForModel } from "../src/provider/modalities.js"
-import { MODEL_COSTS, ZERO_MODEL_COST } from "../src/provider/pricing.js"
 import { assert, assertEqual, run } from "./harness.js"
 
 const OPTIONS = {
@@ -24,15 +23,34 @@ const OPTIONS = {
   baseURL: "https://api.commandcode.ai",
 }
 
+// Local snapshot fixture in the post-#130 CatalogModel shape (ship-bar
+// fields per row: contextLength/efforts/cost, null = pending).
 const SNAPSHOT: readonly CatalogModel[] = [
-  { id: "claude-sonnet-5", name: "Claude Sonnet 5", contextLength: 200000 },
-  { id: "deepseek/deepseek-v4-flash", name: "DeepSeek V4 Flash (latest)", contextLength: 1000000 },
+  {
+    id: "claude-sonnet-5",
+    name: "Claude Sonnet 5",
+    contextLength: 200000,
+    efforts: ["low", "medium", "high", "xhigh", "max"],
+    cost: { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 },
+  },
+  {
+    id: "deepseek/deepseek-v4-flash",
+    name: "DeepSeek V4 Flash (latest)",
+    contextLength: 1000000,
+    efforts: ["high", "max"],
+    cost: { input: 0.22, output: 0.66, cacheRead: 0.007, cacheWrite: 0 },
+  },
   {
     id: "meta/muse-spark-1.2-contributor",
     name: "Muse Spark 1.2 Contributor",
     contextLength: 1048576,
+    efforts: null,
+    cost: { input: 0.1, output: 0.2, cacheRead: 0.002, cacheWrite: 0 },
   },
-  { id: "unknown/foo", name: "Foo", contextLength: 16000 },
+  // A pending-context row (models.md Context cell missing; the fallback
+  // ladder lands in #132). Not free, not zero — the runtime must keep it
+  // usable with a neutral context rather than mislabel it.
+  { id: "unknown/foo", name: "Foo", contextLength: null, efforts: null, cost: null },
 ]
 
 run([
@@ -71,17 +89,11 @@ run([
 
       const unknown = entry.models["unknown/foo"]
       assertEqual(unknown.name, "[CMD] Foo")
-      assertEqual(unknown.limit, { context: 16000, output: 16000 })
+      // A pending-context row must not read as a 0-context or broken
+      // model: the runtime advertises a conservative placeholder context
+      // (PENDING_CONTEXT_LENGTH, 128000) until the #132 ladder resolves it.
+      assertEqual(unknown.limit, { context: 128000, output: 65536 })
 
-      const expectedCost = (id: string) => {
-        const costs = MODEL_COSTS[id] ?? ZERO_MODEL_COST
-        return {
-          input: costs.input,
-          output: costs.output,
-          cache_read: costs.cacheRead,
-          cache_write: costs.cacheWrite,
-        }
-      }
       for (const model of SNAPSHOT) {
         const registered = entry.models[model.id]
         assertEqual(
@@ -99,10 +111,21 @@ run([
           { input: [...inputModalitiesForModel(model.id)] },
           `${model.id} modalities must mirror the generated modality facts`,
         )
+        // The auto-registered cost mirrors the model's own parsed ship-bar
+        // row cost (issue #130): a null row cost advertises no cost entry.
+        const expectedRegisteredCost =
+          model.cost === null
+            ? undefined
+            : {
+                input: model.cost.input,
+                output: model.cost.output,
+                cache_read: model.cost.cacheRead,
+                cache_write: model.cost.cacheWrite,
+              }
         assertEqual(
           registered.cost,
-          expectedCost(model.id),
-          `${model.id} cost must mirror the generated pricing facts`,
+          expectedRegisteredCost,
+          `${model.id} cost must mirror the row's parsed ship-bar cost`,
         )
       }
     },
@@ -119,8 +142,14 @@ run([
       const effortsId = Object.keys(MODEL_EFFORTS)[0]
       assert(effortsId, "the generated efforts facts must not be empty")
       const snapshot: readonly CatalogModel[] = [
-        { id: reasoningId, name: "Derived Reasoning", contextLength: 1000 },
-        { id: effortsId, name: "Efforts Model", contextLength: 2000 },
+        {
+          id: reasoningId,
+          name: "Derived Reasoning",
+          contextLength: 1000,
+          efforts: null,
+          cost: null,
+        },
+        { id: effortsId, name: "Efforts Model", contextLength: 2000, efforts: null, cost: null },
       ]
       const config = {}
       autoRegister(config, snapshot, OPTIONS)
@@ -326,20 +355,27 @@ run([
   [
     "free variants get a (free) suffix so paid and free models are distinguishable",
     () => {
-      // Data-driven from the zero cost table — a model is only
-      // "free" when the catalog has an actual zero-cost entry (an
-      // absent entry falls back to ZERO_MODEL_COST and is NOT free).
-      // The pin is on a model that has a zero-cost entry in the
-      // generated facts (`poolside/laguna-s-2.1-free`), not on a
-      // specific upstream name-collision pair. The name-collision
-      // case (paid + free with the same upstream name) used to be
-      // pinned here against MiniMax; that case is now exercised by
-      // the upstream-data-dependent catalog-refresh cron, not by
-      // this unit test.
+      // Data-driven from the row's parsed cost — a model is only "free"
+      // when its models.md price cell is an explicit all-zero entry (a
+      // missing cell — cost null — gets no suffix and no cost key).
+      // The pin is on a model whose row carries a zero-cost entry
+      // (`poolside/laguna-s-2.1-free`), not on a specific upstream
+      // name-collision pair. The name-collision case (paid + free with
+      // the same upstream name) used to be pinned here against MiniMax;
+      // that case is now exercised by the upstream-data-dependent
+      // catalog-refresh cron, not by this unit test.
       const config = {}
       autoRegister(
         config,
-        [{ id: "poolside/laguna-s-2.1-free", name: "Laguna S 2.1", contextLength: 256000 }],
+        [
+          {
+            id: "poolside/laguna-s-2.1-free",
+            name: "Laguna S 2.1",
+            contextLength: 256000,
+            efforts: null,
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+          },
+        ],
         OPTIONS,
       )
       const entry = config.provider.commandcode
@@ -348,24 +384,97 @@ run([
   ],
 
   [
-    "absent cost entries get no (free) suffix; zero-cost entries always do",
+    "absent cost entries get no (free) suffix and no cost key; zero-cost entries always do",
     () => {
-      // A model missing from MODEL_COSTS falls back to ZERO_MODEL_COST but is
-      // deliberately NOT free — only an explicit zero-cost catalog entry earns
-      // the suffix. Laguna has one (its name does not collide with a paid
-      // sibling, but the suffix is still informative).
+      // A row with cost: null (missing models.md price cell) is never
+      // "free": no suffix, and no cost entry advertised. Only an explicit
+      // all-zero cell earns the suffix. Laguna has one (its name does not
+      // collide with a paid sibling, but the suffix is still informative).
       const config = {}
       autoRegister(
         config,
         [
-          { id: "vendor/unknown-model", name: "Unknown Model", contextLength: 16000 },
-          { id: "poolside/laguna-s-2.1-free", name: "Laguna S 2.1", contextLength: 256000 },
+          {
+            id: "vendor/unknown-model",
+            name: "Unknown Model",
+            contextLength: 16000,
+            efforts: null,
+            cost: null,
+          },
+          {
+            id: "poolside/laguna-s-2.1-free",
+            name: "Laguna S 2.1",
+            contextLength: 256000,
+            efforts: null,
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+          },
         ],
         OPTIONS,
       )
       const entry = config.provider.commandcode
       assertEqual(entry.models["vendor/unknown-model"].name, "[CMD] Unknown Model")
+      assert(
+        entry.models["vendor/unknown-model"].cost === undefined,
+        "a null-cost row must advertise no cost entry",
+      )
       assertEqual(entry.models["poolside/laguna-s-2.1-free"].name, "[CMD] Laguna S 2.1 (free)")
+    },
+  ],
+
+  [
+    "a pending-context row keeps a usable model: neutral context, never 0, never a fabricated API value",
+    () => {
+      // Issue #130: a package row whose models.md Context cell is missing
+      // ("—") ships with contextLength: null (the fallback ladder lands in
+      // #132). The runtime must keep the model usable with a well-formed
+      // context rather than advertise a broken 0-context model.
+      const config = {}
+      autoRegister(
+        config,
+        [
+          {
+            id: "vendor/pending-ctx",
+            name: "Pending Ctx",
+            contextLength: null,
+            efforts: null,
+            cost: { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 0 },
+          },
+        ],
+        OPTIONS,
+      )
+      const entry = config.provider.commandcode
+      assertEqual(entry.models["vendor/pending-ctx"].limit, { context: 128000, output: 65536 })
+    },
+  ],
+
+  [
+    "a missing-cost row is never zero-filled and never labeled free (missing ≠ all-zero)",
+    () => {
+      // Issue #130: a package row whose price cell is missing ("—") ships
+      // with cost: null — the cost ladder lands in #132. Missing must never
+      // read as a $0 model: the auto-registered entry advertises NO cost
+      // entry (the config schema's cost is optional), and no (free) suffix
+      // is appended (only an explicit all-zero catalog entry is free).
+      const config = {}
+      autoRegister(
+        config,
+        [
+          {
+            id: "vendor/pending-cost",
+            name: "Pending Cost",
+            contextLength: 100000,
+            efforts: null,
+            cost: null,
+          },
+        ],
+        OPTIONS,
+      )
+      const entry = config.provider.commandcode
+      assertEqual(entry.models["vendor/pending-cost"].name, "[CMD] Pending Cost")
+      assert(
+        entry.models["vendor/pending-cost"].cost === undefined,
+        "a missing cost must advertise no cost entry, never a zero cost",
+      )
     },
   ],
 

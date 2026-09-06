@@ -21,6 +21,34 @@ const BUNDLE = `
 
 run([
   [
+    "collects contextWindows for catalog entries that carry them",
+    () => {
+      const withCtx = `const MODELS = {
+        FIRST: { id: "first/model", name: "First", inputModalities: ["text"], contextWindow: 2e5 },
+        SECOND: { id: "second/model", label: "Second", inputModalities: ["text"], contextWindow: 1e6 },
+      }`
+      const result = parseInputModalities(withCtx)
+      assertEqual(result.contextWindows, { "first/model": 200000, "second/model": 1000000 })
+    },
+  ],
+  [
+    "omits contextWindows when a catalog entry has none; rejects a conflicting duplicate",
+    () => {
+      const noCtx = `const MODELS = {
+        FIRST: { id: "first/model", name: "First", inputModalities: ["text"] },
+      }`
+      assertEqual(parseInputModalities(noCtx).contextWindows, {})
+      const conflict = `const MODELS = {
+        FIRST: { id: "first/model", name: "First", inputModalities: ["text"], contextWindow: 1e6 },
+        SECOND: { id: "first/model", name: "First", inputModalities: ["text"], contextWindow: 2e5 },
+      }`
+      throws(
+        () => parseInputModalities(conflict),
+        /conflicting contextWindow entries for first\/model/,
+      )
+    },
+  ],
+  [
     "extracts modalities independent of property order",
     () => {
       const result = parseInputModalities(BUNDLE)

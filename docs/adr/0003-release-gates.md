@@ -2,6 +2,18 @@
 
 Status: accepted
 
+> **Status note (issue #135).** The membership halves of the gates recorded
+> below are **superseded by [ADR-0008](0008-models-md-primary-catalog.md)**:
+> the npm package models.md table is the sole membership authority, the
+> listing API is a pure divergence reporter (zero gating power), the CLI
+> bundle is modalities enrichment (omission is a pending report with a
+> text-only fallback, never a failure), and only two loud failure classes
+> survive anywhere (an unshippable ship-bar row after the full enrichment
+> ladder, and a parser shape change). The tag/main-ancestor guard, the
+> stale-snapshot loud failure, and the non-blocking deals check stand
+> unchanged. This ADR keeps its original text so the decision history stays
+> readable.
+
 Supersedes the "re-triggering snapshot refresh" behavior of [ADR 0002](0002-tag-driven-releases.md). The trigger stays: pushing a `vX.Y.Z` tag starts the release pipeline. Two gates now decide whether it may publish.
 
 The tag's commit must be an ancestor of `origin/main`, and the tag must match `package.json` (existing guard). The first gate exists because the pipeline runs on the tag's tree, not on main: without it, tagging an unmerged or stale commit publishes a version whose source never reached main — the version bump and CHANGELOG entry ship while `main` still carries the old version, and the published artifact is not reproducible from the branch. Pushing a tag while the bump is still in review, or tagging an old commit, fails with an explicit error instead of releasing.

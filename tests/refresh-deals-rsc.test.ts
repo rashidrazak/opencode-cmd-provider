@@ -234,8 +234,8 @@ run([
     () => {
       // The RSC's per-plan (goat, pro) slug records are the source of
       // truth for the snapshot id. Records that don't resolve are
-      // docs-ahead-of-API skew (catalog-refresh run 33924108227: the
-      // docs shipped gpt-6-astra before the API catalog did) — the
+      // docs-ahead-of-membership skew (catalog-refresh run 33924108227: the
+      // docs shipped gpt-6-astra before the package table did) — the
       // refresh script's RSC path drops them by design (per the
       // missing-snapshot-id guard in #82, locked by the synthetic
       // drop test in refresh-deals.test.ts), so they must not fail
