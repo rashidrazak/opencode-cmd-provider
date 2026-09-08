@@ -1,3 +1,17 @@
+## 1.7.1 - 2026-09-08
+
+### Deals intelligence
+
+## Deals intelligence
+
+- **DEAL_LAST_REFRESHED**: `2026-09-06` → `2026-09-08`
+
+| Model                                   | Change      | Before                                                                                                                                      | After                                                                                                                                                |
+| --------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `deepseek/deepseek-v4-flash`            | peakOffPeak | peak in 0.44 / out 1.32 / cacheRead 0.014 / cacheWrite 0 · off-peak in 0.22 / out 0.66 / cacheRead 0.007 / cacheWrite 0 (01–04 & 06–10 UTC) | peak in 0.44 / out 1.32 / cacheRead 0.014 / cacheWrite 0 · off-peak in 0.22 / out 0.66 / cacheRead 0.007 / cacheWrite 0 (01–04 & 06–10 UTC, Mon–Fri) |
+| `deepseek/deepseek-v4-flash-vision-exp` | peakOffPeak | peak in 0.44 / out 1.32 / cacheRead 0.014 / cacheWrite 0 · off-peak in 0.22 / out 0.66 / cacheRead 0.007 / cacheWrite 0 (01–04 & 06–10 UTC) | peak in 0.44 / out 1.32 / cacheRead 0.014 / cacheWrite 0 · off-peak in 0.22 / out 0.66 / cacheRead 0.007 / cacheWrite 0 (01–04 & 06–10 UTC, Mon–Fri) |
+| `deepseek/deepseek-v4-pro`              | peakOffPeak | peak in 1.32 / out 3.96 / cacheRead 0.044 / cacheWrite 0 · off-peak in 0.66 / out 1.98 / cacheRead 0.022 / cacheWrite 0 (01–04 & 06–10 UTC) | peak in 1.32 / out 3.96 / cacheRead 0.044 / cacheWrite 0 · off-peak in 0.66 / out 1.98 / cacheRead 0.022 / cacheWrite 0 (01–04 & 06–10 UTC, Mon–Fri) |
+
 ## 1.7.0 - 2026-09-06
 
 ### Model catalog: models.md-primary with enrichment that never blocks shipping
