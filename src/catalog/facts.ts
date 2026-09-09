@@ -6,10 +6,10 @@
 // parse from the CLI bundle (dist/cli.mjs). Regenerate with
 // `npm run refresh:snapshot`.
 
-export const FACTS_SOURCE_URL = "https://unpkg.com/command-code@1.50.1/dist/bundled/command-code-knowledge/reference/models.md"
-export const MODALITIES_SOURCE_URL = "https://unpkg.com/command-code@1.50.1/dist/cli.mjs"
-export const FACTS_PACKAGE_VERSION = "1.50.1"
-export const FACTS_LAST_REFRESHED = "2026-09-08"
+export const FACTS_SOURCE_URL = "https://unpkg.com/command-code@1.52.0/dist/bundled/command-code-knowledge/reference/models.md"
+export const MODALITIES_SOURCE_URL = "https://unpkg.com/command-code@1.52.0/dist/cli.mjs"
+export const FACTS_PACKAGE_VERSION = "1.52.0"
+export const FACTS_LAST_REFRESHED = "2026-09-09"
 
 export const MODEL_EFFORTS: Readonly<Record<string, readonly string[]>> = {
   "deepseek/deepseek-v4-pro": ["high","max"],
@@ -20,6 +20,7 @@ export const MODEL_EFFORTS: Readonly<Record<string, readonly string[]>> = {
   "z-ai/glm-5.3-flash": ["low","high","max"],
   "zai-org/GLM-5.3": ["low","high","max"],
   "zai-org/GLM-5.2": ["high","max"],
+  "MiniMaxAI/MiniMax-M3": ["low","medium","high"],
   "Qwen/Qwen3.8-Max-0902": ["low","medium","xhigh"],
   "Qwen/Qwen3.8-Max": ["low","medium","xhigh"],
   "Qwen/Qwen3.8-27B": ["low","medium","xhigh"],
@@ -97,6 +98,7 @@ export const MODEL_COSTS: Readonly<
   "thinkingmachines/inkling": { input: 1, output: 4.05, cacheRead: 0.17, cacheWrite: 0 },
   "thinkingmachines/inkling-small": { input: 0.5, output: 1.2, cacheRead: 0.1, cacheWrite: 0 },
   "poolside/laguna-s-2.1-free": { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+  "inclusionai/ling-3.0-flash-sante:free": { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
   "claude-sonnet-5": { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 },
   "claude-sonnet-4-6": { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
   "claude-fable-5-1": { input: 10, output: 50, cacheRead: 0.25, cacheWrite: 12.5 },
