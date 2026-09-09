@@ -1,3 +1,100 @@
+## 1.7.2 - 2026-09-09
+
+### Model catalog
+
+## Model catalog
+
+- **FACTS_LAST_REFRESHED**: `2026-09-08` → `2026-09-09`
+
+| Model                                   | Change  | Before | After                             |
+| --------------------------------------- | ------- | ------ | --------------------------------- |
+| `inclusionai/ling-3.0-flash-sante:free` | added   | —      | Ling 3.0 Flash Sante · 262000 ctx |
+| `MiniMaxAI/MiniMax-M3`                  | efforts | —      | low, medium, high                 |
+
+### API divergence
+
+- `gpt-6-astra`: in package membership but not served by the listing API
+
+### Reasoning classification
+
+## Reasoning classification
+
+- **CLASSIFICATION_LAST_REFRESHED**: `2026-09-08` → `2026-09-09`
+
+| Model                                   | Change         | Before                    | After                             |
+| --------------------------------------- | -------------- | ------------------------- | --------------------------------- |
+| `inclusionai/ling-3.0-flash-sante:free` | new            | —                         | reasoning-without-efforts         |
+| `MiniMaxAI/MiniMax-M3`                  | classification | reasoning-without-efforts | efforts model (low, medium, high) |
+
+### Deals intelligence
+
+## Deals intelligence
+
+- **DEAL_LAST_REFRESHED**: `2026-09-08` → `2026-09-09`
+
+| Model                                   | Change    | Before                         | After                          |
+| --------------------------------------- | --------- | ------------------------------ | ------------------------------ |
+| `claude-fable-5`                        | benchmark | intelligence 62.1, tok/s 67.8  | intelligence 53.2, tok/s 62.2  |
+| `claude-fable-5-1`                      | benchmark | —                              | intelligence 56.8, tok/s 67.6  |
+| `claude-haiku-4-5-20251001`             | benchmark | intelligence 24.1, tok/s 103.9 | intelligence 17.4, tok/s 91.3  |
+| `claude-opus-4-7`                       | benchmark | intelligence 55, tok/s —       | intelligence 44.3, tok/s —     |
+| `claude-opus-4-8`                       | benchmark | intelligence 57.3, tok/s —     | intelligence 47.8, tok/s —     |
+| `claude-opus-5`                         | benchmark | intelligence 63.1, tok/s 55.5  | intelligence 54.1, tok/s 51.6  |
+| `claude-sonnet-4-6`                     | benchmark | intelligence 48.4, tok/s —     | intelligence 38.5, tok/s —     |
+| `claude-sonnet-5`                       | benchmark | intelligence 55.3, tok/s 89.6  | intelligence 45.1, tok/s 80    |
+| `deepseek/deepseek-v4-flash`            | benchmark | intelligence 51.8, tok/s 129   | intelligence 40.8, tok/s 117.7 |
+| `deepseek/deepseek-v4-flash-vision-exp` | benchmark | —                              | intelligence 40.7, tok/s 119.5 |
+| `deepseek/deepseek-v4-pro`              | benchmark | intelligence 53.2, tok/s 61    | intelligence 42.1, tok/s 62.1  |
+| `google/gemini-3.1-flash-lite`          | benchmark | intelligence 25.6, tok/s —     | intelligence 19.3, tok/s —     |
+| `google/gemini-3.5-flash`               | benchmark | intelligence 52, tok/s —       | intelligence 39.7, tok/s —     |
+| `google/gemini-3.5-flash-lite`          | benchmark | intelligence 37.4, tok/s 368.8 | intelligence 27.6, tok/s 338.6 |
+| `google/gemini-3.6-flash`               | benchmark | intelligence 51.6, tok/s 197.3 | intelligence 40.3, tok/s 188.5 |
+| `google/gemini-3.7-flash`               | benchmark | intelligence 56, tok/s 365.9   | intelligence 45.2, tok/s 324.6 |
+| `google/gemini-3.8-flash`               | benchmark | —                              | intelligence 47.1, tok/s 355.8 |
+| `gpt-5.3-codex`                         | benchmark | intelligence 45.5, tok/s 121.4 | intelligence 36.9, tok/s 143.1 |
+| `gpt-5.4`                               | benchmark | intelligence 53.1, tok/s —     | intelligence 42.8, tok/s —     |
+| `gpt-5.4-mini`                          | benchmark | intelligence 40.9, tok/s —     | intelligence 31.9, tok/s —     |
+| `gpt-5.5`                               | benchmark | intelligence 56.3, tok/s —     | intelligence 45.6, tok/s —     |
+| `gpt-5.6-luna`                          | benchmark | intelligence 52.3, tok/s 124.1 | intelligence 43.4, tok/s 116.7 |
+| `gpt-5.6-sol`                           | benchmark | intelligence 60.9, tok/s 69.6  | intelligence 51.3, tok/s 73.4  |
+| `gpt-5.6-terra`                         | benchmark | intelligence 56.6, tok/s 112.8 | intelligence 46.8, tok/s 121.2 |
+| `gpt-6-astra`                           | benchmark | —                              | intelligence 54.7, tok/s 63.4  |
+| `inclusionai/ling-3.0-flash-sante:free` | added     | —                              | opensource (free)              |
+| `meituan/LongCat-2.0:free`              | benchmark | —                              | intelligence 25.8, tok/s 49.2  |
+| `meta/muse-spark-1.1`                   | benchmark | intelligence 53.2, tok/s —     | intelligence 41.2, tok/s —     |
+| `meta/muse-spark-1.2`                   | benchmark | intelligence 56.8, tok/s —     | intelligence 46.8, tok/s 262   |
+| `meta/muse-spark-1.2-contributor`       | benchmark | intelligence 56.8, tok/s —     | intelligence 46.8, tok/s 262   |
+| `meta/muse-spark-1.3`                   | benchmark | —                              | intelligence 53, tok/s 221     |
+| `meta/muse-spark-1.3-contributor`       | benchmark | —                              | intelligence 53, tok/s 221     |
+| `MiniMaxAI/MiniMax-M2.5`                | benchmark | intelligence 34.5, tok/s —     | intelligence 26.8, tok/s —     |
+| `MiniMaxAI/MiniMax-M2.7`                | benchmark | intelligence 38.9, tok/s —     | intelligence 30.1, tok/s —     |
+| `MiniMaxAI/MiniMax-M3`                  | benchmark | intelligence 45.4, tok/s 111.3 | intelligence 35.7, tok/s 95.7  |
+| `moonshotai/Kimi-K2.5`                  | benchmark | intelligence 36, tok/s —       | intelligence 27.6, tok/s —     |
+| `moonshotai/Kimi-K2.6`                  | benchmark | intelligence 45.1, tok/s —     | intelligence 35.8, tok/s —     |
+| `moonshotai/Kimi-K2.7-Code`             | benchmark | intelligence 43, tok/s 39.5    | intelligence 32.7, tok/s 65.7  |
+| `moonshotai/Kimi-K3`                    | benchmark | intelligence 59.7, tok/s 38.4  | intelligence 50.2, tok/s 42.2  |
+| `nvidia/nemotron-3-ultra-550b-a55b`     | benchmark | intelligence 38.3, tok/s 174.2 | intelligence 29.3, tok/s 157.9 |
+| `Qwen/Qwen3.6-Max-Preview`              | benchmark | intelligence 41.1, tok/s —     | intelligence 32.9, tok/s —     |
+| `Qwen/Qwen3.6-Plus`                     | benchmark | intelligence 40.5, tok/s —     | intelligence 31.5, tok/s —     |
+| `Qwen/Qwen3.7-Max`                      | benchmark | intelligence 46.7, tok/s —     | intelligence 36.6, tok/s —     |
+| `Qwen/Qwen3.7-Plus`                     | benchmark | intelligence 39.4, tok/s 55.5  | intelligence 31.9, tok/s 55.2  |
+| `Qwen/Qwen3.8-27B`                      | benchmark | intelligence 52, tok/s 50.5    | intelligence 41.4, tok/s 46.1  |
+| `Qwen/Qwen3.8-Max`                      | benchmark | intelligence 58.1, tok/s 23.6  | intelligence 46.9, tok/s 38.1  |
+| `stepfun/Step-3.5-Flash`                | benchmark | intelligence 26.5, tok/s —     | intelligence 19.5, tok/s —     |
+| `stepfun/Step-3.7-Flash`                | benchmark | intelligence 30.9, tok/s 94.1  | intelligence 22.9, tok/s 86.9  |
+| `tencent/hy3-paid`                      | benchmark | intelligence 42.2, tok/s 69.1  | intelligence 32.4, tok/s 99.2  |
+| `thinkingmachines/inkling`              | benchmark | intelligence 42.3, tok/s 50.6  | intelligence 32.2, tok/s 65.1  |
+| `thinkingmachines/inkling-small`        | benchmark | intelligence 41.2, tok/s 115.5 | intelligence 32.2, tok/s 132.8 |
+| `xai/grok-4.5`                          | benchmark | intelligence 55.8, tok/s 48.7  | intelligence 45.5, tok/s 52.6  |
+| `xai/grok-4.6`                          | benchmark | intelligence 60.9, tok/s 60.8  | intelligence 50.6, tok/s 57.2  |
+| `xiaomi/mimo-v2.5`                      | benchmark | intelligence 38, tok/s 64.1    | intelligence 28.2, tok/s 61.4  |
+| `xiaomi/mimo-v2.5-pro`                  | benchmark | intelligence 42.9, tok/s 43.1  | intelligence 32.6, tok/s 40.7  |
+| `z-ai/glm-5.3-flash`                    | benchmark | intelligence 57.5, tok/s 41.8  | intelligence 46.2, tok/s 58.7  |
+| `zai-org/GLM-5`                         | benchmark | intelligence 40.6, tok/s —     | intelligence 32.4, tok/s —     |
+| `zai-org/GLM-5.1`                       | benchmark | intelligence 41, tok/s —       | intelligence 31.9, tok/s —     |
+| `zai-org/GLM-5.2`                       | benchmark | intelligence 52.6, tok/s 68.9  | intelligence 42.1, tok/s 68.3  |
+| `zai-org/GLM-5.3`                       | benchmark | intelligence 59.5, tok/s 80.6  | intelligence 48.6, tok/s 74.5  |
+
 ## 1.7.1 - 2026-09-08
 
 ### Deals intelligence
