@@ -1,3 +1,41 @@
+## 1.7.3 - 2026-09-10
+
+### Model catalog
+
+## Model catalog
+
+- **FACTS_LAST_REFRESHED**: `2026-09-09` → `2026-09-10`
+
+| Model                          | Change  | Before                                                    | After                                                    |
+| ------------------------------ | ------- | --------------------------------------------------------- | -------------------------------------------------------- |
+| `deepseek/deepseek-v4-flash`   | pricing | input 0.22 / output 0.66 / cacheRead 0.007 / cacheWrite 0 | input 0.15 / output 0.6 / cacheRead 0.003 / cacheWrite 0 |
+| `deepseek/deepseek-v4.1-flash` | added   | —                                                         | DeepSeek V4.1 Flash · 1000000 ctx                        |
+
+### API divergence
+
+- `gpt-6-astra`: in package membership but not served by the listing API
+
+### Reasoning classification
+
+## Reasoning classification
+
+- **CLASSIFICATION_LAST_REFRESHED**: `2026-09-09` → `2026-09-10`
+
+| Model                          | Change | Before | After                          |
+| ------------------------------ | ------ | ------ | ------------------------------ |
+| `deepseek/deepseek-v4.1-flash` | new    | —      | efforts model (low, high, max) |
+
+### Deals intelligence
+
+## Deals intelligence
+
+- **DEAL_LAST_REFRESHED**: `2026-09-09` → `2026-09-10`
+
+| Model                          | Change      | Before                                                                                                                                               | After                                                                                                                                             |
+| ------------------------------ | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `deepseek/deepseek-v4-flash`   | peakOffPeak | peak in 0.44 / out 1.32 / cacheRead 0.014 / cacheWrite 0 · off-peak in 0.22 / out 0.66 / cacheRead 0.007 / cacheWrite 0 (01–04 & 06–10 UTC, Mon–Fri) | peak in 0.3 / out 1.2 / cacheRead 0.006 / cacheWrite 0 · off-peak in 0.15 / out 0.6 / cacheRead 0.003 / cacheWrite 0 (01–04 & 06–10 UTC, Mon–Fri) |
+| `deepseek/deepseek-v4.1-flash` | added       | —                                                                                                                                                    | opensource                                                                                                                                        |
+
 ## 1.7.2 - 2026-09-09
 
 ### Model catalog
