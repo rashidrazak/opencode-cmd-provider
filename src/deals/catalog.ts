@@ -50,10 +50,11 @@ export const MODEL_DEALS: Readonly<Record<string, ModelDeals>> = {
   "claude-opus-5": { tier: "premium", benchmark: {"intelligence":54.1,"tokPerSec":51.6}, free: false, allowance: {"goat":20,"pro":20} },
   "claude-sonnet-4-6": { tier: "premium", benchmark: {"intelligence":38.5}, free: false, allowance: {"goat":20,"pro":20} },
   "claude-sonnet-5": { tier: "premium", benchmark: {"intelligence":45.1,"tokPerSec":80}, free: false, allowance: {"goat":20,"pro":20} },
-  "deepseek/deepseek-v4-flash": { tier: "opensource", benchmark: {"intelligence":40.8,"tokPerSec":117.7}, peakOffPeak: {"peak":{"input":0.44,"output":1.32,"cacheRead":0.014,"cacheWrite":0},"offPeak":{"input":0.22,"output":0.66,"cacheRead":0.007,"cacheWrite":0},"windows":"01–04 & 06–10 UTC, Mon–Fri"}, free: false, allowance: {"goat":60,"pro":70} },
+  "deepseek/deepseek-v4-flash": { tier: "opensource", benchmark: {"intelligence":40.8,"tokPerSec":117.7}, peakOffPeak: {"peak":{"input":0.3,"output":1.2,"cacheRead":0.006,"cacheWrite":0},"offPeak":{"input":0.15,"output":0.6,"cacheRead":0.003,"cacheWrite":0},"windows":"01–04 & 06–10 UTC, Mon–Fri"}, free: false, allowance: {"goat":60,"pro":70} },
   "deepseek/deepseek-v4-flash-fast": { tier: "opensource", free: false, allowance: {"goat":20,"pro":30} },
   "deepseek/deepseek-v4-flash-vision-exp": { tier: "opensource", benchmark: {"intelligence":40.7,"tokPerSec":119.5}, peakOffPeak: {"peak":{"input":0.44,"output":1.32,"cacheRead":0.014,"cacheWrite":0},"offPeak":{"input":0.22,"output":0.66,"cacheRead":0.007,"cacheWrite":0},"windows":"01–04 & 06–10 UTC, Mon–Fri"}, free: false, allowance: {"goat":20,"pro":30} },
   "deepseek/deepseek-v4-pro": { tier: "opensource", benchmark: {"intelligence":42.1,"tokPerSec":62.1}, peakOffPeak: {"peak":{"input":1.32,"output":3.96,"cacheRead":0.044,"cacheWrite":0},"offPeak":{"input":0.66,"output":1.98,"cacheRead":0.022,"cacheWrite":0},"windows":"01–04 & 06–10 UTC, Mon–Fri"}, free: false, allowance: {"goat":20,"pro":30} },
+  "deepseek/deepseek-v4.1-flash": { tier: "opensource", peakOffPeak: {"peak":{"input":0.3,"output":1.2,"cacheRead":0.006,"cacheWrite":0},"offPeak":{"input":0.15,"output":0.6,"cacheRead":0.003,"cacheWrite":0},"windows":"01–04 & 06–10 UTC, Mon–Fri"}, free: false, allowance: {"goat":60,"pro":70} },
   "google/gemini-3.1-flash-lite": { tier: "premium", benchmark: {"intelligence":19.3}, free: false, allowance: {"goat":20,"pro":20} },
   "google/gemini-3.5-flash": { tier: "premium", benchmark: {"intelligence":39.7}, free: false, allowance: {"goat":20,"pro":20} },
   "google/gemini-3.5-flash-lite": { tier: "premium", benchmark: {"intelligence":27.6,"tokPerSec":338.6}, free: false, allowance: {"goat":20,"pro":20} },
@@ -124,5 +125,5 @@ export const PLAN_CATALOG: Readonly<Record<PlanId, PlanInfo>> = {
 }
 
 export const DEAL_SOURCE_URL = "https://commandcode.ai/docs/resources/pricing-limits"
-export const DEAL_LAST_REFRESHED = "2026-09-09"
+export const DEAL_LAST_REFRESHED = "2026-09-10"
 export const DEAL_PACKAGE_VERSION = "docs"

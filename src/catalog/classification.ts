@@ -20,7 +20,7 @@ export const CLASSIFICATION_SOURCE_URLS: ReadonlyArray<string> = [
   "https://commandcode.ai/docs/plans/pro",
 ]
 
-export const CLASSIFICATION_LAST_REFRESHED = "2026-09-09"
+export const CLASSIFICATION_LAST_REFRESHED = "2026-09-10"
 
 // Active capability overrides. Empty = upstream data is truth.
 // Every entry requires a written justification naming the upstream
@@ -48,6 +48,7 @@ export const MODEL_REASONING_CAPABILITY: Readonly<Record<string, boolean>> = {
   "deepseek/deepseek-v4-flash-fast": true,
   "deepseek/deepseek-v4-flash-vision-exp": true,
   "deepseek/deepseek-v4-pro": true,
+  "deepseek/deepseek-v4.1-flash": true,
   "google/gemini-3.1-flash-lite": true,
   "google/gemini-3.5-flash": true,
   "google/gemini-3.5-flash-lite": true,
