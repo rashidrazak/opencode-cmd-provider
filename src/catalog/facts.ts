@@ -6,10 +6,10 @@
 // parse from the CLI bundle (dist/cli.mjs). Regenerate with
 // `npm run refresh:snapshot`.
 
-export const FACTS_SOURCE_URL = "https://unpkg.com/command-code@1.53.0/dist/bundled/command-code-knowledge/reference/models.md"
-export const MODALITIES_SOURCE_URL = "https://unpkg.com/command-code@1.53.0/dist/cli.mjs"
-export const FACTS_PACKAGE_VERSION = "1.53.0"
-export const FACTS_LAST_REFRESHED = "2026-09-10"
+export const FACTS_SOURCE_URL = "https://unpkg.com/command-code@1.53.1/dist/bundled/command-code-knowledge/reference/models.md"
+export const MODALITIES_SOURCE_URL = "https://unpkg.com/command-code@1.53.1/dist/cli.mjs"
+export const FACTS_PACKAGE_VERSION = "1.53.1"
+export const FACTS_LAST_REFRESHED = "2026-09-11"
 
 export const MODEL_EFFORTS: Readonly<Record<string, readonly string[]>> = {
   "deepseek/deepseek-v4-pro": ["high","max"],
@@ -63,7 +63,7 @@ export const MODEL_COSTS: Readonly<
 > = {
   "deepseek/deepseek-v4-pro": { input: 0.66, output: 1.98, cacheRead: 0.022, cacheWrite: 0 },
   "deepseek/deepseek-v4-flash": { input: 0.15, output: 0.6, cacheRead: 0.003, cacheWrite: 0 },
-  "deepseek/deepseek-v4-flash-vision-exp": { input: 0.22, output: 0.66, cacheRead: 0.007, cacheWrite: 0 },
+  "deepseek/deepseek-v4-flash-vision-exp": { input: 0.15, output: 0.6, cacheRead: 0.003, cacheWrite: 0 },
   "deepseek/deepseek-v4-flash-fast": { input: 0.28, output: 0.56, cacheRead: 0.07, cacheWrite: 0 },
   "deepseek/deepseek-v4.1-flash": { input: 0.15, output: 0.6, cacheRead: 0.003, cacheWrite: 0 },
   "moonshotai/Kimi-K3": { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 0 },
