@@ -1,3 +1,19 @@
+## 1.7.4 - 2026-09-11
+
+### Model catalog
+
+## Model catalog
+
+- **FACTS_LAST_REFRESHED**: `2026-09-10` → `2026-09-11`
+
+| Model                                   | Change  | Before                                                    | After                                                    |
+| --------------------------------------- | ------- | --------------------------------------------------------- | -------------------------------------------------------- |
+| `deepseek/deepseek-v4-flash-vision-exp` | pricing | input 0.22 / output 0.66 / cacheRead 0.007 / cacheWrite 0 | input 0.15 / output 0.6 / cacheRead 0.003 / cacheWrite 0 |
+
+### API divergence
+
+- `gpt-6-astra`: in package membership but not served by the listing API
+
 ## 1.7.3 - 2026-09-10
 
 ### Model catalog
