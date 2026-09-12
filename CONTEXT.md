@@ -16,6 +16,16 @@ _Avoid_: embedded catalog, static catalog, shipped list
 The plugin making the `commandcode` provider and its models available to OpenCode without the user declaring them in `opencode.json`.
 _Avoid_: config injection, zero-config, self-registration
 
+**Provider specifier**:
+The npm specifier Auto-registration registers for the `commandcode` provider
+(`provider.commandcode.npm`): this package's own name plus the exact version of
+the running plugin (e.g. `opencode-cmd-provider@1.7.4`), so OpenCode's
+specifier-keyed package cache can never install a runtime provider from a
+different release than the plugin that registered it. The bare package name is
+the fallback when the version cannot be read; a user-declared value always
+wins. See ADR-0009.
+_Avoid_: npm field, provider package, version pin
+
 **Declared models**:
 Models the user explicitly lists under `provider.commandcode.models` in `opencode.json`, taking precedence over snapshot models.
 _Avoid_: user models, custom models, overrides

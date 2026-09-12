@@ -34,6 +34,13 @@ git diff --check
 
 For release and npm smoke-test steps, see [RELEASE.md](RELEASE.md).
 
+Running a local build through OpenCode registers the runtime provider as
+`opencode-cmd-provider@<package.json version>`. A version that has not been
+published yet therefore cannot be installed, and the provider fails loudly —
+declare `provider.commandcode.npm` yourself (for example as a `file://` URL to
+your built `dist/index.js`) to point the runtime at your working tree instead.
+See [ADR-0009](docs/adr/0009-version-pinned-provider-specifier.md).
+
 ## End-to-end test
 
 `test:e2e` runs the real OpenCode CLI against a mock Command Code server through the built package. It requires `opencode` on `PATH` and is excluded from `npm test`:
