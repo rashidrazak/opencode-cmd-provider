@@ -27,3 +27,9 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npm test
+      # GitHub's own secret scanning covers partner patterns and blocks pushes
+      # that carry one. Command Code's key format is not a partner pattern, so
+      # `.secretlintrc.json` adds exactly that one shape — no generic heuristic,
+      # which is what makes the gate quiet on the credential-shaped fixtures in
+      # `tests/` (allowlisted by value there).
+      - run: npm run lint:secrets
