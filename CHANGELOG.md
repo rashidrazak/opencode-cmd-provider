@@ -1,3 +1,22 @@
+## Unreleased
+
+Fix: the runtime provider is pinned to the plugin's own version
+([#152](https://github.com/rashidrazak/opencode-cmd-provider/issues/152),
+reported in [#149](https://github.com/rashidrazak/opencode-cmd-provider/issues/149)).
+
+- `provider.commandcode.npm` is now registered as
+  `opencode-cmd-provider@<version>` — the exact version of the installed
+  plugin — instead of the bare package name. OpenCode's package cache is keyed
+  by the exact specifier and never refreshed, so the bare name let the runtime
+  provider sit at a different release than the plugin that registered it.
+- A user-declared `provider.commandcode.npm` still wins, and a plugin that
+  cannot read its own `package.json` falls back to the bare name rather than
+  failing to load.
+- Updating still requires clearing the package cache (see the README):
+  OpenCode never refreshes an existing install, and this change does not
+  address that (upstream:
+  [anomalyco/opencode#48514](https://github.com/anomalyco/opencode/issues/48514)).
+
 ## 1.7.4 - 2026-09-11
 
 ### Model catalog

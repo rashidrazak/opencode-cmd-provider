@@ -11,6 +11,14 @@ Status: accepted
 > prefix, and the `COMMANDCODE_API_KEY` env declaration. This ADR keeps
 > its original text so the decision history stays readable.
 
+> **Status note (issue #152).** The registered `npm` value is now
+> **version-pinned** — the package's own name plus the exact version from the
+> shipped `package.json` — see
+> [ADR-0009](0009-version-pinned-provider-specifier.md) for why: opencode's
+> package cache is keyed by the exact specifier and never refreshed, so the
+> bare name let the runtime provider drift away from the plugin that
+> registered it. The mechanism halves of this ADR stand unchanged.
+
 OpenCode only fires a plugin's `provider.models` hook for providers present in its
 models.dev catalog, and `commandcode` is not in that catalog — so users had to declare
 every model by hand in `opencode.json`, which was the plugin's biggest UX wart. We decided

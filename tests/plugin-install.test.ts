@@ -85,12 +85,15 @@ run([
       // TUI plugin's dealsRows then renders Tier/allowance etc. without any hand-written tui.json.
       const { MODEL_SNAPSHOT } = await import("../src/catalog/snapshot.js")
       const { autoRegister } = await import("../src/plugin/models.js")
+      const { resolveProviderNpm } = await import("../src/plugin/version.js")
       const { enrichCommandCodeModels } = await import("../src/deals/index.js")
       const { dealsRows } = await import("../src/deals/tui.js")
-      // Simulate the config hook's auto-registration + enrichment pipeline
+      // Simulate the config hook's auto-registration + enrichment pipeline,
+      // provider specifier included, so the simulation cannot drift from the
+      // entry (issue #152).
       const config: any = {}
       autoRegister(config, MODEL_SNAPSHOT, {
-        npm: "opencode-cmd-provider",
+        npm: resolveProviderNpm(),
         name: "Command Code",
         baseURL: "http://test",
       })

@@ -21,8 +21,15 @@ deleting the cache:
 rm -rf ~/.cache/opencode/packages/opencode-cmd-provider*
 ```
 
+The runtime provider is registered under this package's exact version
+(`opencode-cmd-provider@<version>`), so it lives in its own cache directory and
+can never drift away from the plugin that registered it — the wildcard above
+removes those directories too. Nothing updates by itself: without the delete,
+both halves stay at the version you installed.
+
 Restart OpenCode afterwards. The plugin is re-downloaded, so that first launch
-takes a little longer than usual; subsequent startups are fast again.
+takes a little longer than usual; subsequent startups are fast again. The first
+Command Code request after an update also fetches the matching runtime provider.
 
 Install globally (available in every project):
 
@@ -257,6 +264,11 @@ Then restart OpenCode. The plugin is re-downloaded, so that first launch takes
 a little longer than usual; subsequent startups are fast again. If new Command
 Code models stop appearing in `/models` after a release, a stale cache entry is
 the most likely cause.
+
+The runtime provider is registered under this package's exact version, so it
+lives in its own `opencode-cmd-provider@<version>` directory — the wildcard
+above removes those copies too. Nothing updates by itself: without the delete,
+both the plugin and its runtime provider stay at the version you installed.
 
 - **OpenChamber users:** click **Reload OpenCode** in OpenChamber's settings
   instead of restarting manually — the running OpenCode server keeps the old
