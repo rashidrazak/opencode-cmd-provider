@@ -1,4 +1,4 @@
-## Unreleased
+## 1.7.5 - 2026-09-12
 
 Fix: the runtime provider is pinned to the plugin's own version
 ([#152](https://github.com/rashidrazak/opencode-cmd-provider/issues/152),
