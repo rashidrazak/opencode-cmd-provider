@@ -28,6 +28,7 @@ Before opening a PR, run:
 ```sh
 npm run build
 npm test
+npm run lint:secrets
 npm run format:check
 git diff --check
 ```

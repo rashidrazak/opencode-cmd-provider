@@ -12,6 +12,12 @@ decisions in `docs/adr/`.
   emit is non-reactive (props freeze; the sidebar never repaints). CI installs
   bun.
 - `npm test` = typecheck → unit → integration → contract → `format:check`.
+- `npm run lint:secrets` scans the tree with secretlint for Command Code key
+  material (`user_`/`cc_` + 8 characters, mirroring `provider/redact.ts`). It is
+  a separate CI step, not part of `npm test`. `.secretlintrc.json` deliberately
+  carries that one pattern and no generic heuristic; the credential-shaped
+  fixtures in `tests/` are allowlisted by value, so a new sentinel fails the
+  gate until it is added there.
 - Single test: `npx tsx tests/<file>.test.ts`. Tests are plain `.test.ts` files
   run by `tsx` (no vitest/jest); helpers `run`/`assert`/`assertEqual` come from
   `tests/harness.ts`.
