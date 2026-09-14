@@ -6,6 +6,7 @@
 // transport. Rendering is a pure function so tests never touch the network.
 import { z } from "zod"
 import { MODEL_COSTS } from "../catalog/facts.js"
+import type { V2ToolDefinition } from "../plugin/v2-types.js"
 import {
   MODEL_DEALS,
   PLAN_CATALOG,
@@ -226,13 +227,48 @@ function estimateMonthlyRequests(modelId: string, allowance: number): number {
   return Math.floor(allowance / perRequest + 1e-9)
 }
 
+/**
+ * The tool's description and argument contract, shared verbatim by both hosts
+ * so a v1 and a v2 session see the same tool (ADR-0010). v1 builds it with the
+ * `tool()` zod helper, v2 with a plain JSON Schema.
+ */
+export const PLAN_SUMMARY_DESCRIPTION =
+  "Show the Command Code plan's credits, usage windows, per-model monthly allowances (GOAT/Pro) or active deals (other plans), with estimated monthly request counts. Set COMMANDCODE_PLAN (go|goat|pro|max|max20|teampro|provider) to pin the plan without network access."
+export const PLAN_SUMMARY_ARG_DESCRIPTION = "go|goat|pro|max|max20|teampro|provider"
+
 export function planSummaryTool() {
   return {
-    description:
-      "Show the Command Code plan's credits, usage windows, per-model monthly allowances (GOAT/Pro) or active deals (other plans), with estimated monthly request counts. Set COMMANDCODE_PLAN (go|goat|pro|max|max20|teampro|provider) to pin the plan without network access.",
+    description: PLAN_SUMMARY_DESCRIPTION,
     args: {
-      plan: z.string().optional().describe("go|goat|pro|max|max20|teampro|provider"),
+      plan: z.string().optional().describe(PLAN_SUMMARY_ARG_DESCRIPTION),
     },
     execute: async (args: { plan?: string }) => renderPlanSummary(await resolvePlan(args.plan)),
+  }
+}
+
+export interface PlanSummaryInput {
+  plan?: string
+}
+
+/**
+ * v2 tool definition (ADR-0010): the Promise API takes JSON Schema input and
+ * returns structured content, so the rendered summary moves into
+ * `{ content }` unchanged. Same name, description, argument, and rendering as
+ * the v1 tool — `cmd_plan_summary` behaves identically in either host.
+ */
+export function planSummaryV2Tool(): V2ToolDefinition<PlanSummaryInput> {
+  return {
+    name: "cmd_plan_summary",
+    description: PLAN_SUMMARY_DESCRIPTION,
+    input: {
+      type: "object",
+      properties: {
+        plan: { type: "string", description: PLAN_SUMMARY_ARG_DESCRIPTION },
+      },
+      additionalProperties: false,
+    },
+    execute: async (input) => ({
+      content: renderPlanSummary(await resolvePlan(input?.plan)),
+    }),
   }
 }
