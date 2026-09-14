@@ -1,3 +1,19 @@
+## Unreleased
+
+### Deals intelligence
+
+- **The `Command Code` sidebar is back on OpenCode v2.** `dist/tui.js` only
+  implemented the v1 TUI contract (`{ id, tui(api) }` with the snake_case
+  `sidebar_content` slot), and the v2 TUI host rejects any plugin module whose
+  default export lacks `setup()` ("Invalid V2 TUI plugin module"). v2 loaded the
+  module and dropped it, so the sidebar silently disappeared while v1 kept
+  working and no test noticed. The default export now carries both halves
+  (ADR-0010): v1 registers `sidebar_content` off `options.cmd`, v2 claims the
+  dot-separated `"sidebar.content"` path with `ui.slot` and reads the same Deals
+  payload from `settings.cmd`. `src/plugin/v2-tui-types.ts` mirrors the v2 TUI
+  context, and `tests/tui-deals-panel.test.ts` plus `tests/contract.test.ts` pin
+  both contracts against the built bundle.
+
 ## 1.7.6 - 2026-09-14
 
 ### Deals intelligence

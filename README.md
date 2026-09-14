@@ -151,14 +151,23 @@ choose a transport: inference starts on the Provider API unless you explicitly
 pin `plan=go`, and a Go account switches to the legacy endpoint automatically
 when the Provider API answers `403 upgrade_required`.
 
-Delivery is zero-step: the package exports both a `server` and a `tui` target
-(`exports["./tui"]` → `dist/tui.js`), and `opencode plugin
+Delivery is zero-step on both hosts: the package exports both a `server` and a
+`tui` target (`exports["./tui"]` → `dist/tui.js`), and `opencode plugin
 opencode-cmd-provider` writes both `opencode.json(c)` and `tui.json` from one
-spec. The sidebar is a TUI plugin loaded from `tui.json` — which is why
-installs made before the `./tui` export only wrote the server target and never
-showed a sidebar. Re-run `opencode plugin opencode-cmd-provider --force` to add
-`tui.json` (this only rewrites the config entry — see
+spec — on v2 the installer writes the global `plugins` entry instead and the TUI
+host loads the package's `./tui` entrypoint itself. Installs made before the
+`./tui` export only wrote the server target and never showed a sidebar; re-run
+`opencode plugin opencode-cmd-provider --force` (v1) or `opencode plugin add
+opencode-cmd-provider` (v2) to add it (this only rewrites the config entry — see
 [Update and remove](#update-and-remove) for refreshing the cached package).
+
+`dist/tui.js` carries one default export with both TUI host contracts — v1's
+`{ id, tui(api) }` registering the `sidebar_content` slot, and v2's
+`{ id, setup(context) }` claiming the dot-separated `"sidebar.content"` path
+(ADR-0010). Shipping only one half is invisible on the other host: the v2 TUI
+rejects a module without `setup()` with `Invalid V2 TUI plugin module` and the
+sidebar silently never appears — the missing-v2-sidebar bug this package fixed by
+shipping both halves.
 
 When the Deals catalog is empty (the upstream fetch failed or the RSC shape
 changed), the feature degrades visibly rather than silently: the sidebar shows

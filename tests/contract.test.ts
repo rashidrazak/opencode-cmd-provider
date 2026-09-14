@@ -77,6 +77,32 @@ run([
     },
   ],
   [
+    "dist/tui.js default export satisfies both TUI host contracts",
+    async () => {
+      // One default export, two TUI loaders (ADR-0010), mirroring the server
+      // entry's dual shape:
+      //  - v1's reader (`readV1Plugin` with kind "tui", strict) requires a
+      //    function `tui` and *rejects* a module carrying both `server()` and
+      //    `tui()`;
+      //  - v2's TUI loader validates `id` (non-empty string) + `setup`
+      //    (function) and throws "Invalid V2 TUI plugin module" otherwise.
+      // Shipping only the v1 half let v2 load dist/tui.js and
+      // dropped it — the sidebar never appeared on v2 and no v1 behaviour
+      // noticed. Pin both halves here.
+      const mod = await loadTui()
+      const def = mod.default as {
+        id?: unknown
+        tui?: unknown
+        setup?: unknown
+        server?: unknown
+      }
+      assertEqual(def.id, "commandcode.deals")
+      assert(typeof def.tui === "function", "v1 needs tui(api)")
+      assert(typeof def.setup === "function", "v2 needs setup(context)")
+      assertEqual(def.server, undefined, "v1 rejects a module with both server() and tui()")
+    },
+  ],
+  [
     "index.ts exports exactly one create* function",
     async () => {
       const mod = await load()

@@ -61,6 +61,48 @@ it never imports the named package. A provider entry without a matching SDK
 hook fails model initialization with "No AISDK provider plugin returned an
 SDK". `ctx.aisdk.hook("sdk", …, { providerID: "commandcode" })` is that seam.
 
+### The TUI half: one `./tui` export, two contracts
+
+The Deals sidebar is a _TUI_ plugin, loaded from `exports["./tui"]`
+(`dist/tui.js`) by a different host process than the server halves above — and
+that host has its own v1/v2 split. One default export carries both:
+
+```ts
+export default { id: "commandcode.deals", tui, setup }
+```
+
+- **v1** (`packages/opencode/src/cli/cmd/tui/…` at v1.18.30) reads the default
+  export through its `tui`-kind reader: a `tui` function is required, and a
+  module carrying both `server()` and `tui()` is rejected. The half registers
+  snake_case slots with `api.slots.register({ order, slots })` —
+  `sidebar_content` is the one this panel uses — and reads the selected model
+  from `api.state.session` × `api.state.provider`, where the config hook's
+  enrichment left `options.cmd`.
+- **v2** (`@opencode/plugin@2.0.3`, `dist/tui/context.d.ts`) validates the
+  default export as a TUI `Definition` — `id` a non-empty string and `setup` a
+  function — and rejects anything else as "Invalid V2 TUI plugin module". Its
+  API is a dot-separated slot tree claimed with
+  `ctx.ui.slot({ append: "sidebar.content", render })`; its data lives in
+  `ctx.data.session` / `ctx.data.location.model`; and the model's provider-option
+  bag is `settings`, so the same enrichment payload v1 writes to `options.cmd`
+  is read from `settings.cmd` (`enrichCommandCodeModelsV2`).
+
+Shipping only the v1 half was the missing-v2-sidebar bug: v2 still loaded `dist/tui.js`
+(its TUI host takes a registered package's `tui` entrypoint), rejected the
+module, and the `Command Code` sidebar silently disappeared — no v1 symptom, no
+server-side symptom, and no test noticing. Both contracts are now pinned by
+`tests/contract.test.ts` (the built bundle) and `tests/tui-deals-panel.test.ts`
+(registration and data path), and `src/plugin/v2-tui-types.ts` mirrors the v2
+TUI context exactly as `src/plugin/v2-types.ts` mirrors the catalog,
+integration, and tool context.
+
+Both hosts rewrite the plugin's `@opentui/*` and `solid-js` imports to their own
+module instances — v1 in its TUI plugin loader, v2 through
+`@opentui/solid/runtime-plugin-support` — so the bundle keeps those imports bare
+and the panel runs on the host's single reactive runtime. That is also why the
+slice stays one bundled file (`scripts/build-tui.ts`): the rewrite covers the
+entry's own imports.
+
 ### What carries over unchanged
 
 - **Membership.** `catalogModelForV2` maps the same Snapshot row the v1 entry
@@ -154,6 +196,16 @@ SDK". `ctx.aisdk.hook("sdk", …, { providerID: "commandcode" })` is that seam.
   (this package's pin), so the model the v2 SDK hook hands over implements the
   interface the host calls. The version is not added as a dependency: nothing
   in the runtime path imports a provider package.
+- **The TUI half was read from the host binaries, then run against both lines**
+  (the missing-v2-sidebar bug). The v2.0.3 binary's TUI loader validates a plugin's default
+  export with `"id" in m && typeof m.id === "string" && "setup" in m &&
+typeof m.setup === "function"`, and logs `plugin reconciliation completed
+plugins=N` — with the v1-only bundle our package loaded
+  (`…/dist/tui.js`, `role=cli`) and was then dropped, so `N` never counted it.
+  After the fix a real v2.0.3 TUI (patched build in the plugin cache, session
+  resumed with `--session`) rendered the panel's rows (`Tier:`, `Tok/s:`,
+  `GOAT allowance:`) beside the real v1.18.30 TUI, which rendered the same rows
+  through `sidebar_content` with no load errors.
 
 ## Consequences
 
@@ -163,6 +215,13 @@ SDK". `ctx.aisdk.hook("sdk", …, { providerID: "commandcode" })` is that seam.
   cannot break a build when v2 changes — but it will not warn either. Bumping
   the supported v2 line means re-deriving `src/plugin/v2-types.ts` from the
   published `@opencode/plugin` and re-reading the mapping table above.
+- **The TUI mirror carries the same risk with a sharper edge.** v2's TUI
+  vocabulary (the `"sidebar.content"` path, the `ui.slot` claim shape, and the
+  `settings` bag) is mirrored in `src/plugin/v2-tui-types.ts`; renaming any of
+  it upstream would silently empty the sidebar again rather than fail a build,
+  so the mirror and `tests/tui-deals-panel.test.ts` must be re-derived from
+  `@opencode/plugin@<line>/dist/tui/context.d.ts` whenever the supported v2 line
+  moves.
 - `@opencode/plugin@2.0.3` pins `@opentui/core >= 0.5.10` while this package
   pins `^0.5.4`; that peer conflict is why the v2 context is mirrored rather
   than depended on. If the TUI dependencies are ever aligned, the mirror could
