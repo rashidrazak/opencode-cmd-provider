@@ -1,6 +1,15 @@
-// src/plugin/models.ts — snapshot → config auto-registration (issue #16)
+// src/plugin/models.ts — snapshot → host model entry (issue #16)
+//
+// Two hosts, two entry shapes, one Snapshot:
+//  - v1: the `config` hook fills `provider.commandcode.models` (autoRegister,
+//    below) — a `ConfigModel` per row;
+//  - v2: the `catalog.transform` fills `Model.Info` records (catalogModelForV2)
+//    — see ADR-0010.
+// Both derive the same Display name, limits, reasoning variants, and modality
+// facts from the Snapshot row, so a model reads identically in either host.
 import type { Config, ProviderConfig } from "@opencode-ai/sdk/v2"
 import type { CatalogModel } from "../catalog/snapshot.js"
+import type { V2ModelInfo } from "./v2-types.js"
 import { isFreeModelCost } from "../provider/pricing.js"
 import { reasoningVariantsForModel, isReasoningModel } from "../provider/reasoning.js"
 import { inputModalitiesForModel } from "../provider/modalities.js"
@@ -129,25 +138,10 @@ export function augmentConfigCommandCodeModels(config: Config): void {
  */
 function configModelFor(model: CatalogModel, prefix = DEFAULT_DISPLAY_PREFIX): ConfigModel {
   const variants = reasoningVariantsForModel(model.id)
-  // The row's own parsed price is the ship-bar authority. A null cost
-  // (missing models.md price cell) advertises no cost entry — the
-  // zero-cost defensive fallback (ZERO_MODEL_COST) is deliberately not
-  // used here: a missing price must never read as a $0 model (the parent
-  // spec's "missing never zero-fills").
   const rowCost = model.cost
-  const freeSuffix = rowCost !== null && isFreeModelCost(rowCost) ? " (free)" : ""
-  // OpenCode requires a numeric context limit. A package row whose Context
-  // cell is missing ships as pending-context (issue #130) and must not read
-  // as 0 — that would advertise a broken model. PENDING_CONTEXT_LENGTH is
-  // a conservative placeholder for such a row until the ladder (issue
-  // #132) resolves it.
-  const contextLength = model.contextLength ?? PENDING_CONTEXT_LENGTH
   return {
-    name: `${prefix}${model.name}${freeSuffix}`,
-    limit: {
-      context: contextLength,
-      output: Math.min(contextLength, DEFAULT_MAX_OUTPUT_TOKENS),
-    },
+    name: displayNameFor(model, prefix),
+    limit: limitsFor(model),
     reasoning: isReasoningModel(model.id) ? true : undefined,
     variants: variants as ConfigVariants | undefined,
     // `tool_call: true` advertises tool use (the runtime already sends tools).
@@ -171,4 +165,85 @@ function configModelFor(model: CatalogModel, prefix = DEFAULT_DISPLAY_PREFIX): C
       : {}),
     status: "active",
   }
+}
+
+/**
+ * Display name for a Snapshot row: the configurable prefix, the catalog name,
+ * and the "(free)" marker for an explicitly all-zero price cell (Display name
+ * in CONTEXT.md). Shared by both hosts so a model never reads differently in
+ * v1 and v2.
+ */
+function displayNameFor(model: CatalogModel, prefix: string): string {
+  const freeSuffix = model.cost !== null && isFreeModelCost(model.cost) ? " (free)" : ""
+  return `${prefix}${model.name}${freeSuffix}`
+}
+
+/**
+ * Context/output limits for a Snapshot row. OpenCode requires a numeric
+ * context limit, so a row whose models.md Context cell was missing ships as
+ * pending-context (issue #130) behind PENDING_CONTEXT_LENGTH — never 0, never
+ * a fabricated listing-API value.
+ */
+function limitsFor(model: CatalogModel): { context: number; output: number } {
+  const contextLength = model.contextLength ?? PENDING_CONTEXT_LENGTH
+  return { context: contextLength, output: Math.min(contextLength, DEFAULT_MAX_OUTPUT_TOKENS) }
+}
+
+/**
+ * v2 `Model.Info` draft fields for a Snapshot row (ADR-0010).
+ *
+ * Same ship-bar authority as the v1 entry — the row's own parsed price and
+ * context cell, with missing never zero-filling:
+ *  - cost null advertises an empty `cost` array (no rate), never a $0 tier;
+ *  - the v2 `cost` shape is an array of context tiers with a required
+ *    `cache.{read,write}`, so the v1 flat `cache_read`/`cache_write` pair maps
+ *    onto the single untiered entry.
+ * Reasoning effort reaches the runtime through `variants` (`settings` become
+ * the model's provider options in v2), the counterpart of v1's `variants` map.
+ * `capabilities.input` carries the modality table; `output` stays text-only —
+ * Command Code's published catalog exposes no non-text output.
+ */
+export type V2CatalogModelFields = Pick<
+  V2ModelInfo,
+  "name" | "limit" | "capabilities" | "cost" | "variants" | "status"
+>
+
+export function catalogModelForV2(
+  model: CatalogModel,
+  prefix = DEFAULT_DISPLAY_PREFIX,
+): V2CatalogModelFields {
+  const rowCost = model.cost
+  return {
+    name: displayNameFor(model, prefix),
+    limit: limitsFor(model),
+    capabilities: {
+      tools: true,
+      input: [...inputModalitiesForModel(model.id)],
+      output: ["text"],
+    },
+    cost:
+      rowCost === null
+        ? []
+        : [
+            {
+              input: rowCost.input,
+              output: rowCost.output,
+              cache: { read: rowCost.cacheRead, write: rowCost.cacheWrite },
+            },
+          ],
+    variants: catalogVariantsForV2(model.id),
+    status: "active",
+  }
+}
+
+/**
+ * Reasoning-effort variants for a v2 model entry. v2 carries the effort in the
+ * variant's `settings`, which the host projects into the model's provider
+ * options — the counterpart of v1's `variants` map, where the effort sat at the
+ * variant's top level.
+ */
+export function catalogVariantsForV2(modelId: string): V2ModelInfo["variants"] {
+  const variants = reasoningVariantsForModel(modelId)
+  if (variants === undefined) return []
+  return Object.entries(variants).map(([id, settings]) => ({ id, settings: { ...settings } }))
 }

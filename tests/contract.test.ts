@@ -86,13 +86,18 @@ run([
     },
   ],
   [
-    "default export is a V1 plugin module { id, server }",
+    "default export is a dual OpenCode plugin module { id, server, setup }",
     async () => {
+      // One default export, two loaders (ADR-0010). v1 (`readV1Plugin`, detect
+      // mode) only inspects id/server/tui, so the extra `setup` is invisible to
+      // it; v2 decodes the export against `{ id, setup }` and strips unknown
+      // keys, so the extra `server` is invisible to it. Both halves must stay.
       const mod = await load()
-      const def = mod.default as { id?: unknown; server?: unknown }
+      const def = mod.default as { id?: unknown; server?: unknown; setup?: unknown }
       assert(typeof def === "object" && def !== null)
       assertEqual(def.id, "commandcode")
-      assert(typeof def.server === "function")
+      assert(typeof def.server === "function", "v1 needs server()")
+      assert(typeof def.setup === "function", "v2 needs setup(context)")
     },
   ],
   [
@@ -114,6 +119,26 @@ run([
       assert(
         offenders.length === 0,
         `runtime @opencode-ai/* imports found in built bundle: ${offenders.join(", ")}`,
+      )
+    },
+  ],
+  [
+    "built bundle never runtime-imports the v2 host packages either",
+    () => {
+      // The v2 plugin context is *injected* by the host, so `@opencode/plugin`
+      // is never imported — not even by the v2 half (ADR-0010). A runtime
+      // import would make the package depend on a module only the installed
+      // opencode release provides, breaking the v1 host that shares this file.
+      const offenders: string[] = []
+      for (const file of listJsFiles(new URL("../dist", import.meta.url).pathname)) {
+        const text = readFileSync(file, "utf-8")
+        if (/^\s*import\s.*from\s+["']@opencode\//m.test(text)) {
+          offenders.push(file)
+        }
+      }
+      assert(
+        offenders.length === 0,
+        `runtime @opencode/* imports found in built bundle: ${offenders.join(", ")}`,
       )
     },
   ],

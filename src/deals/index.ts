@@ -20,8 +20,19 @@ export type { ModelDeals, PlanId, PlanInfo, DealRates } from "./catalog.js"
 // into src/plugin)
 export { vendorFamilyForModel } from "./vendor.js"
 
-// Enrichment (family + options.cmd + context_over_200k cost)
-export { enrichCommandCodeModels, buildCmdOptions } from "./enrichment.js"
+// Enrichment (family + cmd options + context_over_200k cost) — v1 config hook
+// and v2 catalog transform share one Deals catalog
+export {
+  enrichCommandCodeModels,
+  enrichCommandCodeModelsV2,
+  buildCmdOptions,
+} from "./enrichment.js"
 
-// Tool
-export { planSummaryTool, renderPlanSummary, resolvePlan, normalizePlan } from "./plan-summary.js"
+// Tool (v1 `tool()` helper and v2 JSON-Schema definition from one rendering)
+export {
+  planSummaryTool,
+  planSummaryV2Tool,
+  renderPlanSummary,
+  resolvePlan,
+  normalizePlan,
+} from "./plan-summary.js"

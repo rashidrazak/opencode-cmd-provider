@@ -23,11 +23,23 @@ the running plugin (e.g. `opencode-cmd-provider@1.7.4`), so OpenCode's
 specifier-keyed package cache can never install a runtime provider from a
 different release than the plugin that registered it. The bare package name is
 the fallback when the version cannot be read; a user-declared value always
-wins. See ADR-0009.
+wins. On OpenCode v2 the same specifier is registered as the provider's
+`package`, carrying v2's `aisdk:` prefix — v2's marker that a plugin supplies
+the runtime SDK. See ADR-0009 and ADR-0010.
 _Avoid_: npm field, provider package, version pin
 
+**Host**:
+An OpenCode process that loads the plugin: **v1** (the 1.18.x line, which calls
+the default export's `server()` and consumes the returned hook map) or **v2**
+(the 2.0.x line, which calls `setup(context)` and registers transforms). One
+default export serves both; each Host reads only its own key, and the two
+halves are independent implementations of the same capabilities rather than one
+translating the other. The TUI Host is neither — it loads the `./tui` export.
+See ADR-0010.
+_Avoid_: version, runtime, platform, shim
+
 **Declared models**:
-Models the user explicitly lists under `provider.commandcode.models` in `opencode.json`, taking precedence over snapshot models.
+Models the user explicitly lists under `provider.commandcode.models` in `opencode.json` (v2: `providers.commandcode.models`), taking precedence over snapshot models.
 _Avoid_: user models, custom models, overrides
 
 **Catalog refresh**:
@@ -35,7 +47,7 @@ Updating the snapshot to match the Model catalog's membership (the models.md tab
 _Avoid_: model sync, catalog update, live refresh
 
 **Core**:
-`provider.commandcode` auto-registration (snapshot → `provider.commandcode.models`), configurable display-name prefix (default `[CMD]`), `COMMANDCODE_API_KEY` auth, and `provider/*` streaming. Deals intelligence is not part of core.
+`provider.commandcode` auto-registration (v1: snapshot → `provider.commandcode.models`; v2: the same Snapshot → catalog `Model.Info` records), configurable display-name prefix (default `[CMD]`), `COMMANDCODE_API_KEY` auth, and `provider/*` streaming. Deals intelligence is not part of core.
 _Avoid_: base provider, essential plugin
 
 **Deals catalog**:
@@ -55,7 +67,7 @@ with the snapshot.
 _Avoid_: pricing table, deal feed
 
 **Deals intelligence**:
-The deals catalog plus its enrichment (`model.options.cmd`, `context_over_200k` cost) and its surfaces: the TUI sidebar panel and the `cmd_plan_summary` tool. A single excisable slice — removing it leaves core byte-identical.
+The deals catalog plus its enrichment (v1: `model.options.cmd`, `context_over_200k` cost; v2: `settings.cmd`, a 200k context cost tier) and its surfaces: the TUI sidebar panel and the `cmd_plan_summary` tool. A single excisable slice — removing it leaves core byte-identical.
 _Avoid_: deals feature, pricing UI
 
 **Classification**:

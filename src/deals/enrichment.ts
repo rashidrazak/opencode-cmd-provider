@@ -1,12 +1,18 @@
-// src/deals/enrichment.ts — docs-derived model enrichment for the
-// config hook. Purely additive: every field is gap-filled only when the user
-// left it unset. When the Deals catalog is empty the mitigated state is
-// visible: `model.options.cmd.unavailable` is injected instead of leaving
-// `cmd` absent, while `family`/`cost` are preserved and Declared `cmd` is
-// never overwritten.
+// src/deals/enrichment.ts — docs-derived model enrichment for the config hook
+// (v1) and the catalog transform (v2). Purely additive: every field is
+// gap-filled only when the user left it unset. When the Deals catalog is empty
+// the mitigated state is visible: `cmd.unavailable` is injected instead of
+// leaving `cmd` absent, while `family`/`cost` are preserved and Declared `cmd`
+// is never overwritten.
 import type { Config } from "@opencode-ai/sdk/v2"
+import type { V2CatalogEditor } from "../plugin/v2-types.js"
 import { MODEL_DEALS, type ModelDeals } from "./catalog.js"
 import { vendorFamilyForModel } from "./vendor.js"
+
+/** Provider id both hosts register under — the enrichment's only target. */
+const PROVIDER_ID = "commandcode"
+/** Context threshold of the over-200k rate tier, keyed `context_over_200k` in v1. */
+const OVER_CONTEXT_TIER_SIZE = 200_000
 
 export function enrichCommandCodeModels(
   config: Config,
@@ -62,4 +68,61 @@ export function buildCmdOptions(deals: ModelDeals): Record<string, unknown> {
   if (deals.overContext !== undefined) out.overContext = deals.overContext
   out.free = deals.free
   return out
+}
+
+/**
+ * v2 counterpart of `enrichCommandCodeModels` (ADR-0010), run as a catalog
+ * transform extension right after Auto-registration. Field-by-field the same
+ * gap-fill against the same Deals catalog:
+ *  - `family` ← the vendor table;
+ *  - `options.cmd` → `settings.cmd` (v2 settings are the model's provider
+ *    options);
+ *  - `cost.context_over_200k` → a `cost` entry tiered at 200k tokens — v2's
+ *    cost shape is an array of context tiers, so the over-200k rate is the
+ *    tiered entry rather than a sibling key.
+ * Declared values are never overwritten, and an empty Deals catalog still
+ * surfaces `{ unavailable: true }` instead of a silent gap.
+ */
+export function enrichCommandCodeModelsV2(
+  catalog: V2CatalogEditor,
+  deals: Readonly<Record<string, ModelDeals>> = MODEL_DEALS,
+): void {
+  const record = catalog.provider.get(PROVIDER_ID)
+  if (!record) return
+  const isEmpty = Object.keys(deals).length === 0
+  for (const [modelId, model] of record.models) {
+    if (model.family === undefined) {
+      const family = vendorFamilyForModel(modelId)
+      if (family !== undefined) model.family = family
+    }
+    const entry = deals[modelId]
+    if (!entry) {
+      if (isEmpty && model.settings?.["cmd"] === undefined) {
+        model.settings ??= {}
+        model.settings["cmd"] = { unavailable: true }
+      }
+      continue
+    }
+    if (model.settings?.["cmd"] === undefined) {
+      model.settings ??= {}
+      model.settings["cmd"] = buildCmdOptions(entry)
+    }
+    if (entry.overContext !== undefined && !hasOverContextTier(model)) {
+      const c = entry.overContext
+      model.cost.push({
+        tier: { type: "context", size: OVER_CONTEXT_TIER_SIZE },
+        input: c.input,
+        output: c.output,
+        cache: { read: c.cacheRead, write: c.cacheWrite },
+      })
+    }
+  }
+}
+
+function hasOverContextTier(model: {
+  cost: readonly { tier?: { type: "context"; size: number } }[]
+}): boolean {
+  return model.cost.some(
+    (entry) => entry.tier?.type === "context" && entry.tier.size === OVER_CONTEXT_TIER_SIZE,
+  )
 }
