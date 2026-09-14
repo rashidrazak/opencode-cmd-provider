@@ -3,6 +3,11 @@
 // package.json exports["./tui"] and writes both opencode.json(c) and tui.json
 // with the same spec. Uses a local file:// spec so it runs without network
 // and without publishing.
+//
+// That command is the **v1** project-local installer. V2 replaced it with
+// `opencode plugin add`, which accepts only npm registry or Git specifiers and
+// writes the global `plugins` entry — so this leg skips on a v2 binary instead
+// of asserting an install step that host does not have (ADR-0010).
 import { spawnSync } from "node:child_process"
 import { mkdtempSync, existsSync, readFileSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -10,6 +15,26 @@ import { join, resolve } from "node:path"
 import { run, assert, assertEqual } from "./harness.js"
 
 const hasOpenCode = spawnSync("which", ["opencode"]).status === 0
+// Isolated HOME: a bare `opencode --version` writes its log under
+// $XDG_DATA_HOME and prints nothing when that is unwritable.
+function probeVersion(): string {
+  if (!hasOpenCode) return ""
+  const home = mkdtempSync(join(tmpdir(), "oc-install-probe-"))
+  const result = spawnSync("opencode", ["--version"], {
+    encoding: "utf-8",
+    env: {
+      PATH: process.env.PATH ?? "/usr/bin:/bin",
+      HOME: home,
+      XDG_CONFIG_HOME: join(home, ".config"),
+      XDG_DATA_HOME: join(home, ".data"),
+      XDG_CACHE_HOME: join(home, ".cache"),
+      OPENCODE_DISABLE_AUTOUPDATE: "1",
+    },
+  })
+  return `${result.stdout ?? ""}${result.stderr ?? ""}`.trim()
+}
+const opencodeVersion = probeVersion()
+const isV2 = /\bv2\./.test(opencodeVersion)
 
 run([
   [
@@ -17,6 +42,12 @@ run([
     () => {
       if (!hasOpenCode) {
         console.log("skip - opencode not on PATH")
+        return
+      }
+      if (isV2) {
+        console.log(
+          `skip - opencode is v2 (${opencodeVersion}): no project-local \`opencode plugin <spec>\` install`,
+        )
         return
       }
       const home = mkdtempSync(join(tmpdir(), "oc-install-home-"))
@@ -68,10 +99,15 @@ run([
   [
     "published artifact would contain both server and tui (npm pack dry-run)",
     () => {
-      // Validate via npm pack --dry-run that dist/tui.js is included
+      // Validate via npm pack --dry-run that dist/tui.js is included.
+      // `npm pack` writes scratch files into the npm cache, so point it at a
+      // throwaway one: the assertion is about the packed file list, and a
+      // read-only or shared ambient cache must not turn that into a failure.
+      const cache = mkdtempSync(join(tmpdir(), "oc-install-npm-"))
       const packed = spawnSync("npm", ["pack", "--dry-run"], {
         encoding: "utf-8",
         timeout: 15_000,
+        env: { ...process.env, npm_config_cache: cache },
       })
       const out = (packed.stdout || "") + (packed.stderr || "")
       assert(out.includes("dist/tui.js"), "npm pack must include dist/tui.js")
