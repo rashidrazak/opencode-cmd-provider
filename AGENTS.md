@@ -89,7 +89,10 @@ fixtures (see `scripts/check-deals-coverage.mjs` and
   the v2 `setup`, `enrichCommandCodeModels` and `planSummaryTool` in the v1
   `server`) leaves Core green. Keep the server barrel `src/deals/index.ts` free
   of the TUI re-exports — exporting `tui.tsx` from it pulls
-  `solid-js`/`@opentui` into the server bundle.
+  `solid-js`/`@opentui` into the server bundle. Plan identity (`PlanId`,
+  `normalizePlan`) is Core — `src/catalog/plans.ts` — because transport
+  selection reads an explicit plan pin; Core never imports the slice
+  (ADR-0011), enforced by `tests/contract.test.ts`.
 - **Never runtime-import `@opencode-ai/*` or `@opencode/*`.** `@opencode-ai/plugin`/`@opencode-ai/sdk`
   are optional peer deps: `opencode plugin <pkg>` installs them in `.opencode/`,
   not next to the plugin, so a runtime import fails to resolve at load and kills

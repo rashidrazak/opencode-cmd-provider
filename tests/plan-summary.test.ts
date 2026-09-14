@@ -1,16 +1,57 @@
-// tests/plan-summary.test.ts — plan resolution + summary rendering
+// tests/plan-summary.test.ts — plan resolution (billing subscription, issue
+// #159) + summary rendering. Plan identity lives in Core
+// (src/catalog/plans.ts); the lookup and rendering live in the Deals slice.
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import {
   resolvePlan,
   renderPlanSummary,
-  normalizePlan,
-  type PlanResolutionCache,
+  planSummaryTool,
+  planSummaryV2Tool,
+  PLAN_SUMMARY_DESCRIPTION,
 } from "../src/deals/plan-summary.js"
+import { normalizePlan } from "../src/catalog/plans.js"
 import { MODEL_DEALS, PLAN_CATALOG } from "../src/deals/catalog.js"
 import { assert, assertEqual, run } from "./harness.js"
 
 const OFFLINE_ENV: NodeJS.ProcessEnv = {} // no key → no network attempt
+const MOCK_ENV: NodeJS.ProcessEnv = {
+  COMMANDCODE_API_KEY: "k",
+  COMMANDCODE_API_BASE: "http://mock",
+}
 
-/** Stubs global fetch for the duration of fn (resolvePlan fetches whoami via the global). */
+interface Call {
+  url: string
+  headers: Record<string, string>
+  signal: unknown
+}
+
+/** Records every lookup request and answers from a path → body map (404 for
+ * anything unlisted, so the stubbed "API" has to be explicit per endpoint). */
+function recordingFetch(
+  bodies: Record<string, unknown>,
+  calls: Call[] = [],
+): { calls: Call[]; fetch: typeof fetch } {
+  const impl = (async (url: string, init: RequestInit) => {
+    calls.push({
+      url,
+      headers: (init.headers ?? {}) as Record<string, string>,
+      signal: init.signal,
+    })
+    const path = url.replace("http://mock", "")
+    if (!(path in bodies)) return new Response("not found", { status: 404 })
+    return new Response(JSON.stringify(bodies[path]), { status: 200 })
+  }) as unknown as typeof fetch
+  return { calls, fetch: impl }
+}
+
+const SUBSCRIPTION_ACTIVE = (planId: string) => ({
+  success: true,
+  data: { status: "active", planId },
+})
+
+/** Stubs global fetch for the duration of fn (resolvePlan defaults to it). */
 function withFetchStub(
   stub: (url: string, init: RequestInit) => Promise<Response> | Response,
   fn: () => Promise<void> | void,
@@ -34,45 +75,16 @@ run([
       assertEqual(normalizePlan("individual-ultra"), "max20")
       assertEqual(normalizePlan("team-pro"), "teampro")
       assertEqual(normalizePlan("Team Pro"), "teampro")
+      // the id the API actually returns for a Team Pro subscription (#159)
+      assertEqual(normalizePlan("teams-pro"), "teampro")
       assertEqual(normalizePlan("individual-provider"), "provider")
-      assertEqual(normalizePlan("teams-pro"), undefined)
       assertEqual(normalizePlan(42), undefined)
       assertEqual(normalizePlan(undefined), undefined)
     },
   ],
 
   [
-    "resolvePlan: arg beats env beats default",
-    async () => {
-      assertEqual(await resolvePlan("goat", OFFLINE_ENV), "goat")
-      assertEqual(await resolvePlan("pro", { COMMANDCODE_PLAN: "goat" }), "pro")
-      assertEqual(await resolvePlan(undefined, { COMMANDCODE_PLAN: "max20" }), "max20")
-      assertEqual(await resolvePlan(undefined, OFFLINE_ENV), "go")
-    },
-  ],
-
-  [
-    "resolvePlan: unknown env value falls back to default",
-    async () => {
-      assertEqual(await resolvePlan(undefined, { COMMANDCODE_PLAN: "bogus" }), "go")
-    },
-  ],
-
-  [
-    "resolvePlan falls back to default when whoami is unreachable",
-    async () => {
-      assertEqual(
-        await resolvePlan(undefined, {
-          COMMANDCODE_API_KEY: "k",
-          COMMANDCODE_API_BASE: "http://127.0.0.1:1",
-        }),
-        "go",
-      )
-    },
-  ],
-
-  [
-    "normalizePlan covers the transport alias set (issue #54)",
+    "normalizePlan covers the transport pin alias set (issue #54)",
     () => {
       for (const [alias, expected] of [
         ["go", "go"],
@@ -94,134 +106,209 @@ run([
   ],
 
   [
-    "resolvePlan: defaultPlan flips the fallback — transport uses provider, Deals keeps go",
+    "resolvePlan: arg beats env beats the billing lookup",
     async () => {
-      assertEqual(await resolvePlan(undefined, OFFLINE_ENV), "go")
+      let calls = 0
+      const fetchSpy = (async () => {
+        calls++
+        return new Response("{}", { status: 200 })
+      }) as unknown as typeof fetch
+      assertEqual(await resolvePlan("goat", OFFLINE_ENV, { fetch: fetchSpy }), "goat")
       assertEqual(
-        await resolvePlan(undefined, OFFLINE_ENV, { defaultPlan: "provider" }),
-        "provider",
+        await resolvePlan("pro", { COMMANDCODE_PLAN: "goat" }, { fetch: fetchSpy }),
+        "pro",
       )
-      // explicit resolutions are unaffected by the flip
-      assertEqual(await resolvePlan("go", OFFLINE_ENV, { defaultPlan: "provider" }), "go")
       assertEqual(
-        await resolvePlan(undefined, { COMMANDCODE_PLAN: "goat" }, { defaultPlan: "provider" }),
-        "goat",
+        await resolvePlan(undefined, { COMMANDCODE_PLAN: "max20" }, { fetch: fetchSpy }),
+        "max20",
+      )
+      assertEqual(calls, 0, "an override must not touch the network")
+    },
+  ],
+
+  [
+    "resolvePlan: no plan resolves to undefined — never a default (issue #159)",
+    async () => {
+      assertEqual(await resolvePlan(undefined, OFFLINE_ENV), undefined)
+      // unknown env value is not a plan either
+      assertEqual(await resolvePlan(undefined, { COMMANDCODE_PLAN: "bogus" }), undefined)
+      // unreachable API: no guessed plan
+      assertEqual(
+        await resolvePlan(undefined, {
+          COMMANDCODE_API_KEY: "k",
+          COMMANDCODE_API_BASE: "http://127.0.0.1:1",
+        }),
+        undefined,
       )
     },
   ],
 
   [
-    "resolvePlan: arg beats env, env beats whoami (whoami not fetched when env set)",
+    "resolvePlan: reads planId from /alpha/billing/subscriptions (issue #159)",
     async () => {
-      assertEqual(await resolvePlan("goat", { COMMANDCODE_PLAN: "go" }), "goat")
-      let whoamiFetches = 0
-      await withFetchStub(
-        async () => {
-          whoamiFetches++
-          return new Response(JSON.stringify({ planId: "goat" }), { status: 200 })
-        },
-        async () => {
-          const env: NodeJS.ProcessEnv = {
-            COMMANDCODE_PLAN: "go",
-            COMMANDCODE_API_KEY: "k",
-            COMMANDCODE_API_BASE: "http://mock",
-          }
-          assertEqual(await resolvePlan(undefined, env, { defaultPlan: "provider" }), "go")
-          assertEqual(whoamiFetches, 0)
-        },
+      const { calls, fetch } = recordingFetch({
+        "/alpha/whoami": { success: true, user: { id: "u" }, org: null },
+        "/alpha/billing/subscriptions": SUBSCRIPTION_ACTIVE("individual-goat"),
+      })
+      assertEqual(await resolvePlan(undefined, MOCK_ENV, { fetch }), "goat")
+      assertEqual(
+        calls.map((c) => c.url).join(","),
+        "http://mock/alpha/whoami,http://mock/alpha/billing/subscriptions",
+        "whoami first (org scope), then the subscription",
+      )
+      assertEqual(calls[0]!.headers.authorization, "Bearer k")
+      assert(calls[0]!.signal instanceof AbortSignal, "lookup carries an abort signal (5s timeout)")
+    },
+  ],
+
+  [
+    "resolvePlan: an org subscription is looked up with the whoami orgId",
+    async () => {
+      const { calls, fetch } = recordingFetch({
+        "/alpha/whoami": { success: true, user: { id: "u" }, org: { id: "org_42" } },
+        "/alpha/billing/subscriptions?orgId=org_42": SUBSCRIPTION_ACTIVE("teams-pro"),
+      })
+      assertEqual(await resolvePlan(undefined, MOCK_ENV, { fetch }), "teampro")
+      assertEqual(calls[1]!.url, "http://mock/alpha/billing/subscriptions?orgId=org_42")
+    },
+  ],
+
+  [
+    "resolvePlan: only plan-bearing subscription statuses identify a plan",
+    async () => {
+      for (const status of ["active", "trialing", "past_due"]) {
+        const { fetch } = recordingFetch({
+          "/alpha/whoami": { org: null },
+          "/alpha/billing/subscriptions": { data: { status, planId: "individual-pro" } },
+        })
+        assertEqual(await resolvePlan(undefined, MOCK_ENV, { fetch }), "pro", `status ${status}`)
+      }
+      // canceled / unknown status must not resurrect the plan it used to hold
+      for (const status of ["canceled", "unpaid", "paused", undefined]) {
+        const { fetch } = recordingFetch({
+          "/alpha/whoami": { org: null },
+          "/alpha/billing/subscriptions": { data: { status, planId: "individual-pro" } },
+        })
+        assertEqual(
+          await resolvePlan(undefined, MOCK_ENV, { fetch }),
+          undefined,
+          `status ${status}`,
+        )
+      }
+    },
+  ],
+
+  [
+    "resolvePlan: credits.planId is the fallback when no subscription resolves",
+    async () => {
+      const { calls, fetch } = recordingFetch({
+        "/alpha/whoami": { org: null },
+        "/alpha/billing/subscriptions": { data: { status: "canceled", planId: "individual-pro" } },
+        "/alpha/billing/credits": { credits: { planId: "individual-max" } },
+      })
+      assertEqual(await resolvePlan(undefined, MOCK_ENV, { fetch }), "max")
+      assertEqual(calls.length, 3, "credits is consulted only after the subscription misses")
+    },
+  ],
+
+  [
+    "resolvePlan: a failed leg blocks only itself — whoami 500 still reads the subscription",
+    async () => {
+      const urls: string[] = []
+      const fetch = (async (url: string) => {
+        urls.push(url)
+        if (url.includes("/alpha/whoami")) return new Response("boom", { status: 500 })
+        if (url.includes("subscriptions")) {
+          return new Response(JSON.stringify(SUBSCRIPTION_ACTIVE("individual-max")), {
+            status: 200,
+          })
+        }
+        return new Response("not found", { status: 404 })
+      }) as unknown as typeof fetch
+      assertEqual(await resolvePlan(undefined, MOCK_ENV, { fetch }), "max")
+      assertEqual(
+        urls[1],
+        "http://mock/alpha/billing/subscriptions",
+        "no orgId when whoami yielded no org",
       )
     },
   ],
 
   [
-    "resolvePlan: whoami beats default; GET {base}/alpha/whoami with Bearer key (issue #54)",
+    "resolvePlan: credits is still tried when the subscription leg errors",
     async () => {
-      await withFetchStub(
-        async (url, init) => {
-          assertEqual(url, "http://mock/alpha/whoami")
-          assertEqual((init.headers as Record<string, string>).authorization, "Bearer k")
-          return new Response(JSON.stringify({ planId: "goat" }), { status: 200 })
-        },
-        async () => {
-          const env: NodeJS.ProcessEnv = {
-            COMMANDCODE_API_KEY: "k",
-            COMMANDCODE_API_BASE: "http://mock",
-          }
-          assertEqual(await resolvePlan(undefined, env, { defaultPlan: "provider" }), "goat")
-        },
-      )
-      // plan.id fallback shape; a resolved go stays go
-      await withFetchStub(
-        async () => new Response(JSON.stringify({ plan: { id: "go" } }), { status: 200 }),
-        async () => {
-          assertEqual(
-            await resolvePlan(undefined, {
-              COMMANDCODE_API_KEY: "k",
-              COMMANDCODE_API_BASE: "http://mock",
-            }),
-            "go",
-          )
-        },
+      const urls: string[] = []
+      const fetch = (async (url: string) => {
+        urls.push(url)
+        if (url.includes("/alpha/whoami")) {
+          return new Response(JSON.stringify({ org: null }), { status: 200 })
+        }
+        if (url.includes("subscriptions")) return new Response("boom", { status: 500 })
+        return new Response(JSON.stringify({ credits: { planId: "individual-goat" } }), {
+          status: 200,
+        })
+      }) as unknown as typeof fetch
+      assertEqual(await resolvePlan(undefined, MOCK_ENV, { fetch }), "goat")
+      assert(
+        urls.some((u) => u.includes("/alpha/billing/credits")),
+        "credits leg ran",
       )
     },
   ],
 
   [
-    "resolvePlan: non-OK / rejected / unknown whoami falls through to the default, not go",
+    "resolvePlan: non-OK / rejected / unknown / malformed responses resolve to undefined",
     async () => {
-      await withFetchStub(
-        async () => new Response("oops", { status: 500 }),
-        async () => {
-          assertEqual(
-            await resolvePlan(
-              undefined,
-              { COMMANDCODE_API_KEY: "k", COMMANDCODE_API_BASE: "http://mock" },
-              { defaultPlan: "provider" },
-            ),
-            "provider",
-          )
-        },
-      )
-      await withFetchStub(
-        async () => {
-          throw new Error("offline")
-        },
-        async () => {
-          assertEqual(
-            await resolvePlan(
-              undefined,
-              { COMMANDCODE_API_KEY: "k", COMMANDCODE_API_BASE: "http://mock" },
-              { defaultPlan: "provider" },
-            ),
-            "provider",
-          )
-        },
-      )
-      await withFetchStub(
-        async () => new Response(JSON.stringify({ planId: "bogus-plan" }), { status: 200 }),
-        async () => {
-          assertEqual(
-            await resolvePlan(
-              undefined,
-              { COMMANDCODE_API_KEY: "k", COMMANDCODE_API_BASE: "http://mock" },
-              { defaultPlan: "provider" },
-            ),
-            "provider",
-          )
-        },
-      )
-      // no key → no fetch at all
+      const cases: Array<[string, (url: string) => Promise<Response>]> = [
+        ["500", async () => new Response("oops", { status: 500 })],
+        [
+          "rejected",
+          async () => {
+            throw new Error("offline")
+          },
+        ],
+        [
+          "unknown plan id",
+          async (url) =>
+            url.includes("subscriptions")
+              ? new Response(JSON.stringify(SUBSCRIPTION_ACTIVE("bogus-plan")), { status: 200 })
+              : new Response(JSON.stringify({ org: null }), { status: 200 }),
+        ],
+        [
+          "malformed body",
+          async (url) =>
+            url.includes("subscriptions")
+              ? new Response("not json", { status: 200 })
+              : new Response(JSON.stringify({ org: null }), { status: 200 }),
+        ],
+        [
+          "timeout (signal fired)",
+          async () => {
+            throw new DOMException("The operation timed out.", "TimeoutError")
+          },
+        ],
+      ]
+      for (const [label, stub] of cases) {
+        await withFetchStub(stub as typeof fetch, async () => {
+          assertEqual(await resolvePlan(undefined, MOCK_ENV), undefined, label)
+        })
+      }
+    },
+  ],
+
+  [
+    "resolvePlan: without a credential no request is made and no plan is guessed",
+    async () => {
       let fetches = 0
       await withFetchStub(
         async () => {
           fetches++
-          return new Response(JSON.stringify({ planId: "goat" }), { status: 200 })
+          return new Response(JSON.stringify(SUBSCRIPTION_ACTIVE("individual-goat")), {
+            status: 200,
+          })
         },
         async () => {
-          assertEqual(
-            await resolvePlan(undefined, OFFLINE_ENV, { defaultPlan: "provider" }),
-            "provider",
-          )
+          assertEqual(await resolvePlan(undefined, OFFLINE_ENV), undefined)
           assertEqual(fetches, 0)
         },
       )
@@ -229,146 +316,89 @@ run([
   ],
 
   [
-    "resolvePlan: whoami fetched at most once per cache object (reused across calls)",
+    "resolvePlan: apiKey + baseURL options drive the lookup (model-seam path)",
     async () => {
-      let fetches = 0
-      const cache: PlanResolutionCache = {}
-      await withFetchStub(
-        async () => {
-          fetches++
-          return new Response(JSON.stringify({ planId: "goat" }), { status: 200 })
-        },
-        async () => {
-          const env: NodeJS.ProcessEnv = {
-            COMMANDCODE_API_KEY: "k",
-            COMMANDCODE_API_BASE: "http://mock",
-          }
-          assertEqual(await resolvePlan(undefined, env, { cache }), "goat")
-          assertEqual(await resolvePlan(undefined, env, { cache }), "goat")
-          assertEqual(await resolvePlan(undefined, env, { cache, defaultPlan: "provider" }), "goat")
-          assertEqual(fetches, 1)
-        },
+      const calls: Call[] = []
+      const fetch = (async (url: string, init: RequestInit) => {
+        calls.push({
+          url,
+          headers: (init.headers ?? {}) as Record<string, string>,
+          signal: init.signal,
+        })
+        return url.includes("subscriptions")
+          ? new Response(JSON.stringify(SUBSCRIPTION_ACTIVE("individual-pro")), { status: 200 })
+          : new Response(JSON.stringify({ org: null }), { status: 200 })
+      }) as unknown as typeof fetch
+      assertEqual(
+        await resolvePlan(
+          undefined,
+          { COMMANDCODE_API_KEY: "env_key" },
+          {
+            apiKey: "opt_key",
+            baseURL: "http://model-base",
+            fetch,
+          },
+        ),
+        "pro",
       )
+      assertEqual(calls[0]!.url, "http://model-base/alpha/whoami")
+      // option key wins over the env key, matching resolveApiKey precedence
+      assertEqual(calls[0]!.headers.authorization, "Bearer opt_key")
     },
   ],
 
   [
-    "resolvePlan: failed whoami is cached too (no refetch; falls through to default)",
+    "cmd_plan_summary resolves its credential through resolveApiKey (issue #159)",
     async () => {
-      let fetches = 0
-      const cache: PlanResolutionCache = {}
-      await withFetchStub(
-        async () => {
-          fetches++
-          return new Response("nope", { status: 500 })
-        },
-        async () => {
-          const env: NodeJS.ProcessEnv = {
-            COMMANDCODE_API_KEY: "k",
-            COMMANDCODE_API_BASE: "http://mock",
-          }
-          assertEqual(
-            await resolvePlan(undefined, env, { cache, defaultPlan: "provider" }),
-            "provider",
-          )
-          assertEqual(
-            await resolvePlan(undefined, env, { cache, defaultPlan: "provider" }),
-            "provider",
-          )
-          assertEqual(fetches, 1)
-        },
-      )
+      // A credential that exists only in an auth file — no exported env var,
+      // which is the opencode /connect case the bug hid.
+      const dir = mkdtempSync(join(tmpdir(), "cmd-plan-auth-"))
+      const authFile = join(dir, "auth.json")
+      writeFileSync(authFile, JSON.stringify({ "command-code": { type: "api", key: "file_key" } }))
+      try {
+        const { calls, fetch } = recordingFetch({
+          "/alpha/whoami": { org: null },
+          "/alpha/billing/subscriptions": SUBSCRIPTION_ACTIVE("individual-goat"),
+        })
+        const tool = planSummaryTool({
+          authPaths: [authFile],
+          baseURL: "http://mock",
+          fetch,
+          env: {},
+        })
+        const rendered = await tool.execute({})
+        assert(rendered.includes("GOAT"), `file credential must drive the lookup, got: ${rendered}`)
+        assertEqual(calls[0]!.headers.authorization, "Bearer file_key")
+      } finally {
+        rmSync(dir, { recursive: true, force: true })
+      }
     },
   ],
 
   [
-    "resolvePlan: concurrent first calls share one whoami fetch (in-flight dedup)",
+    "cmd_plan_summary (v1 + v2) renders unknown instead of Go when nothing resolves",
     async () => {
-      let fetches = 0
-      const cache: PlanResolutionCache = {}
-      await withFetchStub(
-        async () => {
-          fetches++
-          await new Promise((resolve) => setTimeout(resolve, 20))
-          return new Response(JSON.stringify({ planId: "goat" }), { status: 200 })
-        },
-        async () => {
-          const env: NodeJS.ProcessEnv = {
-            COMMANDCODE_API_KEY: "k",
-            COMMANDCODE_API_BASE: "http://mock",
-          }
-          const [a, b] = await Promise.all([
-            resolvePlan(undefined, env, { cache }),
-            resolvePlan(undefined, env, { cache }),
-          ])
-          assertEqual(a, "goat")
-          assertEqual(b, "goat")
-          assertEqual(fetches, 1)
-        },
-      )
-    },
-  ],
-
-  [
-    "resolvePlan: whoami timeout (signal fired) falls through to the default, not go",
-    async () => {
-      await withFetchStub(
-        async (_url, init) => {
-          assert(init.signal instanceof AbortSignal, "whoami carries an abort signal (5s timeout)")
-          throw new DOMException("The operation timed out.", "TimeoutError")
-        },
-        async () => {
-          const env: NodeJS.ProcessEnv = {
-            COMMANDCODE_API_KEY: "k",
-            COMMANDCODE_API_BASE: "http://mock",
-          }
-          assertEqual(await resolvePlan(undefined, env, { defaultPlan: "provider" }), "provider")
-          assertEqual(await resolvePlan(undefined, env), "go") // Deals default unaffected
-        },
-      )
-    },
-  ],
-
-  [
-    "resolvePlan: apiKey + baseURL options drive whoami (model-seam path)",
-    async () => {
-      await withFetchStub(
-        async (url, init) => {
-          assertEqual(url, "http://model-base/alpha/whoami")
-          // option key wins over the env key, matching resolveApiKey precedence
-          assertEqual((init.headers as Record<string, string>).authorization, "Bearer opt_key")
-          return new Response(JSON.stringify({ planId: "teampro" }), { status: 200 })
-        },
-        async () => {
-          assertEqual(
-            await resolvePlan(
-              undefined,
-              { COMMANDCODE_API_KEY: "env_key" },
-              { apiKey: "opt_key", baseURL: "http://model-base", defaultPlan: "provider" },
-            ),
-            "teampro",
-          )
-        },
-      )
-      // key-less options never fetch
-      let fetches = 0
-      await withFetchStub(
-        async () => {
-          fetches++
-          return new Response(JSON.stringify({ planId: "goat" }), { status: 200 })
-        },
-        async () => {
-          assertEqual(
-            await resolvePlan(
-              undefined,
-              {},
-              { baseURL: "http://model-base", defaultPlan: "provider" },
-            ),
-            "provider",
-          )
-          assertEqual(fetches, 0)
-        },
-      )
+      const notFound = (async () => new Response("not found", { status: 404 })) as typeof fetch
+      const v1 = await planSummaryTool({ fetch: notFound, env: {} }).execute({})
+      const v2def = planSummaryV2Tool({ fetch: notFound, env: {} })
+      const v2 = await v2def.execute({})
+      for (const [label, out] of [
+        ["v1", v1],
+        ["v2", v2.content],
+      ] as const) {
+        assert(out.includes("plan: unknown"), `${label} must name the unknown state`)
+        assert(out.includes("COMMANDCODE_PLAN"), `${label} must name the pin override`)
+        assert(!out.includes("buys $"), `${label} must not render a guessed plan's credits`)
+        assert(!out.includes("5-hour window $3"), `${label} must not render Go's windows`)
+        assertEqual(
+          PLAN_SUMMARY_DESCRIPTION.includes(
+            "plan is detected from the account's billing subscription",
+          ),
+          true,
+          "the shared description documents the detection source",
+        )
+      }
+      assertEqual(v2def.name, "cmd_plan_summary")
     },
   ],
 
@@ -386,6 +416,20 @@ run([
       assert(out.includes("50%"), "must show the Gemini discount")
       assert(out.includes("free"), "must mention free models")
       assert(out.includes("pricing-limits"), "must link the pricing page")
+    },
+  ],
+
+  [
+    "renderPlanSummary handles the unknown plan (issue #159)",
+    () => {
+      const out = renderPlanSummary(undefined, MODEL_DEALS, PLAN_CATALOG)
+      assert(out.includes("plan: unknown"), "must name the unknown state")
+      assert(out.includes("could not be detected"), "must explain detection failed")
+      assert(out.includes("pass `plan`") || out.includes("Pass `plan`"), "must offer the override")
+      assert(out.includes("go|goat|pro|max|max20|teampro|provider"), "must list valid plans")
+      assert(out.includes("pricing-limits"), "must link the live table")
+      assert(!out.includes("buys $"), "must not show any plan's credits")
+      assert(!out.includes("| Model |"), "must not show a plan's model table")
     },
   ],
 

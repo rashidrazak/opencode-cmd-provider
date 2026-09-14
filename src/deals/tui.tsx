@@ -6,7 +6,8 @@
 import { For, Show, createMemo } from "solid-js"
 import type { Provider } from "@opencode-ai/sdk/v2"
 import type { TuiPlugin, TuiPluginApi, TuiPluginModule } from "@opencode-ai/plugin/tui"
-import { DEAL_SOURCE_URL, PLAN_CATALOG, type PlanId } from "./catalog.js"
+import { DEAL_SOURCE_URL, PLAN_CATALOG } from "./catalog.js"
+import type { PlanId } from "../catalog/plans.js"
 
 type Cmd = {
   unavailable?: unknown
@@ -122,11 +123,7 @@ function DealsPanel(props: { api: TuiPluginApi; session_id: string }) {
           <b>Command Code</b>
         </text>
         <For each={rows()}>
-          {(row) => (
-            <text fg={theme().textMuted}>
-              {row[1] ? `${row[0]}: ${row[1]}` : row[0]}
-            </text>
-          )}
+          {(row) => <text fg={theme().textMuted}>{row[1] ? `${row[0]}: ${row[1]}` : row[0]}</text>}
         </For>
       </box>
     </Show>

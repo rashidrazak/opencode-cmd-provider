@@ -142,4 +142,33 @@ run([
       )
     },
   ],
+  [
+    "Core never imports the excisable Deals slice (ADR-0004, ADR-0011)",
+    () => {
+      // Deleting src/deals/ plus the two registration lines in
+      // src/plugin/index.ts must leave Core (provider, catalog, env, the rest
+      // of the plugin) intact. Plan identity lives in src/catalog/plans.ts
+      // precisely so transport selection can read an explicit plan pin without
+      // reaching into the slice — a Core → Deals import is what this pins out.
+      const dist = new URL("../dist", import.meta.url).pathname
+      const coreFiles = [
+        ...listJsFiles(join(dist, "src/provider")),
+        ...listJsFiles(join(dist, "src/catalog")),
+        // src/plugin is Core too, except its entry point: index.js is the
+        // registration seam the invariant explicitly allows to import the slice.
+        ...listJsFiles(join(dist, "src/plugin")).filter(
+          (file) => !file.endsWith("/plugin/index.js"),
+        ),
+        join(dist, "src/env.js"),
+      ]
+      assert(
+        coreFiles.some((file) => file.endsWith("command-code-model.js")),
+        "the Core file list must contain the provider model (guard against a vacuous scan)",
+      )
+      const offenders = coreFiles.filter((file) =>
+        /from\s+["'][^"']*\bdeals\//.test(readFileSync(file, "utf-8")),
+      )
+      assert(offenders.length === 0, `Core imports the Deals slice: ${offenders.join(", ")}`)
+    },
+  ],
 ])

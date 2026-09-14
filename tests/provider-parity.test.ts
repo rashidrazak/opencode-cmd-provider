@@ -61,7 +61,8 @@ function makeSpy(handler: (call: SpyCall) => Response): { fetch: typeof fetch; c
   return { fetch: fetchImpl, calls }
 }
 
-/** Routes Provider API + whoami URLs to their configured SSE streams. */
+/** Routes Provider API URLs to their configured SSE streams; plan-lookup URLs
+ * answer 404, so an accidental routing lookup would fail loudly. */
 function providerHandler(
   openAIEvents: Array<Record<string, unknown> | "end">,
   anthropicEvents: Array<Record<string, unknown> | "end">,
@@ -352,9 +353,11 @@ run([
           )
           assertEqual(inference.filter((c) => c.url.includes("/provider/v1/messages")).length, 1)
           assertEqual(
-            calls.filter((c) => c.url.includes("/alpha/whoami")).length,
+            calls.filter(
+              (c) => c.url.includes("/alpha/whoami") || c.url.includes("/alpha/billing/"),
+            ).length,
             0,
-            "explicit override short-circuits whoami",
+            "no plan lookup on the inference path (routing is pin-only)",
           )
         },
       )
