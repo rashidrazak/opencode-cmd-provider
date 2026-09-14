@@ -13,7 +13,12 @@ export {
   DEAL_LAST_REFRESHED,
   DEAL_PACKAGE_VERSION,
 } from "./catalog.js"
-export type { ModelDeals, PlanId, PlanInfo, DealRates } from "./catalog.js"
+export type { ModelDeals, PlanInfo, DealRates } from "./catalog.js"
+
+// Plan identity is Core (it is the provider transport's pin vocabulary too),
+// re-exported here so Deals consumers keep one entry point.
+export { normalizePlan } from "../catalog/plans.js"
+export type { PlanId } from "../catalog/plans.js"
 
 // Vendor (used by enrichment, but exported for tests that import vendor directly
 // from the deals deep module — keep as part of the slice so tests don't reach
@@ -34,5 +39,4 @@ export {
   planSummaryV2Tool,
   renderPlanSummary,
   resolvePlan,
-  normalizePlan,
 } from "./plan-summary.js"

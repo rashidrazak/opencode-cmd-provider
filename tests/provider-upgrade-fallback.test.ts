@@ -109,7 +109,8 @@ async function collect(
 
 const providerCalls = (calls: SpyCall[]) => calls.filter((c) => c.url.includes("/provider/v1/"))
 const legacyCalls = (calls: SpyCall[]) => calls.filter((c) => c.url.includes("/alpha/generate"))
-const whoamiCalls = (calls: SpyCall[]) => calls.filter((c) => c.url.includes("/alpha/whoami"))
+const planLookupCalls = (calls: SpyCall[]) =>
+  calls.filter((c) => c.url.includes("/alpha/whoami") || c.url.includes("/alpha/billing/"))
 
 run([
   [
@@ -127,7 +128,7 @@ run([
       )
       assertEqual(legacyCalls(calls).length, 1, "one legacy retry")
       assertEqual(legacyCalls(calls)[0].url, "https://x/alpha/generate")
-      assertEqual(whoamiCalls(calls).length, 0, "explicit plan short-circuits whoami")
+      assertEqual(planLookupCalls(calls).length, 0, "an explicit pin makes no plan lookup")
       // The retry uses the legacy CLI wire format.
       const legacyBody = legacyCalls(calls)[0].body as {
         params: { model: string; stream: boolean }

@@ -55,6 +55,17 @@ export interface MockCcOptions {
   whoamiStatus?: number
   /** called with the headers of each GET /alpha/whoami request */
   onWhoami?: (headers: Record<string, string>) => void
+  /** JSON body served at GET /alpha/billing/subscriptions (plan identity, issue #159); 404 when unset */
+  subscriptions?: unknown
+  /** status for GET /alpha/billing/subscriptions (e.g. 500 to exercise the fall-through) */
+  subscriptionsStatus?: number
+  /** JSON body served at GET /alpha/billing/credits (the plan-identity fallback); 404 when unset */
+  credits?: unknown
+  /** status for GET /alpha/billing/credits */
+  creditsStatus?: number
+  /** called with the full request URL (orgId query included) and headers of each
+   * GET /alpha/billing/subscriptions request */
+  onSubscriptions?: (url: string, headers: Record<string, string>) => void
   /**
    * RSC body served at GET /docs/resources/pricing-limits (the raw flight
    * payload the docs site returns for `RSC: 1` requests — the RSC rides
@@ -88,6 +99,8 @@ export interface MockCcHits {
   chatCompletions: number
   messages: number
   whoami: number
+  subscriptions: number
+  credits: number
   rscPricing: number
   rscGoat: number
   rscPro: number
@@ -103,6 +116,8 @@ export function startMockCc(
     chatCompletions: 0,
     messages: 0,
     whoami: 0,
+    subscriptions: 0,
+    credits: 0,
     rscPricing: 0,
     rscGoat: 0,
     rscPro: 0,
@@ -171,6 +186,43 @@ export function startMockCc(
         }
         res.writeHead(200, { "content-type": "application/json" })
         res.end(JSON.stringify(options.whoami))
+        return
+      }
+      // Billing endpoints (issue #159): the plan identity a `cmd_plan_summary`
+      // lookup reads, org-scoped by the whoami org id. The query string
+      // (`?orgId=…`) is part of the request, so these match by prefix and hand
+      // the full URL to the hook.
+      if (req.url?.startsWith("/alpha/billing/subscriptions") && req.method === "GET") {
+        hits.subscriptions++
+        options.onSubscriptions?.(req.url, (req.headers ?? {}) as Record<string, string>)
+        if (options.subscriptionsStatus !== undefined && options.subscriptionsStatus >= 400) {
+          res.writeHead(options.subscriptionsStatus, { "content-type": "application/json" })
+          res.end(JSON.stringify({ error: { message: "mock subscriptions error" } }))
+          return
+        }
+        if (options.subscriptions === undefined) {
+          res.writeHead(404)
+          res.end("not found")
+          return
+        }
+        res.writeHead(200, { "content-type": "application/json" })
+        res.end(JSON.stringify(options.subscriptions))
+        return
+      }
+      if (req.url?.startsWith("/alpha/billing/credits") && req.method === "GET") {
+        hits.credits++
+        if (options.creditsStatus !== undefined && options.creditsStatus >= 400) {
+          res.writeHead(options.creditsStatus, { "content-type": "application/json" })
+          res.end(JSON.stringify({ error: { message: "mock credits error" } }))
+          return
+        }
+        if (options.credits === undefined) {
+          res.writeHead(404)
+          res.end("not found")
+          return
+        }
+        res.writeHead(200, { "content-type": "application/json" })
+        res.end(JSON.stringify(options.credits))
         return
       }
       if (req.url === "/alpha/generate" && req.method === "POST") {

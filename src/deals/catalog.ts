@@ -4,8 +4,12 @@
 // site (pricing-limits, plans/goat, plans/pro). Bundled so the plugin can
 // enrich the model picker, the sidebar panel, and the plan summary tool
 // without network access at runtime. Regenerate with `npm run refresh:deals`.
+//
+// Plan identity (PlanId) lives in Core — src/catalog/plans.ts — so the
+// provider transport can read an explicit plan pin without importing this
+// excisable slice (ADR-0004).
 
-export type PlanId = "go" | "goat" | "pro" | "max" | "max20" | "teampro" | "provider"
+import type { PlanId } from "../catalog/plans.js"
 
 export interface DealRates {
   input: number

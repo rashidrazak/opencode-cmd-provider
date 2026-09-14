@@ -70,6 +70,16 @@ _Avoid_: pricing table, deal feed
 The deals catalog plus its enrichment (v1: `model.options.cmd`, `context_over_200k` cost; v2: `settings.cmd`, a 200k context cost tier) and its surfaces: the TUI sidebar panel and the `cmd_plan_summary` tool. A single excisable slice — removing it leaves core byte-identical.
 _Avoid_: deals feature, pricing UI
 
+**Plan identity**:
+The Command Code plan an account holds (Go, GOAT, Pro, Max 10×, Max 20×,
+Team Pro, Provider), resolved from an explicit pin (the `plan` tool argument,
+`COMMANDCODE_PLAN`, a per-call provider option) or from the account's billing
+subscription, and **unknown** when neither resolves — never a default. The
+vocabulary and alias table live in Core (`src/catalog/plans.ts`); transport
+selection reads only the explicit pin, so a Go account reaches the legacy
+endpoint through the documented `403 upgrade_required` fallback (ADR-0011).
+_Avoid_: plan detection default, detected-guess plan
+
 **Classification**:
 The per-model reasoning capability (reasoning-capable or not, and whether
 with explicit efforts), derived any-true-wins across the models.md efforts

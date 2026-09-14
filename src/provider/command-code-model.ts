@@ -35,7 +35,7 @@ import {
   createAnthropicStreamParser,
 } from "./stream.js"
 import { getApiBase, getCmdZdr } from "../env.js"
-import { resolvePlan, type PlanResolutionCache } from "../deals/plan-summary.js"
+import { normalizePlan } from "../catalog/plans.js"
 import {
   redactCommandCodeErrorText,
   commandCodeErrorMessage,
@@ -70,8 +70,11 @@ export interface CommandCodeModelOptions {
   maxRetries?: number
   maxRetryDelayMs?: number
   authPaths?: readonly string[]
-  // Optional explicit plan override for provider transport (normalized via normalizePlan).
-  // Also honoured via COMMANDCODE_PLAN env and per-call providerOptions.
+  // Explicit plan pin for transport selection (normalized via normalizePlan).
+  // Only a pin that resolves to "go" selects the legacy transport; with no pin
+  // the session starts on the Provider API and a Go account flips via the
+  // documented 403 fallback. Also honoured via COMMANDCODE_PLAN env and
+  // per-call providerOptions.
   plan?: string
 }
 
@@ -164,45 +167,30 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
   }
 
   /**
-   * Per-instance whoami cache: the `GET /alpha/whoami` fetch happens at most
-   * once for the lifetime of this model instance and is reused across turns.
-   */
-  private readonly planCache: PlanResolutionCache = {}
-
-  /**
    * Safety-net flag (issue #56): once the Provider API answers a documented
    * `403 upgrade_required`, the session is pinned to the legacy
    * `/alpha/generate` transport for the lifetime of this model instance —
    * subsequent turns stay on legacy without re-hitting the Provider API (no
    * second 403). The Provider API has no path for Go-plan users (that is
-   * exactly what the 403 documents), so the plugin's legacy transport is the
-   * only way to keep serving a plan-detection miss that routed a true Go user
-   * there.
+   * exactly what the 403 documents), so the legacy transport is how every Go
+   * account is served.
    */
   private pinnedToLegacy = false
 
   /**
-   * Resolves the transport plan through the shared plan-resolution seam:
-   * explicit override (providerOptions plan, model option `plan`) →
-   * COMMANDCODE_PLAN env → cached whoami → default Provider API. Only a
-   * resolved `go` selects the legacy transport; every other resolution
-   * selects the Provider API. The whoami fetch is cached for the lifetime of
-   * this instance (see planCache) and honours the same resolved key, base URL
-   * and injected fetch as inference.
+   * Transport selection honours an explicitly written plan pin and nothing
+   * else (issue #159): the per-call `providerOptions.plan` → the model's
+   * `plan` option → `COMMANDCODE_PLAN`. Only an explicit `go` pin selects the
+   * legacy transport; with no pin — and for every other plan — the session
+   * starts on the Provider API, where a Go account flips to legacy through the
+   * documented `403 upgrade_required` fallback above. No plan lookup is ever
+   * made to route, so this path needs neither a credential nor the network.
    */
-  private async shouldUseProviderTransport(options: ModelCallOptions): Promise<boolean> {
+  private shouldUseProviderTransport(options: ModelCallOptions): boolean {
     if (this.pinnedToLegacy) return false
-    const plan = await resolvePlan(this.planArgFor(options), process.env, {
-      defaultPlan: "provider",
-      cache: this.planCache,
-      apiKey: resolveApiKey({
-        apiKey: this.options.apiKey,
-        authPaths: this.options.authPaths,
-      }),
-      baseURL: this.options.baseURL,
-      fetch: this.options.fetch,
-    })
-    return plan !== "go"
+    const pin =
+      normalizePlan(this.planArgFor(options)) ?? normalizePlan(process.env.COMMANDCODE_PLAN)
+    return pin !== "go"
   }
 
   private planArgFor(options: ModelCallOptions): string | undefined {
@@ -264,7 +252,7 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
   async doStream(
     options: ModelCallOptions,
   ): Promise<{ stream: ReadableStream<LanguageModelV3StreamPart>; error?: unknown }> {
-    if (await this.shouldUseProviderTransport(options)) {
+    if (this.shouldUseProviderTransport(options)) {
       const isClaude = isClaudeModel(this.modelId)
       const body = this.providerBodyFor(options, isClaude)
       const headers = this.providerHeadersFor(options)
@@ -304,7 +292,7 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
     }
     const parts: LanguageModelV3StreamPart[] = []
     let stream: ReadableStream<LanguageModelV3StreamPart>
-    if (await this.shouldUseProviderTransport(options)) {
+    if (this.shouldUseProviderTransport(options)) {
       const isClaude = isClaudeModel(this.modelId)
       const body = this.providerBodyFor(options, isClaude)
       const headers = this.providerHeadersFor(options)

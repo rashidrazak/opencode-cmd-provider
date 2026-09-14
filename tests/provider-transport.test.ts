@@ -1,6 +1,8 @@
-// tests/provider-transport.test.ts — Provider transport with per-model routing behind explicit plan override (issue #53)
+// tests/provider-transport.test.ts — Provider transport with per-model routing behind an explicit plan pin (issues #53, #159)
 // Verifies documented Provider API: POST /provider/v1/messages for claude-*, POST /provider/v1/chat/completions otherwise,
-// both with stream:true, Authorization: Bearer, baseURL via getApiBase/COMMANDCODE_API_BASE, incremental deltas + terminal usage→finish
+// both with stream:true, Authorization: Bearer, baseURL via getApiBase/COMMANDCODE_API_BASE, incremental deltas + terminal usage→finish.
+// Routing consults only an explicit pin (per-call providerOptions → model option → COMMANDCODE_PLAN): no plan lookup is made to
+// choose a transport, so a Go account starts on the Provider API and flips to legacy on the documented 403 (issue #56).
 import { createCommandCode } from "../src/provider/index.js"
 import {
   startMockCc,
@@ -10,7 +12,10 @@ import {
   openAIFinishChunk,
   textDelta,
   finishEvent,
+  upgradeRequiredBody,
+  headersToRecord,
 } from "./helpers/mock-cc.js"
+import { projectSlugFromPath } from "../src/provider/project-slug.js"
 import type { LanguageModelV3Prompt } from "../src/provider/aisdk-types.js"
 import { assert, assertEqual, run } from "./harness.js"
 import { calculateCommandCodeCost, costUsageFromAiSdkUsage } from "../src/provider/cost.js"
@@ -248,10 +253,11 @@ run([
     },
   ],
   [
-    "provider routing: no plan defaults to Provider API (default-flip, issue #54)",
+    "provider routing: with no plan pin the session starts on the Provider API — no plan lookup (issue #159)",
     async () => {
-      // scrub plan/key/base env so the resolution is exactly: no override →
-      // key present (model option) → whoami 404 → default Provider API
+      // Routing must not depend on the account's plan any more, so scrub every
+      // env input and serve no billing endpoint: the Provider API is used and
+      // nothing was fetched to decide it.
       await withEnvVars(
         {
           COMMANDCODE_PLAN: undefined,
@@ -268,7 +274,9 @@ run([
               await collect(provider.languageModel("gpt-5.6-terra"), [
                 { role: "user", content: "hi" },
               ])
-              assertEqual(mock.hits.whoami, 1) // whoami 404 (unset) → falls to Provider
+              assertEqual(mock.hits.whoami, 0, "no whoami lookup to route")
+              assertEqual(mock.hits.subscriptions, 0, "no billing lookup to route")
+              assertEqual(mock.hits.credits, 0)
               assertEqual(mock.hits.chatCompletions, 1)
               assertEqual(mock.hits.generate, 0)
               assertEqual(mock.hits.messages, 0)
@@ -287,6 +295,7 @@ run([
               ])
               assertEqual(mock.hits.messages, 1)
               assertEqual(mock.hits.generate, 0)
+              assertEqual(mock.hits.whoami, 0)
             } finally {
               await mock.close()
             }
@@ -876,15 +885,16 @@ run([
     },
   ],
   [
-    "transport: whoami goat selects Provider API via cached GET /alpha/whoami (issue #54)",
+    "transport: a live Go subscription does not route the session (issue #159)",
     async () => {
-      let whoamiHeaders: Record<string, string> | undefined
+      // The billing endpoints are served and would resolve individual-go, but
+      // inference never asks: routing is not plan-based any more. A real Go
+      // account reaches legacy through the documented 403 fallback below.
       const mock = await startMockCc({
-        whoami: { planId: "goat" },
+        whoami: { success: true, user: { id: "u" }, org: null },
+        subscriptions: { success: true, data: { status: "active", planId: "individual-go" } },
+        credits: { credits: { planId: "individual-go" } },
         chatCompletionsStream: [openAIChunk("hi"), openAIFinishChunk()],
-        onWhoami: (headers) => {
-          whoamiHeaders = headers
-        },
       })
       try {
         await withEnvVars(
@@ -898,12 +908,12 @@ run([
             await collect(provider.languageModel("gpt-5.6-terra"), [
               { role: "user", content: "hi" },
             ])
-            assertEqual(mock.hits.whoami, 1)
+            assertEqual(mock.hits.whoami, 0)
+            assertEqual(mock.hits.subscriptions, 0)
+            assertEqual(mock.hits.credits, 0)
             assertEqual(mock.hits.chatCompletions, 1)
             assertEqual(mock.hits.generate, 0)
             assertEqual(mock.hits.messages, 0)
-            assert(whoamiHeaders, "whoami headers captured")
-            assertEqual(whoamiHeaders!["authorization"], "Bearer test_key")
           },
         )
       } finally {
@@ -912,28 +922,45 @@ run([
     },
   ],
   [
-    "transport: whoami says go selects legacy /alpha/generate",
+    "transport: a Go account flips to legacy on 403 — the legacy metadata stays pinned (#56, #159 item 3)",
     async () => {
+      let legacyHeaders: Record<string, string> | undefined
+      let legacyBody: Record<string, unknown> | undefined
       const mock = await startMockCc({
-        whoami: { planId: "go" },
+        chatCompletionsStatus: 403,
+        chatCompletionsErrorBody: JSON.stringify(upgradeRequiredBody()),
         stream: [textDelta("hi"), finishEvent()],
+        onGenerate: (body, headers) => {
+          legacyBody = body
+          legacyHeaders = headers
+        },
       })
       try {
         await withEnvVars(
           { COMMANDCODE_PLAN: undefined, COMMANDCODE_API_KEY: "k", COMMANDCODE_API_BASE: mock.url },
           async () => {
             const provider = createCommandCode({ apiKey: "k", baseURL: mock.url })
-            const parts = await collect(provider.languageModel("claude-sonnet-5"), [
+            const parts = await collect(provider.languageModel("gpt-5.6-terra"), [
               { role: "user", content: "hi" },
             ])
-            assertEqual(mock.hits.whoami, 1)
-            assertEqual(mock.hits.generate, 1)
-            assertEqual(mock.hits.chatCompletions, 0)
-            assertEqual(mock.hits.messages, 0)
+            assertEqual(mock.hits.chatCompletions, 1, "Provider API is tried first")
+            assertEqual(mock.hits.generate, 1, "403 upgrade_required → one legacy retry")
+            assertEqual(mock.hits.whoami, 0, "the flip needs no plan lookup")
             assert(
               parts.some((p) => p.type === "text-delta"),
               "legacy delta emitted",
             )
+            // The legacy transport carries the working directory and project
+            // metadata the Provider API never sends (issue #159 item 3). Pin it
+            // so the Go path's exposure stays deliberate and visible.
+            const config = legacyBody?.config as Record<string, unknown> | undefined
+            assertEqual(config?.workingDir, process.cwd(), "legacy body carries the absolute cwd")
+            assertEqual(
+              legacyHeaders?.["x-project-slug"],
+              projectSlugFromPath(process.cwd()),
+              "legacy headers carry the project slug",
+            )
+            assertEqual(legacyHeaders?.["x-taste-learning"], "true")
           },
         )
       } finally {
@@ -942,27 +969,25 @@ run([
     },
   ],
   [
-    "transport: non-go whoami plans (pro/max/max20/teampro/provider) all select Provider API",
+    "transport: only an explicit go pin selects legacy — every other pin uses the Provider API",
     async () => {
-      for (const planId of ["pro", "max", "max20", "teampro", "provider"]) {
+      for (const plan of ["pro", "max", "max20", "teampro", "provider", "individual-goat"]) {
         const mock = await startMockCc({
-          whoami: { planId },
+          whoami: { planId: "individual-go" },
+          subscriptions: { success: true, data: { status: "active", planId: "individual-go" } },
           chatCompletionsStream: [openAIChunk("hi"), openAIFinishChunk()],
         })
         try {
           await withEnvVars(
-            {
-              COMMANDCODE_PLAN: undefined,
-              COMMANDCODE_API_KEY: "k",
-              COMMANDCODE_API_BASE: mock.url,
-            },
+            { COMMANDCODE_PLAN: plan, COMMANDCODE_API_KEY: "k", COMMANDCODE_API_BASE: mock.url },
             async () => {
               const provider = createCommandCode({ apiKey: "k", baseURL: mock.url })
               await collect(provider.languageModel("gpt-5.6-terra"), [
                 { role: "user", content: "hi" },
               ])
-              assertEqual(mock.hits.chatCompletions, 1, `whoami ${planId} → chat/completions`)
-              assertEqual(mock.hits.generate, 0, `whoami ${planId} no /alpha/generate`)
+              assertEqual(mock.hits.chatCompletions, 1, `pin ${plan} → chat/completions`)
+              assertEqual(mock.hits.generate, 0, `pin ${plan} no /alpha/generate`)
+              assertEqual(mock.hits.subscriptions, 0, `pin ${plan} consults no billing endpoint`)
             },
           )
         } finally {
@@ -972,10 +997,10 @@ run([
     },
   ],
   [
-    "transport: whoami fetched at most once per model instance (two turns → one fetch)",
+    "transport: two turns on one model instance make no plan lookup (nothing to cache)",
     async () => {
       const mock = await startMockCc({
-        whoami: { planId: "goat" },
+        subscriptions: { success: true, data: { status: "active", planId: "individual-goat" } },
         chatCompletionsStream: [openAIChunk("hi"), openAIFinishChunk()],
       })
       try {
@@ -986,8 +1011,8 @@ run([
             const model = provider.languageModel("gpt-5.6-terra")
             await collect(model, [{ role: "user", content: "hi" }])
             await collect(model, [{ role: "user", content: "hi" }])
-            assertEqual(mock.hits.whoami, 1)
             assertEqual(mock.hits.chatCompletions, 2)
+            assertEqual(mock.hits.whoami + mock.hits.subscriptions + mock.hits.credits, 0)
             assertEqual(mock.hits.generate, 0)
           },
         )
@@ -997,10 +1022,12 @@ run([
     },
   ],
   [
-    "transport: non-OK whoami (500) falls through to Provider API — not go",
+    "transport: a broken or unauthorized billing API cannot change routing — it is never called",
     async () => {
       const mock = await startMockCc({
         whoamiStatus: 500,
+        subscriptionsStatus: 401,
+        creditsStatus: 500,
         chatCompletionsStream: [openAIChunk("hi"), openAIFinishChunk()],
       })
       try {
@@ -1011,7 +1038,9 @@ run([
             await collect(provider.languageModel("gpt-5.6-terra"), [
               { role: "user", content: "hi" },
             ])
-            assertEqual(mock.hits.whoami, 1)
+            assertEqual(mock.hits.whoami, 0)
+            assertEqual(mock.hits.subscriptions, 0)
+            assertEqual(mock.hits.credits, 0)
             assertEqual(mock.hits.chatCompletions, 1)
             assertEqual(mock.hits.generate, 0)
           },
@@ -1022,7 +1051,7 @@ run([
     },
   ],
   [
-    "transport: whoami non-OK via model base falls through to Provider — not go (doStream + doGenerate)",
+    "transport: doStream and doGenerate both start on the Provider API with no plan lookup",
     async () => {
       const mock = await startMockCc({
         chatCompletionsStream: [openAIChunk("hi"), openAIFinishChunk()],
@@ -1032,8 +1061,7 @@ run([
           {
             COMMANDCODE_PLAN: undefined,
             COMMANDCODE_API_KEY: "k",
-            // env base is unreachable, but the model's baseURL option wins for
-            // whoami too, so the fetch reaches the mock (which serves 404)
+            // an unreachable env base cannot matter: nothing is fetched to route
             COMMANDCODE_API_BASE: "http://127.0.0.1:1",
           },
           async () => {
@@ -1045,10 +1073,10 @@ run([
               prompt: [{ role: "user", content: "hi" }],
               mode: { type: "regular" },
             } as never)
-            // two model instances (doStream + doGenerate) → two whoami attempts,
-            // both 404 → Provider transport
-            assertEqual(mock.hits.whoami, 2)
+            // two model instances (doStream + doGenerate) → two Provider API
+            // calls and zero routing lookups
             assertEqual(mock.hits.chatCompletions, 2)
+            assertEqual(mock.hits.whoami + mock.hits.subscriptions + mock.hits.credits, 0)
             assertEqual(mock.hits.generate, 0)
             assert(gen.content.length >= 1, "doGenerate produced content")
           },
@@ -1059,10 +1087,11 @@ run([
     },
   ],
   [
-    "transport: COMMANDCODE_PLAN=go env beats whoami — no whoami fetch, legacy transport",
+    "transport: COMMANDCODE_PLAN=go is the explicit pin — legacy transport, no lookup",
     async () => {
       const mock = await startMockCc({
-        whoami: { planId: "goat" },
+        whoami: { planId: "individual-goat" },
+        subscriptions: { success: true, data: { status: "active", planId: "individual-goat" } },
         stream: [textDelta("hi"), finishEvent()],
       })
       try {
@@ -1074,6 +1103,7 @@ run([
               { role: "user", content: "hi" },
             ])
             assertEqual(mock.hits.whoami, 0)
+            assertEqual(mock.hits.subscriptions, 0)
             assertEqual(mock.hits.generate, 1)
             assertEqual(mock.hits.chatCompletions, 0)
           },
@@ -1114,32 +1144,22 @@ run([
     },
   ],
   [
-    "transport: fetch spy observes whoami and transport choice (issue #54)",
+    "transport: the inference fetch never asks for a plan, and an explicit go pin needs no network to route",
     async () => {
       await withEnvVars(
         {
           COMMANDCODE_PLAN: undefined,
           COMMANDCODE_API_KEY: "spy_key",
-          // no baseURL option on the model: whoami URL comes from getApiBase(env)
           COMMANDCODE_API_BASE: "https://api.commandcode.ai",
         },
         async () => {
           const seen: Array<{ url: string; headers: Record<string, string> }> = []
-          const fakeFetch: typeof fetch = async (input, init) => {
-            const url = typeof input === "string" ? input : (input as URL).toString()
-            seen.push({ url, headers: (init?.headers ?? {}) as Record<string, string> })
-            if (url.includes("/alpha/whoami")) {
-              return new Response(JSON.stringify({ planId: "goat" }), {
-                status: 200,
-                headers: { "content-type": "application/json" },
-              })
-            }
+          const sse = (events: Array<Record<string, unknown>>): Response => {
             const body = new ReadableStream<Uint8Array>({
               start(c) {
                 const enc = new TextEncoder()
-                c.enqueue(enc.encode(`data: ${JSON.stringify(openAIChunk("hi"))}\n\n`))
-                c.enqueue(enc.encode(`data: ${JSON.stringify(openAIFinishChunk())}\n\n`))
-                c.enqueue(enc.encode(`data: [DONE]\n\n`))
+                for (const evt of events) c.enqueue(enc.encode(`data: ${JSON.stringify(evt)}\n\n`))
+                c.enqueue(enc.encode("data: [DONE]\n\n"))
                 c.close()
               },
             })
@@ -1148,17 +1168,42 @@ run([
               headers: { "content-type": "text/event-stream" },
             })
           }
+          const fakeFetch: typeof fetch = async (input, init) => {
+            const url = typeof input === "string" ? input : (input as URL).toString()
+            seen.push({ url, headers: headersToRecord(init?.headers) })
+            if (url.includes("/alpha/generate")) return sse([textDelta("hi"), finishEvent()])
+            if (url.includes("/provider/v1/")) {
+              return sse([openAIChunk("hi"), openAIFinishChunk()])
+            }
+            return new Response("not found", { status: 404 })
+          }
+
+          // No pin: Provider API, and no billing/whoami request to decide it.
           const provider = createCommandCode({ apiKey: "spy_key", fetch: fakeFetch })
           const model = provider.languageModel("gpt-5.6-terra")
           await collect(model, [{ role: "user", content: "hi" }])
           await collect(model, [{ role: "user", content: "hi" }])
-          const whoamiCalls = seen.filter((s) => s.url.includes("/alpha/whoami"))
-          assertEqual(whoamiCalls.length, 1, "whoami observed exactly once across two turns")
-          assertEqual(whoamiCalls[0].url, "https://api.commandcode.ai/alpha/whoami")
-          assertEqual(whoamiCalls[0].headers["authorization"], "Bearer spy_key")
           const inference = seen.filter((s) => s.url.includes("/provider/v1/chat/completions"))
           assertEqual(inference.length, 2, "provider transport chosen via spy")
           assert(!seen.some((s) => s.url.includes("/alpha/generate")), "no legacy traffic")
+          assert(
+            !seen.some((s) => s.url.includes("/alpha/whoami") || s.url.includes("/alpha/billing/")),
+            "no plan lookup on the inference path",
+          )
+
+          // Explicit go pin: legacy, still with zero routing requests.
+          const before = seen.length
+          const legacyModel = createCommandCode({
+            apiKey: "spy_key",
+            fetch: fakeFetch,
+          }).languageModel("gpt-5.6-terra")
+          await collect(legacyModel, [{ role: "user", content: "hi" }], {
+            commandcode: { plan: "go" },
+          })
+          const after = seen.slice(before)
+          assertEqual(after.length, 1, "the pinned turn makes exactly one request")
+          assert(after[0]!.url.includes("/alpha/generate"), "pinned go → legacy /alpha/generate")
+          assertEqual(after[0]!.headers["authorization"], "Bearer spy_key")
         },
       )
     },

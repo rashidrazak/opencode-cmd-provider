@@ -140,6 +140,17 @@ serves for `rsc: 1` requests (see ADR-0005). It surfaces in two places:
 - **`cmd_plan_summary` tool** — plan-aware allowances and deal rates, to
   estimate monthly requests.
 
+The tool detects your plan from the account's billing subscription
+(`GET /alpha/billing/subscriptions`, org-scoped through `/alpha/whoami`), using
+the credential OpenCode already holds — no exported env var required. Pass the
+`plan` argument or set `COMMANDCODE_PLAN`
+(`go|goat|pro|max|max20|teampro|provider`) to pin it and skip the lookup
+entirely. When no plan can be detected the summary says so — it never falls
+back to a plan you may not be on (ADR-0011). Plan detection is not used to
+choose a transport: inference starts on the Provider API unless you explicitly
+pin `plan=go`, and a Go account switches to the legacy endpoint automatically
+when the Provider API answers `403 upgrade_required`.
+
 Delivery is zero-step: the package exports both a `server` and a `tui` target
 (`exports["./tui"]` → `dist/tui.js`), and `opencode plugin
 opencode-cmd-provider` writes both `opencode.json(c)` and `tui.json` from one
