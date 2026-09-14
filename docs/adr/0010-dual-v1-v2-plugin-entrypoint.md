@@ -109,6 +109,14 @@ SDK". `ctx.aisdk.hook("sdk", …, { providerID: "commandcode" })` is that seam.
 - The v2 loader's decode schema runs against this package's entry in
   `tests/plugin-v2.test.ts`; the dual shape is asserted against the built
   bundle in `tests/contract.test.ts`.
+- **A real OpenCode v1.18.30 binary was run against the built package**
+  (`npm run test:e2e` with `OPENCODE_BIN` pointing at an `opencode-ai@1.18.30`
+  install): the host loaded the dual default export and auto-registered
+  `commandcode/claude-sonnet-5` from an `opencode.json` that declares no
+  provider and no models. The extra `setup` key is invisible to `readV1Plugin`
+  in practice, not merely by reading its source. Both e2e scripts take
+  `OPENCODE_BIN` and skip when the binary belongs to the other line, so the two
+  hosts can be exercised on one machine.
 - **A real OpenCode v2.0.3 host was run against the built package**
   (`tests/e2e-opencode-v2.mjs`, `npm run test:e2e:v2`). The host logged
   `loading plugin` for `.opencode/plugins/commandcode`, accepted the dual

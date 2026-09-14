@@ -30,6 +30,11 @@ import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { pathToFileURL } from "node:url"
 
+// Which opencode to exercise. Defaults to PATH; set OPENCODE_BIN to point at a
+// specific v2 install when a v1 binary is also present (tests/e2e-opencode.mjs
+// takes the same variable for the v1 side).
+const OPENCODE = process.env.OPENCODE_BIN ?? "opencode"
+
 const isoHome = mkdtempSync(join(tmpdir(), "oc-v2-e2e-home-"))
 const isoEnv = {
   PATH: process.env.PATH ?? "/usr/bin:/bin",
@@ -40,17 +45,19 @@ const isoEnv = {
   XDG_CONFIG_HOME: join(isoHome, ".config"),
 }
 
-const which = spawnSync("which", ["opencode"])
-if (which.status !== 0) {
-  console.log("skip - opencode not on PATH")
+const version = spawnSync(OPENCODE, ["--version"], { env: isoEnv, encoding: "utf-8" })
+if (version.error || version.status !== 0) {
+  console.log(`skip - ${OPENCODE} is not runnable (${version.error?.code ?? version.status})`)
   process.exit(0)
 }
-const version = spawnSync("opencode", ["--version"], { env: isoEnv, encoding: "utf-8" })
-const reported = (version.stdout ?? "").trim()
+const reported = `${version.stdout ?? ""}${version.stderr ?? ""}`.trim()
 if (!/\bv2\./.test(reported)) {
-  console.log(`skip - installed opencode is not v2 (${reported || "unknown version"})`)
+  console.log(
+    `skip - ${OPENCODE} is not v2 (${reported || "version unknown"}); run 'npm run test:e2e' for v1`,
+  )
   process.exit(0)
 }
+console.log(`using ${OPENCODE} (${reported})`)
 
 const received = []
 const server = createServer((req, res) => {
@@ -128,7 +135,7 @@ export default {
 )
 
 const run = spawnSync(
-  "opencode",
+  OPENCODE,
   [
     "run",
     "--standalone",

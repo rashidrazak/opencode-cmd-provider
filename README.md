@@ -338,9 +338,24 @@ npm run build && npm run test:e2e      # OpenCode v1 host
 npm run build && npm run test:e2e:v2   # OpenCode v2 host
 ```
 
-`scripts/opencode-fixture.mjs` writes a throwaway `opencode.json` wiring only the local build as a plugin — no declared provider or models — so `opencode models` proves auto-registration against a real opencode v1 binary. `test:e2e` is a local dev gate (it needs the real `opencode` binary on PATH) and is excluded from `npm test`.
+Both scripts take the binary from `PATH` and accept `OPENCODE_BIN` to point at a
+specific install — each skips when that binary belongs to the other host's line,
+so a v1 and a v2 install can sit side by side:
 
-`test:e2e:v2` does the same for v2. It installs the build at the documented v2 local-plugin path (`.opencode/plugins/commandcode/`), runs a headless session, and asserts what the host itself reports back — the provider, every Snapshot model, and the `/connect` integration. It skips when the installed binary is not v2. The final `opencode run` leg is known to hang against a local/mock base URL (upstream bug, anomalyco/opencode #14956, #5674, the same one the v1 script documents), so a hang there is reported as a skip rather than a failure. See [ADR-0010](docs/adr/0010-dual-v1-v2-plugin-entrypoint.md) for the dual-entrypoint design.
+```sh
+# Keep a v1 binary next to the v2 install. npm skips the package's own
+# postinstall in some environments (it fetches the platform binary) — run it
+# yourself if `opencode --version` prints that hint.
+mkdir -p /tmp/ocv1 && npm install --prefix /tmp/ocv1 opencode-ai@1.18.30
+(cd /tmp/ocv1/node_modules/opencode-ai && node postinstall.mjs)
+
+OPENCODE_BIN=/tmp/ocv1/node_modules/.bin/opencode npm run test:e2e   # v1 host
+npm run test:e2e:v2                                                  # v2 host
+```
+
+`scripts/opencode-fixture.mjs` writes a throwaway `opencode.json` wiring only the local build as a plugin — no declared provider or models — so `opencode models` proves auto-registration against a real opencode v1 binary. `test:e2e` is a local dev gate and is excluded from `npm test`.
+
+`test:e2e:v2` does the same for v2. It installs the build at the documented v2 local-plugin path (`.opencode/plugins/commandcode/`), runs a headless session, and asserts what the host itself reports back — the provider, every Snapshot model, and the `/connect` integration. The final `opencode run` leg is known to hang against a local/mock base URL (upstream bug, anomalyco/opencode #14956, #5674, the same one the v1 script documents), so a hang there is reported as a skip rather than a failure. See [ADR-0010](docs/adr/0010-dual-v1-v2-plugin-entrypoint.md) for the dual-entrypoint design.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for local setup and tests. See [RELEASE.md](RELEASE.md) for the release process.
 

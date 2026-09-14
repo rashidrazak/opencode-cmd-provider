@@ -23,17 +23,22 @@ decisions in `docs/adr/`.
   `tests/harness.ts`.
 - **New test files must be added to the `test:unit` script in `package.json`**
   (it is an explicit `&&` list, not a glob) or CI won't run them.
-- `npm run test:e2e` needs a real `opencode` binary on PATH and is excluded from
+- `npm run test:e2e` needs a real `opencode` binary and is excluded from
   `npm test`. Its headless `opencode run` leg deliberately skips — upstream
   opencode bug (anomalyco/opencode #14956, #5674). Don't "fix" the skip.
 - `npm run test:e2e:v2` is the v2 counterpart: it installs the build at
   `.opencode/plugins/commandcode/` (v2 only accepts a **directory** as a
   configured local plugin path), runs a headless `opencode run`, and asserts the
   provider, all Snapshot models, and the integration as the host reports them
-  back. It skips when the installed binary is not v2, and its `run` leg skips on
-  the same upstream hang. Don't use `opencode models` for this — v2 activates
-  plugins asynchronously and the one-shot CLI can win that race (the API's
-  `POST /api/plugin/await-activation` is the wait primitive).
+  back. Its `run` leg skips on the same upstream hang. Don't use `opencode
+models` for this — v2 activates plugins asynchronously and the one-shot CLI
+  can win that race (the API's `POST /api/plugin/await-activation` is the wait
+  primitive).
+- Both e2e scripts read `OPENCODE_BIN` and each skips when that binary belongs
+  to the other host's line, so a v1 and a v2 install coexist on one machine:
+  `npm install --prefix <dir> opencode-ai@1.18.30`, run that package's
+  `postinstall.mjs` if npm skipped it (it fetches the platform binary), then
+  `OPENCODE_BIN=<dir>/node_modules/.bin/opencode npm run test:e2e`.
 
 ## Generated files — do not hand-edit
 
