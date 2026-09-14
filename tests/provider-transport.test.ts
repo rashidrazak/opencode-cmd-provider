@@ -19,6 +19,7 @@ import { projectSlugFromPath } from "../src/provider/project-slug.js"
 import type { LanguageModelV3Prompt } from "../src/provider/aisdk-types.js"
 import { assert, assertEqual, run } from "./harness.js"
 import { calculateCommandCodeCost, costUsageFromAiSdkUsage } from "../src/provider/cost.js"
+import { MODEL_COSTS } from "../src/provider/pricing.js"
 
 type Model = ReturnType<ReturnType<typeof createCommandCode>["languageModel"]>
 
@@ -485,6 +486,71 @@ run([
       } finally {
         await mock.close()
       }
+    },
+  ],
+  [
+    "provider: OpenAI transport reports cache reads from prompt_tokens_details (issue #158)",
+    async () => {
+      // Reproduction at the transport boundary: the documented OpenAI-shape
+      // terminal chunk nests the cached prefix in prompt_tokens_details.
+      // Before #158 the parser read only top-level cache fields, reported
+      // cacheRead 0, and let usageToAiSdk reclassify the whole 52000-token
+      // prompt as fresh input — billing the cached prefix at the input rate
+      // and inflating the reported spend by the input/cacheRead ratio.
+      //
+      // The model is picked from the generated cost table rather than pinned
+      // by id (spec #108): the assertion is arithmetic over whatever rates
+      // upstream ships, so a refresh re-derives instead of going red.
+      const modelId = Object.keys(MODEL_COSTS).find(
+        (id) => id.includes("/") && MODEL_COSTS[id].cacheRead > 0,
+      )
+      assert(modelId !== undefined, "a priced model with a cacheRead rate exists")
+      if (modelId === undefined) return
+      const rates = MODEL_COSTS[modelId]
+      await withEnv("pro", async () => {
+        const mock = await startMockCc({
+          chatCompletionsStream: [
+            openAIChunk("Hello"),
+            openAIFinishChunk({
+              prompt_tokens: 52000,
+              completion_tokens: 300,
+              total_tokens: 52300,
+              prompt_tokens_details: { cached_tokens: 50000 },
+            }),
+          ],
+        })
+        try {
+          const provider = createCommandCode({ apiKey: "k", baseURL: mock.url })
+          const parts = await collect(provider.languageModel(modelId), [
+            { role: "user", content: "hi" },
+          ])
+          assertEqual(mock.hits.chatCompletions, 1)
+          const finish = parts.find((p) => p.type === "finish") as {
+            usage?: {
+              inputTokens: { total: number; noCache: number; cacheRead: number; cacheWrite: number }
+              outputTokens: { total: number }
+            }
+          }
+          assertEqual(finish.usage, {
+            inputTokens: { total: 52000, noCache: 2000, cacheRead: 50000, cacheWrite: 0 },
+            outputTokens: { total: 300, text: 300, reasoning: 0 },
+          })
+
+          // The reported spend is the defect's headline: bill the emitted usage
+          // at the model's shipped rates and require the true total.
+          const cu = costUsageFromAiSdkUsage(finish.usage as never)
+          calculateCommandCodeCost({ cost: rates }, cu)
+          const trueCost =
+            (2000 / 1_000_000) * rates.input +
+            (300 / 1_000_000) * rates.output +
+            (50000 / 1_000_000) * rates.cacheRead
+          assertEqual(cu.cost.total.toFixed(8), trueCost.toFixed(8))
+          const buggyTotal = cu.cost.total + (48000 / 1_000_000) * (rates.input - rates.cacheRead)
+          assert(cu.cost.total < buggyTotal, "cache reads are billed below fresh input")
+        } finally {
+          await mock.close()
+        }
+      })
     },
   ],
   [

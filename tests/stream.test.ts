@@ -10,6 +10,7 @@ import {
   mapFinishReason,
   ccEventToStreamPart,
   ccUsageToAiSdkUsage,
+  openAIUsageToAiSdkUsage,
   createOpenAIStreamParser,
   createAnthropicStreamParser,
 } from "../src/provider/stream.js"
@@ -286,6 +287,102 @@ run([
       assertEqual(usage, {
         inputTokens: { total: 100, noCache: 50, cacheRead: 30, cacheWrite: 20 },
         outputTokens: { total: 50, text: 50, reasoning: 0 },
+      })
+    },
+  ],
+
+  [
+    "openAIUsageToAiSdkUsage reads prompt_tokens_details.cached_tokens (issue #158)",
+    () => {
+      // OpenAI-shape usage nests the cached prefix; the top-level prompt count
+      // stays cache-inclusive, so `noCache` is the fresh remainder and the
+      // cost path bills 50000 at the cache-read rate instead of fresh input.
+      const usage = openAIUsageToAiSdkUsage({
+        usage: {
+          prompt_tokens: 52000,
+          completion_tokens: 300,
+          total_tokens: 52300,
+          prompt_tokens_details: { cached_tokens: 50000 },
+        },
+      })
+      assertEqual(usage, {
+        inputTokens: { total: 52000, noCache: 2000, cacheRead: 50000, cacheWrite: 0 },
+        outputTokens: { total: 300, text: 300, reasoning: 0 },
+      })
+    },
+  ],
+
+  [
+    "openAIUsageToAiSdkUsage reads top-level cache aliases",
+    () => {
+      // DeepSeek reports prompt_cache_hit_tokens; the generic alias is camelCase.
+      const deepseek = openAIUsageToAiSdkUsage({
+        prompt_tokens: 1000,
+        completion_tokens: 10,
+        prompt_cache_hit_tokens: 900,
+      })
+      assertEqual(deepseek?.inputTokens, {
+        total: 1000,
+        noCache: 100,
+        cacheRead: 900,
+        cacheWrite: 0,
+      })
+
+      const generic = openAIUsageToAiSdkUsage({
+        promptTokens: 1000,
+        completionTokens: 10,
+        cacheReadTokens: 900,
+      })
+      assertEqual(generic?.inputTokens, {
+        total: 1000,
+        noCache: 100,
+        cacheRead: 900,
+        cacheWrite: 0,
+      })
+    },
+  ],
+
+  [
+    "openAIUsageToAiSdkUsage keeps explicit cache fields ahead of nested details",
+    () => {
+      const usage = openAIUsageToAiSdkUsage({
+        prompt_tokens: 1000,
+        completion_tokens: 10,
+        cacheReadTokens: 700,
+        prompt_tokens_details: { cached_tokens: 900 },
+      })
+      assertEqual(usage?.inputTokens, {
+        total: 1000,
+        noCache: 300,
+        cacheRead: 700,
+        cacheWrite: 0,
+      })
+    },
+  ],
+
+  [
+    "createOpenAIStreamParser reports nested cache reads on the finish part",
+    () => {
+      const parser = createOpenAIStreamParser()
+      const chunks = [
+        { id: "gen_cache", choices: [{ delta: { content: "hi" } }] },
+        {
+          id: "gen_cache",
+          choices: [{ delta: {}, finish_reason: "stop" }],
+          usage: {
+            prompt_tokens: 52000,
+            completion_tokens: 300,
+            total_tokens: 52300,
+            prompt_tokens_details: { cached_tokens: 50000 },
+          },
+        },
+      ]
+      const parts = chunks.flatMap((c) => parser(c))
+      const finish = parts[parts.length - 1] as { type: string; usage?: unknown }
+      assertEqual(finish.type, "finish")
+      assertEqual(finish.usage, {
+        inputTokens: { total: 52000, noCache: 2000, cacheRead: 50000, cacheWrite: 0 },
+        outputTokens: { total: 300, text: 300, reasoning: 0 },
       })
     },
   ],
