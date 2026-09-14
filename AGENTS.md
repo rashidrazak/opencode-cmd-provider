@@ -23,9 +23,22 @@ decisions in `docs/adr/`.
   `tests/harness.ts`.
 - **New test files must be added to the `test:unit` script in `package.json`**
   (it is an explicit `&&` list, not a glob) or CI won't run them.
-- `npm run test:e2e` needs a real `opencode` binary on PATH and is excluded from
+- `npm run test:e2e` needs a real `opencode` binary and is excluded from
   `npm test`. Its headless `opencode run` leg deliberately skips — upstream
   opencode bug (anomalyco/opencode #14956, #5674). Don't "fix" the skip.
+- `npm run test:e2e:v2` is the v2 counterpart: it installs the build at
+  `.opencode/plugins/commandcode/` (v2 only accepts a **directory** as a
+  configured local plugin path), runs a headless `opencode run`, and asserts the
+  provider, all Snapshot models, and the integration as the host reports them
+  back. Its `run` leg skips on the same upstream hang. Don't use `opencode
+models` for this — v2 activates plugins asynchronously and the one-shot CLI
+  can win that race (the API's `POST /api/plugin/await-activation` is the wait
+  primitive).
+- Both e2e scripts read `OPENCODE_BIN` and each skips when that binary belongs
+  to the other host's line, so a v1 and a v2 install coexist on one machine:
+  `npm install --prefix <dir> opencode-ai@1.18.30`, run that package's
+  `postinstall.mjs` if npm skipped it (it fetches the platform binary), then
+  `OPENCODE_BIN=<dir>/node_modules/.bin/opencode npm run test:e2e`.
 
 ## Generated files — do not hand-edit
 
@@ -64,19 +77,26 @@ fixtures (see `scripts/check-deals-coverage.mjs` and
 
 ## Architecture
 
-- **Two hosts, two config files.** The server host reads `opencode.json`
-  (`src/plugin/index.ts`, package export `"."`); the TUI host reads `tui.json`
-  (`src/deals/tui.tsx`, package export `"./tui"` → `dist/tui.js`). The TUI host
-  never reads `opencode.json` (verified, ADR-0004).
+- **Three hosts, two config files.** The server host reads `opencode.json`
+  (`src/plugin/index.ts`, package export `"."`) and has two flavours — OpenCode
+  v1 calls the default export's `server()`, v2 calls its `setup(context)`; the
+  TUI host reads `tui.json` (`src/deals/tui.tsx`, package export `"./tui"` →
+  `dist/tui.js`). The TUI host never reads `opencode.json` (verified, ADR-0004).
+  The v1/v2 server halves are separate implementations of the same three
+  capabilities — v2 does not translate v1 hooks (ADR-0010).
 - **`src/deals/` is the excisable Deals slice.** Deleting it plus the two
-  registration lines in `src/plugin/index.ts` leaves Core green. Keep the server
-  barrel `src/deals/index.ts` free of the TUI re-exports — exporting `tui.tsx`
-  from it pulls `solid-js`/`@opentui` into the server bundle.
-- **Never runtime-import `@opencode-ai/*`.** `@opencode-ai/plugin`/`@opencode-ai/sdk`
+  registration lines in `src/plugin/index.ts` (`enrichCatalog` and `tools` in
+  the v2 `setup`, `enrichCommandCodeModels` and `planSummaryTool` in the v1
+  `server`) leaves Core green. Keep the server barrel `src/deals/index.ts` free
+  of the TUI re-exports — exporting `tui.tsx` from it pulls
+  `solid-js`/`@opentui` into the server bundle.
+- **Never runtime-import `@opencode-ai/*` or `@opencode/*`.** `@opencode-ai/plugin`/`@opencode-ai/sdk`
   are optional peer deps: `opencode plugin <pkg>` installs them in `.opencode/`,
   not next to the plugin, so a runtime import fails to resolve at load and kills
-  the whole plugin (no auto-registration, no `/connect`). Reference them only via
-  `import type`. Enforced by `tests/contract.test.ts`.
+  the whole plugin (no auto-registration, no `/connect`). The v2 host packages
+  are worse: the v2 context is _injected_, so nothing needs them at all. Mirror
+  their shapes in `src/plugin/v2-types.ts` and reference the v1 packages only via
+  `import type`. Enforced by `tests/contract.test.ts` for both scopes.
 - The install command is `opencode plugin <pkg>` — **there is no `add`
   subcommand** on opencode 1.18+.
 

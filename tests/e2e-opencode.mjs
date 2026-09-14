@@ -20,6 +20,13 @@ import { mkdtempSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
+// Which opencode to exercise. Defaults to PATH; set OPENCODE_BIN to point at a
+// specific install, which is how a v1 and a v2 binary coexist on one machine
+// without either shadowing the other:
+//   OPENCODE_BIN=/path/to/v1/opencode npm run test:e2e
+//   npm run test:e2e:v2                       # v2 sibling
+const OPENCODE = process.env.OPENCODE_BIN ?? "opencode"
+
 // Run opencode in an isolated HOME + clean env so neither the user's global
 // opencode config nor unrelated env vars (proxy, OPENCODE_*, model config) can
 // leak into the test.
@@ -33,11 +40,21 @@ const isoEnv = {
   XDG_CONFIG_HOME: join(isoHome, ".config"),
 }
 
-const hasOpenCode = spawnSync("which", ["opencode"]).status === 0
-if (!hasOpenCode) {
-  console.log("skip - opencode not on PATH")
+// The install command, the config key, and the plugin entrypoint shape this
+// script asserts are all v1 contracts. On a v2 binary the equivalent checks live
+// in tests/e2e-opencode-v2.mjs, so report that instead of failing on a host this
+// script was never written for.
+const version = spawnSync(OPENCODE, ["--version"], { env: isoEnv, encoding: "utf-8" })
+if (version.error || version.status !== 0) {
+  console.log(`skip - ${OPENCODE} is not runnable (${version.error?.code ?? version.status})`)
   process.exit(0)
 }
+const reported = `${version.stdout ?? ""}${version.stderr ?? ""}`.trim()
+if (/\bv2\./.test(reported)) {
+  console.log(`skip - ${OPENCODE} is v2 (${reported}); run 'npm run test:e2e:v2' for that host`)
+  process.exit(0)
+}
+console.log(`using ${OPENCODE} (${reported || "version unknown"})`)
 
 // Start mock server
 const received = []
@@ -88,7 +105,7 @@ const dir = fixture.stdout.trim()
 
 // 1 + 2: plugin loads and auto-registers the commandcode models — the fixture
 // declares no provider and no models, so discovery proves auto-registration.
-const list = spawnSync("opencode", ["models"], {
+const list = spawnSync(OPENCODE, ["models"], {
   cwd: dir,
   env: { ...isoEnv, COMMANDCODE_API_KEY: "user_e2e", COMMANDCODE_API_BASE: base },
   encoding: "utf-8",
@@ -107,7 +124,7 @@ console.log("ok - plugin auto-registers commandcode/claude-sonnet-5 with no decl
 
 // 3: headless run. Known upstream bug may hang before sending the request; detect
 // and skip gracefully in that case.
-const out = spawnSync("opencode", ["run", "--model", "commandcode/claude-sonnet-5", "say hi"], {
+const out = spawnSync(OPENCODE, ["run", "--model", "commandcode/claude-sonnet-5", "say hi"], {
   cwd: dir,
   env: { ...isoEnv, COMMANDCODE_API_KEY: "user_e2e", COMMANDCODE_API_BASE: base },
   encoding: "utf-8",
