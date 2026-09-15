@@ -616,6 +616,56 @@ run([
   ],
 
   [
+    "createAnthropicStreamParser drops the bare message_stop once message_delta finished the stream (issue #174)",
+    () => {
+      // The live Provider API stream closes in the mirror image of OpenAI's:
+      // usage (and the real stop_reason) arrive on `message_delta`, then a bare
+      // `message_stop` follows. Mapping that terminal too yields a second,
+      // zeroed finish that the transport's last-wins hold prefers — the whole
+      // turn's usage and reason lost.
+      const parser = createAnthropicStreamParser()
+      const events = [
+        { type: "message_start", message: { usage: { input_tokens: 20, output_tokens: 1 } } },
+        { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+        { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Hello" } },
+        { type: "content_block_stop", index: 0 },
+        {
+          type: "message_delta",
+          delta: { stop_reason: "end_turn" },
+          usage: { input_tokens: 20, output_tokens: 8 },
+        },
+        { type: "message_stop" },
+      ]
+      const parts = events.flatMap((e) => parser(e))
+      assertEqual(
+        parts.map((p) => (p as { type: string }).type),
+        ["text-start", "text-delta", "text-end", "finish"],
+      )
+      assertEqual(parts[3], {
+        type: "finish",
+        finishReason: { unified: "stop", raw: "end_turn" },
+        usage: {
+          inputTokens: { total: 20, noCache: 20, cacheRead: 0, cacheWrite: 0 },
+          outputTokens: { total: 8, text: 8, reasoning: 0 },
+        },
+      })
+
+      // The terminal stays the fallback finish for a stream that never sent
+      // `message_delta` — the only finish such a stream gets.
+      assertEqual(createAnthropicStreamParser()({ type: "message_stop" }), [
+        {
+          type: "finish",
+          finishReason: { unified: "stop", raw: "stop" },
+          usage: {
+            inputTokens: { total: 0, noCache: 0, cacheRead: 0, cacheWrite: 0 },
+            outputTokens: { total: 0, text: 0, reasoning: 0 },
+          },
+        },
+      ])
+    },
+  ],
+
+  [
     "createOpenAIStreamParser buffers tool arguments until the call is named (issue #72)",
     () => {
       const parser = createOpenAIStreamParser()

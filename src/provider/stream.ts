@@ -404,7 +404,10 @@ export function anthropicEventToStreamPart(event: unknown): LanguageModelV3Strea
     return [finishPart(mapFinishReason(stopReason), usageToAiSdk(event.usage))]
   }
 
-  // Alternative terminal: { type: "message_stop" } without usage — emit generic finish
+  // Alternative terminal: { type: "message_stop" } without usage — emit generic finish.
+  // The stateful parser suppresses this once `message_delta` has finished the
+  // stream, so the synthesized zeroed usage cannot replace the reported one
+  // (issue #174); a stateless caller has no per-stream state to consult.
   if (type === "message_stop") {
     return [finishPart(undefined, undefined)]
   }
@@ -652,6 +655,14 @@ export function createAnthropicStreamParser(): StreamEventParser {
   // open reasoning part (issue #71). A block type this parser does not model is
   // recorded as "other" so its stop closes nothing (issue #72).
   const blocks = new Map<number, { type: "text" | "tool_use" | "thinking" | "other"; id: string }>()
+  // True once a `message_delta` finished this stream. Anthropic reports usage
+  // (and the real stop_reason) on `message_delta` and then closes with a bare
+  // `message_stop`; mapping that terminal too would hand the transport a
+  // second, zeroed finish for its last-wins hold to prefer, zeroing every
+  // Claude turn's usage and masking the stop_reason (issue #174). The terminal
+  // is still mapped when no `message_delta` arrived — the fallback finish a
+  // stream that never reports usage needs.
+  let messageDeltaFinished = false
 
   /**
    * Resolves the part a delta of `kind` belongs to at `index`, synthesizing the
@@ -799,8 +810,16 @@ export function createAnthropicStreamParser(): StreamEventParser {
       return []
     }
     // Everything else (message_delta, message_stop, ping, error, …) shares the
-    // stateless mapper's handling.
-    return anthropicEventToStreamPart(event)
+    // stateless mapper's handling. The terminal is the one exception: once
+    // `message_delta` produced the finish, the bare `message_stop` adds neither
+    // usage nor a reason, so it maps to nothing rather than to a zeroed finish
+    // the transport would prefer (issue #174).
+    if (type === "message_stop") {
+      return messageDeltaFinished ? [] : anthropicEventToStreamPart(event)
+    }
+    const parts = anthropicEventToStreamPart(event)
+    if (type === "message_delta") messageDeltaFinished = true
+    return parts
   }
 
   // A tool call is settled by its own tool-call part, never by a bare end, so

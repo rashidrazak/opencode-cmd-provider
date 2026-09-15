@@ -490,6 +490,117 @@ run([
     },
   ],
   [
+    "provider: Anthropic message_delta usage survives the trailing message_stop (issue #174)",
+    async () => {
+      // Live /provider/v1/messages order (2026-09-16): message_start →
+      // content_block_* → message_delta (usage) → message_stop (bare). The
+      // parser now drops that terminal once `message_delta` finished the
+      // stream; before the fix it mapped a second, zeroed finish that the
+      // transport's last-wins hold preferred (OpenAI's mirror order is why the
+      // hold exists), so every Claude turn reported zero usage and zero cost
+      // and the real stop_reason was masked by `stop`.
+      const chunks = [
+        {
+          type: "message_start",
+          message: {
+            id: "msg_1",
+            role: "assistant",
+            usage: { input_tokens: 20, output_tokens: 1 },
+          },
+        },
+        { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+        { type: "ping" },
+        anthropicContentBlockDelta("Hello"),
+        { type: "content_block_stop", index: 0 },
+        anthropicMessageDelta({
+          input_tokens: 20,
+          cache_read_input_tokens: 4,
+          cache_creation_input_tokens: 2,
+          output_tokens: 8,
+        }),
+        { type: "message_stop" },
+      ]
+      const mock = await startMockCc({ messagesStream: chunks })
+      try {
+        const model = createCommandCode({ apiKey: "k", baseURL: mock.url }).languageModel(
+          "claude-sonnet-5",
+        )
+        const prompt: LanguageModelV3Prompt = [{ role: "user", content: "hi" }]
+        const parts = await collect(model, prompt)
+        assertEqual(
+          parts.filter((p) => p.type === "finish").length,
+          1,
+          "exactly one finish reaches the consumer",
+        )
+        const finish = parts.find((p) => p.type === "finish") as {
+          finishReason?: { unified?: string; raw?: string }
+          usage?: {
+            inputTokens: { total: number; cacheRead: number; cacheWrite: number }
+            outputTokens: { total: number }
+          }
+        }
+        assertEqual(finish.finishReason, { unified: "stop", raw: "end_turn" })
+        // The defect's headline: non-zero usage rather than the zeroed terminal.
+        // The cache-inclusive total is #178's mapping, so this pins non-zero
+        // input plus the cache pass-through the same capture showed.
+        assert((finish.usage?.inputTokens.total ?? 0) > 0, "input usage non-zero")
+        assertEqual(finish.usage?.inputTokens.cacheRead, 4)
+        assertEqual(finish.usage?.inputTokens.cacheWrite, 2)
+        assertEqual(finish.usage?.outputTokens.total, 8)
+        const cu = costUsageFromAiSdkUsage(finish.usage as never)
+        calculateCommandCodeCost(
+          { cost: { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 } },
+          cu,
+        )
+        assert(cu.cost.total > 0, "anthropic cost positive")
+
+        // The same stream through doGenerate must report the same usage.
+        const gen = await model.doGenerate({ prompt, mode: { type: "regular" } } as never)
+        assert((gen.usage.inputTokens.total ?? 0) > 0, "doGenerate input usage non-zero")
+        assertEqual(gen.usage.outputTokens.total, 8)
+        assertEqual(gen.usage, finish.usage)
+      } finally {
+        await mock.close()
+      }
+    },
+  ],
+  [
+    "provider: Anthropic usage-less terminal finish does not mask the message_delta stop reason (issue #174)",
+    async () => {
+      // The bare terminal's synthesized finish carries the `stop` default. When
+      // it overwrote the usage-bearing finish it also replaced a real
+      // `max_tokens` stop_reason with `stop`, hiding the truncation.
+      const mock = await startMockCc({
+        messagesStream: [
+          { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+          anthropicContentBlockDelta("Truncated"),
+          { type: "content_block_stop", index: 0 },
+          {
+            type: "message_delta",
+            delta: { stop_reason: "max_tokens" },
+            usage: { input_tokens: 20, output_tokens: 8 },
+          },
+          { type: "message_stop" },
+        ],
+      })
+      try {
+        const parts = await collect(
+          createCommandCode({ apiKey: "k", baseURL: mock.url }).languageModel("claude-sonnet-5"),
+          [{ role: "user", content: "hi" }],
+        )
+        const finish = parts.find((p) => p.type === "finish") as {
+          finishReason?: { unified?: string; raw?: string }
+          usage?: { outputTokens: { total: number } }
+        }
+        assert(finish, "finish present")
+        assertEqual(finish.finishReason, { unified: "length", raw: "max_tokens" })
+        assertEqual(finish.usage?.outputTokens.total, 8)
+      } finally {
+        await mock.close()
+      }
+    },
+  ],
+  [
     "provider: OpenAI transport reports cache reads from prompt_tokens_details (issue #158)",
     async () => {
       // Reproduction at the transport boundary: the documented OpenAI-shape
