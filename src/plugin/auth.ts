@@ -12,7 +12,18 @@ import { mirrorCredential, type MirrorOptions } from "./auth-mirror.js"
 import type { AuthOAuthResult } from "@opencode-ai/plugin"
 
 const STUDIO_BASE_URL = "https://commandcode.ai"
-const DEFAULT_AUTH_TIMEOUT_MS = 15_000
+/**
+ * How long the browser flow may take before `callback()` gives up (issue #145).
+ *
+ * A real login — page load, sign-in, org/context pick, approve, key transfer —
+ * is a human-scale operation, so the budget has to be too: at 15 s the timer
+ * fired mid-login and closed the callback server before the studio could POST
+ * the key, which surfaced as "The automatic transfer failed" in the studio and
+ * as `ProviderAuthOauthCallbackFailed` in every host. Five minutes sits well
+ * under OpenChamber's own 15-minute ceiling for this route, so the host never
+ * times out first.
+ */
+export const DEFAULT_AUTH_TIMEOUT_MS = 300_000
 
 function generateStateToken(): string {
   return randomBytes(32).toString("base64url")
@@ -35,15 +46,15 @@ export async function runAuthFlow(options: RunAuthFlowOptions = {}): Promise<Aut
   return {
     url,
     instructions:
-      "Complete the flow in your browser. If automatic transfer fails, set COMMANDCODE_API_KEY to the API key shown by Command Code.",
+      "Complete the flow in your browser. If the automatic transfer fails, choose the API key method and paste the key Command Code shows, or set COMMANDCODE_API_KEY.",
     method: "auto",
     callback: async () => {
+      let timer: ReturnType<typeof setTimeout> | undefined
       try {
-        const timeout = new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error("timeout")), timeoutMs),
-        )
+        const timeout = new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error("timeout")), timeoutMs)
+        })
         const callback = await Promise.race([authServer.waitForCallback, timeout])
-        authServer.server.close()
         if (callback.state !== stateToken) return { type: "failed" }
         if (options.mirror !== false) {
           try {
@@ -54,8 +65,14 @@ export async function runAuthFlow(options: RunAuthFlowOptions = {}): Promise<Aut
         }
         return { type: "success", key: callback.apiKey }
       } catch {
-        authServer.server.close()
         return { type: "failed" }
+      } finally {
+        // Both exits release the listener *and* the budget timer. Leaving the
+        // timer armed after a successful login held the event loop open for
+        // whatever remained of the budget (issue #145) — invisible at 15 s,
+        // a five-minute hang at the current one.
+        clearTimeout(timer)
+        authServer.server.close()
       }
     },
   }
