@@ -12,6 +12,7 @@ import {
   openAIFinishChunk,
   textDelta,
   finishEvent,
+  eventsEnd,
   upgradeRequiredBody,
   headersToRecord,
 } from "./helpers/mock-cc.js"
@@ -1272,6 +1273,136 @@ run([
           assertEqual(after[0]!.headers["authorization"], "Bearer spy_key")
         },
       )
+    },
+  ],
+  [
+    "transport: a mid-stream error event closes open parts before the error part (issue #72)",
+    async () => {
+      // The provider fails after it has already streamed reasoning. The
+      // transport surfaces one error part and closes the stream, so the event
+      // that carries the failure must first close every part the stream opened:
+      // a consumer that keys parts by id (#69) must never be left holding an
+      // open reasoning part.
+      await withEnv("goat", async () => {
+        const mock = await startMockCc({
+          chatCompletionsStream: [
+            { id: "gen_72", choices: [{ delta: { reasoning_content: "thinking" } }] },
+            { error: { message: "upstream exploded", type: "server_error" } },
+            eventsEnd,
+          ],
+          messagesStream: [
+            {
+              type: "content_block_start",
+              index: 0,
+              content_block: { type: "thinking", thinking: "" },
+            },
+            {
+              type: "content_block_delta",
+              index: 0,
+              delta: { type: "thinking_delta", thinking: "pondering" },
+            },
+            { type: "error", error: { type: "overloaded_error", message: "upstream exploded" } },
+            eventsEnd,
+          ],
+        })
+        try {
+          const provider = createCommandCode({ apiKey: "test_key", baseURL: mock.url })
+          const openaiParts = await collect(provider.languageModel("gpt-5.6-terra"), [
+            { role: "user", content: "hi" },
+          ])
+          assertEqual(
+            openaiParts.map((p) => p.type),
+            ["reasoning-start", "reasoning-delta", "reasoning-end", "error"],
+          )
+          assertEqual((openaiParts[0] as { id: string }).id, "gen_72")
+          assertEqual((openaiParts[2] as { id: string }).id, "gen_72")
+          const openaiError = openaiParts[3]!.error as Error
+          assert(openaiError.message.includes("upstream exploded"), openaiError.message)
+
+          const anthropicParts = await collect(provider.languageModel("claude-sonnet-5"), [
+            { role: "user", content: "hi" },
+          ])
+          assertEqual(
+            anthropicParts.map((p) => p.type),
+            ["reasoning-start", "reasoning-delta", "reasoning-end", "error"],
+          )
+          assertEqual((anthropicParts[0] as { id: string }).id, "thinking-0")
+          assertEqual((anthropicParts[2] as { id: string }).id, "thinking-0")
+        } finally {
+          await mock.close()
+        }
+      })
+    },
+  ],
+  [
+    "transport: a stream that ends without a finish event closes open parts first (issue #72)",
+    async () => {
+      // A dropped connection is the other half of "failed mid-generation": the
+      // transport synthesizes a finish to terminate the stream, and the parts
+      // the server never closed must be closed before it.
+      await withEnv("goat", async () => {
+        const mock = await startMockCc({
+          chatCompletionsStream: [
+            { id: "gen_cut", choices: [{ delta: { content: "half an ans" } }] },
+            eventsEnd,
+          ],
+        })
+        try {
+          const provider = createCommandCode({ apiKey: "test_key", baseURL: mock.url })
+          const parts = await collect(provider.languageModel("gpt-5.6-terra"), [
+            { role: "user", content: "hi" },
+          ])
+          assertEqual(
+            parts.map((p) => p.type),
+            ["text-start", "text-delta", "text-end", "finish"],
+          )
+          assertEqual((parts[0] as { id: string }).id, "gen_cut")
+          assertEqual((parts[2] as { id: string }).id, "gen_cut")
+        } finally {
+          await mock.close()
+        }
+      })
+    },
+  ],
+  [
+    "transport: abort mid-reasoning closes the open part before the aborted error part (issue #72)",
+    async () => {
+      await withEnv("goat", async () => {
+        const mock = await startMockCc({
+          chatCompletionsStream: [
+            { id: "gen_abort", choices: [{ delta: { reasoning_content: "thinking" } }] },
+            "stall",
+          ],
+        })
+        try {
+          const provider = createCommandCode({ apiKey: "test_key", baseURL: mock.url })
+          const controller = new AbortController()
+          const result = await provider.languageModel("gpt-5.6-terra").doStream({
+            prompt: [{ role: "user", content: "hi" }],
+            mode: { type: "regular" },
+            abortSignal: controller.signal,
+          } as never)
+          const parts: Array<Record<string, unknown>> = []
+          const reader = result.stream.getReader()
+          parts.push((await reader.read()).value as Record<string, unknown>)
+          parts.push((await reader.read()).value as Record<string, unknown>)
+          controller.abort()
+          for (;;) {
+            const { done, value } = await reader.read()
+            if (done) break
+            parts.push(value as unknown as Record<string, unknown>)
+          }
+          assertEqual(
+            parts.map((p) => p.type),
+            ["reasoning-start", "reasoning-delta", "reasoning-end", "error"],
+          )
+          assertEqual((parts[2] as { id: string }).id, "gen_abort")
+          const abortErrorPart = parts[3]!.error as Error
+          assertEqual(abortErrorPart.message, "The operation was aborted")
+        } finally {
+          await mock.close()
+        }
+      })
     },
   ],
 ])
