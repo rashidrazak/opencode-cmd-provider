@@ -13,11 +13,11 @@ config keys, and generated catalogs.
 
 One package serves both OpenCode lines; three host processes load it.
 
-| Host               | Configured in                                   | Default export                       | Registrations                                                                                       |
-| ------------------ | ----------------------------------------------- | ------------------------------------ | --------------------------------------------------------------------------------------------------- |
-| OpenCode v1 server | `opencode.json` → `plugin`                      | `dist/index.js` → `{ id, server }`   | `config` hook (auto-registration + Deals enrichment), `auth` (OAuth browser flow), `tool` map       |
-| OpenCode v2 server | `opencode.json` → `plugins`                     | `dist/index.js` → `{ id, setup }`    | `ctx.catalog.transform`, `ctx.integration.transform`, `ctx.tool.transform`, `ctx.aisdk.hook("sdk")` |
-| TUI (both lines)   | v1: `tui.json`; v2: the package's `./tui` entry | `dist/tui.js` → `{ id, tui, setup }` | v1: `api.slots.register` on `sidebar_content`; v2: `ctx.ui.slot({ append: "sidebar.content" })`     |
+| Host               | Configured in                                   | Default export                       | Registrations                                                                                                  |
+| ------------------ | ----------------------------------------------- | ------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
+| OpenCode v1 server | `opencode.json` → `plugin`                      | `dist/index.js` → `{ id, server }`   | `config` hook (auto-registration + Deals enrichment), `auth` (OAuth browser flow + API-key method), `tool` map |
+| OpenCode v2 server | `opencode.json` → `plugins`                     | `dist/index.js` → `{ id, setup }`    | `ctx.catalog.transform`, `ctx.integration.transform`, `ctx.tool.transform`, `ctx.aisdk.hook("sdk")`            |
+| TUI (both lines)   | v1: `tui.json`; v2: the package's `./tui` entry | `dist/tui.js` → `{ id, tui, setup }` | v1: `api.slots.register` on `sidebar_content`; v2: `ctx.ui.slot({ append: "sidebar.content" })`                |
 
 - The v1 and v2 halves are **independent implementations** of the same
   capabilities — v2 does not translate v1 hooks. The v2 host context is mirrored
@@ -285,16 +285,17 @@ Both e2e scripts are excluded from `npm test`.
 
 ## Design records
 
-| ADR                                                   | Decision                                                                  |
-| ----------------------------------------------------- | ------------------------------------------------------------------------- |
-| [0001](adr/0001-auto-registration-snapshot.md)        | Auto-registration from a bundled snapshot, config-hook mutation           |
-| [0002](adr/0002-tag-driven-releases.md)               | Tag-driven releases via GitHub Actions                                    |
-| [0003](adr/0003-release-gates.md)                     | Release gates and non-blocking catalog checks                             |
-| [0004](adr/0004-deals-intelligence-slice.md)          | Deals intelligence as an excisable slice with visible degradation         |
-| [0005](adr/0005-rsc-primary-deals-cron.md)            | RSC stream as the primary deals source, refreshed by cron                 |
-| [0006](adr/0006-derived-reasoning-classification.md)  | Reasoning capability derived from generated classification                |
-| [0007](adr/0007-auto-release.md)                      | Auto-release on merged catalog-refresh PRs                                |
-| [0008](adr/0008-models-md-primary-catalog.md)         | The models.md table is the sole membership authority                      |
-| [0009](adr/0009-version-pinned-provider-specifier.md) | Runtime provider pinned to the plugin's exact version                     |
-| [0010](adr/0010-dual-v1-v2-plugin-entrypoint.md)      | One package and entrypoint for OpenCode v1 and v2 (server and TUI halves) |
-| [0011](adr/0011-billing-derived-plan-identity.md)     | Plan identity from the billing subscription, never a default              |
+| ADR                                                            | Decision                                                                  |
+| -------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| [0001](adr/0001-auto-registration-snapshot.md)                 | Auto-registration from a bundled snapshot, config-hook mutation           |
+| [0002](adr/0002-tag-driven-releases.md)                        | Tag-driven releases via GitHub Actions                                    |
+| [0003](adr/0003-release-gates.md)                              | Release gates and non-blocking catalog checks                             |
+| [0004](adr/0004-deals-intelligence-slice.md)                   | Deals intelligence as an excisable slice with visible degradation         |
+| [0005](adr/0005-rsc-primary-deals-cron.md)                     | RSC stream as the primary deals source, refreshed by cron                 |
+| [0006](adr/0006-derived-reasoning-classification.md)           | Reasoning capability derived from generated classification                |
+| [0007](adr/0007-auto-release.md)                               | Auto-release on merged catalog-refresh PRs                                |
+| [0008](adr/0008-models-md-primary-catalog.md)                  | The models.md table is the sole membership authority                      |
+| [0009](adr/0009-version-pinned-provider-specifier.md)          | Runtime provider pinned to the plugin's exact version                     |
+| [0010](adr/0010-dual-v1-v2-plugin-entrypoint.md)               | One package and entrypoint for OpenCode v1 and v2 (server and TUI halves) |
+| [0011](adr/0011-billing-derived-plan-identity.md)              | Plan identity from the billing subscription, never a default              |
+| [0012](adr/0012-connect-callback-budget-and-api-key-method.md) | Human-scale connect callback budget, `api` method without `authorize`     |

@@ -75,8 +75,15 @@ In OpenCode, run:
 /connect
 ```
 
-Select **Command Code** and finish the sign-in in your browser. That's it — the
-key is stored by OpenCode and reused from then on.
+Select **Command Code** in the provider list, then pick how to sign in:
+
+- **Command Code** — the browser flow. Finish the sign-in in your browser; the
+  key is stored by OpenCode and reused from then on. Take your time: the plugin
+  waits up to five minutes for the browser to hand the key back, so there is no
+  rush picking an organization or approving access.
+- **Command Code API key** — paste the key the Command Code studio shows you.
+  Use this when the browser cannot reach OpenCode's `localhost` callback, for
+  example when OpenCode runs on a remote host.
 
 ### OpenCode v2: use your API key
 
@@ -189,7 +196,7 @@ nothing else to clean up.
 | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
 | No `[CMD]` models in `/models`              | Check that your API key is set (or that `/connect` succeeded), restart OpenCode, and update the plugin if your install is old.                    |
 | The sidebar has no **Command Code** section | Make sure the session uses a `[CMD]` model, and press `ctrl+x b` — the sidebar may be hidden.                                                     |
-| Browser sign-in fails (v1)                  | Set `COMMANDCODE_API_KEY` instead and restart OpenCode.                                                                                           |
+| Browser sign-in fails (v1)                  | Run `/connect` again and pick **Command Code API key** to paste one, or set `COMMANDCODE_API_KEY` and restart OpenCode.                           |
 | A model shows `$0` cost                     | No published price for that model, so the estimate is `0`. See [Command Code pricing](https://commandcode.ai/docs/resources/pricing-limits).      |
 | Something else                              | See the [technical reference](docs/TECHNICAL.md#troubleshooting) or [open an issue](https://github.com/rashidrazak/opencode-cmd-provider/issues). |
 

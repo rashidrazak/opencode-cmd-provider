@@ -45,6 +45,18 @@ const server: Plugin = async () => {
           label: "Command Code",
           authorize: async () => runAuthFlow(),
         },
+        {
+          // Additive fallback (issue #145). Hosts render their own prompt for an
+          // `api` method and store the pasted key through `auth.set` themselves:
+          // core's `provider.oauth.authorize` returns early for anything that is
+          // not `oauth`, so an `authorize` here would never run. Declaring it is
+          // what makes OpenChamber render its API Key field
+          // (`shouldShowApiKeyAuth`) and gives the TUI a paste prompt — the only
+          // way in when the browser cannot reach the loopback callback server
+          // (remote `OPENCODE_HOST`, blocked local-network access).
+          type: "api",
+          label: "Command Code API key",
+        },
       ],
     },
     tool: {
