@@ -196,8 +196,20 @@ nothing else to clean up.
 ## Learn more
 
 - **[Technical reference](docs/TECHNICAL.md)** — how the plugin works, where the
-  model and deals data comes from, configuration options, development, tests, and
-  the design decisions behind it.
+  model and deals data comes from, and the decisions behind it. Jump straight to
+  a section:
+  - [Hosts and entry points](docs/TECHNICAL.md#hosts-and-entry-points) — which OpenCode processes load the plugin and what each one registers
+  - [Installation mechanics and caching](docs/TECHNICAL.md#installation-mechanics-and-caching) — where an install lands, how updates work, and why nothing updates by itself
+  - [Model discovery and offline behaviour](docs/TECHNICAL.md#model-discovery-and-offline-behaviour) — bundled model lists, the `[CMD]` name prefix, and mixing in your own model entries
+  - [Generated catalogs](docs/TECHNICAL.md#generated-catalogs) — the model, capability, and deals data files and how they are refreshed
+  - [Deals intelligence](docs/TECHNICAL.md#deals-intelligence) — where allowances, benchmarks, and deals come from, and what happens when they are unavailable
+  - [Reasoning support](docs/TECHNICAL.md#reasoning-support) — how thinking-effort levels reach the model
+  - [Image input](docs/TECHNICAL.md#image-input) — which models accept images
+  - [Pricing display](docs/TECHNICAL.md#pricing-display) — why some models show `$0` in OpenCode
+  - [Environment variables](docs/TECHNICAL.md#environment-variables) — credentials, plan pinning, and test/mock overrides
+  - [Development and testing](docs/TECHNICAL.md#development-and-testing) — build, test, and end-to-end commands
+  - [Troubleshooting](docs/TECHNICAL.md#troubleshooting) — deeper fixes when the table above is not enough
+  - [Design records](docs/TECHNICAL.md#design-records) — every design decision, one line each
 - **[CHANGELOG.md](CHANGELOG.md)** — what changed in each release.
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** and **[RELEASE.md](RELEASE.md)** — for
   contributors and maintainers.
