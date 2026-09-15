@@ -988,6 +988,49 @@ run([
     },
   ],
   [
+    "provider: Claude requests carry one ephemeral cache breakpoint on the system prefix (issue #177)",
+    async () => {
+      // Measured live (2026-09-16): a flat system string re-billed the whole
+      // ~7k prefix on every turn (7015 fresh input, 0 cache reads), while the
+      // same prefix sent as a system block array with `cache_control` wrote
+      // 7142 tokens cold and read them back warm for 13 fresh tokens. The
+      // breakpoint is what makes the prefix reusable. The legacy
+      // `/alpha/generate` body keeps its plain-string `params.system`, pinned
+      // in tests/provider-parity.test.ts — the gateway injects its own 1h
+      // breakpoint there, so the port would be inert.
+      await withEnv("pro", async () => {
+        let bodyMsg: Record<string, unknown> | undefined
+        const mock = await startMockCc({
+          messagesStream: [anthropicContentBlockDelta("hi"), anthropicMessageDelta()],
+          onMessages: (b) => {
+            bodyMsg = b
+          },
+        })
+        try {
+          await collect(
+            createCommandCode({ apiKey: "k", baseURL: mock.url }).languageModel("claude-sonnet-5"),
+            [
+              { role: "system", content: "You are a test." },
+              { role: "user", content: "hi" },
+            ],
+          )
+          assertEqual(mock.hits.messages, 1)
+          assertEqual(bodyMsg?.system, [
+            { type: "text", text: "You are a test.", cache_control: { type: "ephemeral" } },
+          ])
+          // Exactly one breakpoint, on the system prefix: no message is
+          // cache-marked, so history caching stays out of scope (#177).
+          assert(
+            !JSON.stringify(bodyMsg?.messages).includes("cache_control"),
+            "no breakpoint in messages",
+          )
+        } finally {
+          await mock.close()
+        }
+      })
+    },
+  ],
+  [
     "provider: plan override via providerOptions (commandcode.plan) and per-model options",
     async () => {
       // without env, but via providerOptions

@@ -696,8 +696,9 @@ function buildOpenAIBody(options: ProviderRequestOptions): Record<string, unknow
 /**
  * Anthropic Messages body for POST /provider/v1/messages.
  * Docs: https://commandcode.ai/docs/provider — follows Anthropic schema; system is
- * top-level string (not in messages), stream:true, max_tokens required (we default/cap 64k).
- * reasoning_effort same CLI extension as OpenAI path.
+ * top-level (a content-block array, not in messages), stream:true, max_tokens
+ * required (we default/cap 64k). reasoning_effort same CLI extension as OpenAI
+ * path.
  */
 function buildAnthropicBody(options: ProviderRequestOptions): Record<string, unknown> {
   const prompt = options.prompt ?? []
@@ -710,7 +711,16 @@ function buildAnthropicBody(options: ProviderRequestOptions): Record<string, unk
     stream: true,
     messages,
   }
-  if (system) body.system = system
+  if (system) {
+    // One ephemeral cache breakpoint on the system prefix (issue #177). The
+    // cache is prefix-based, so the system block is the stable head every turn
+    // shares; without a breakpoint Anthropic re-bills the whole prefix as fresh
+    // input (measured: 7015 fresh tokens per turn, 0 cache reads). Mirrors the
+    // CLI's `toWireSystem()`. Deliberately not on the legacy `/alpha/generate`
+    // path: that gateway injects its own 1h breakpoint and replaces this
+    // 5-minute one, so the port would be inert (docs/TECHNICAL.md).
+    body.system = [{ type: "text", text: system, cache_control: { type: "ephemeral" } }]
+  }
   if (options.tools) {
     const t = anthropicTools(options.tools)
     if (t) body.tools = t

@@ -6,9 +6,11 @@
 //      format (golden captured from the 6df7653 baseline; volatile fields
 //      normalized) — both doStream and doGenerate.
 //   2. Non-Go sessions never emit /alpha/generate (whole-session fetch spy).
-//   3. Shared layers — tools, images, system prompt, max_tokens, reasoning,
-//      cost, redaction, retry/timeout/abort — behave identically on both
-//      transports (legacy /alpha/generate vs Provider API /provider/v1/*).
+//   3. Shared layers — tools, images, system prompt text, max_tokens,
+//      reasoning, cost, redaction, retry/timeout/abort — behave identically on
+//      both transports (legacy /alpha/generate vs Provider API /provider/v1/*).
+//      The Anthropic system block additionally carries the ephemeral cache
+//      breakpoint (issue #177), which is provider-path-only by design.
 import { createCommandCode } from "../src/provider/index.js"
 import {
   anthropicContentBlockDelta,
@@ -652,8 +654,11 @@ run([
     },
   ],
   [
-    "parity: system prompt lands identically on all three transports",
+    "parity: the same system prompt text lands on all three transports",
     async () => {
+      // The text is shared; the wire shape is not. The Provider API's Anthropic
+      // body wraps it in the cache-breakpoint block (issue #177), while the
+      // legacy body keeps its plain string.
       // legacy params.system
       {
         const { fetch, calls } = makeSpy((call) => {
@@ -681,10 +686,14 @@ run([
         assertEqual(oa.messages[0].content, "You are a test.")
         await collect(provider.languageModel("claude-sonnet-5"), { prompt: SYSTEM_PROMPT })
         const ant = calls.find((c) => c.url.includes("/messages"))!.body as {
-          system: unknown
+          system: Array<{ type: string; text: string; cache_control?: { type: string } }>
           messages: Array<{ role: string }>
         }
-        assertEqual(ant.system, "You are a test.")
+        // The same text lands on the Anthropic transport, wrapped in the block
+        // that carries the cache breakpoint (issue #177): parity is about the
+        // prompt text, and the breakpoint is provider-path-only.
+        assertEqual(ant.system.map((block) => block.text).join("\n"), "You are a test.")
+        assertEqual(ant.system[0].cache_control, { type: "ephemeral" })
         assert(
           !ant.messages.some((m) => m.role === "system"),
           "no system role in anthropic messages",

@@ -189,6 +189,21 @@ from user messages and tool results are forwarded in Command Code's data-URL wir
 format; text-only models reject image content before making a network request
 rather than silently dropping it.
 
+## Claude prompt caching
+
+Claude requests through the Provider API (`POST /provider/v1/messages`) send the
+system prompt as a content-block array carrying one ephemeral cache breakpoint
+(`cache_control: { type: "ephemeral" }`), mirroring the official CLI's
+`toWireSystem()`. Anthropic's cache is prefix-based, and the system block is the
+stable head every turn shares: with the breakpoint a repeated ~7k-token prefix
+reads back as `cache_read_input_tokens` (~99%) instead of being re-billed as
+fresh input — live-measured 7015 fresh tokens per turn without it, against 13
+fresh + 7142 cached with it. Only the system prefix is marked; caching message
+history (a rolling breakpoint) is a separate product decision and is not
+requested. The legacy `/alpha/generate` body keeps its plain-string system
+prompt: that gateway injects its own 1-hour breakpoint and replaces the client's
+5-minute one, so the port would be inert.
+
 ## Pricing display
 
 The Command Code Provider API does not include prices in its model catalog, so

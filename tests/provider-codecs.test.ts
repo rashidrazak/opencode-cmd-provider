@@ -40,7 +40,7 @@ run([
     },
   ],
   [
-    "Anthropic: prompt → Messages body has stream:true and system top-level",
+    "Anthropic: prompt → Messages body has stream:true and one cached system block",
     () => {
       const prompt = [
         { role: "system", content: "you are helpful" },
@@ -49,9 +49,21 @@ run([
       const body = messagesToAnthropic(prompt, { model: "claude-sonnet-5" }) as any
       assertEqual(body.model, "claude-sonnet-5")
       assertEqual(body.stream, true)
-      assertEqual(body.system, "you are helpful")
+      // The system prefix is a content block carrying one ephemeral cache
+      // breakpoint: without it every turn re-bills the whole prefix as fresh
+      // input (issue #177).
+      assertEqual(body.system, [
+        { type: "text", text: "you are helpful", cache_control: { type: "ephemeral" } },
+      ])
       assert(Array.isArray(body.messages), "messages array")
       assert(!body.messages.some((m: any) => m.role === "system"), "no system in messages")
+
+      // No system prompt at all → no `system` field, not an empty block array.
+      const withoutSystem = messagesToAnthropic(
+        [{ role: "user", content: [{ type: "text", text: "hi" }] }] as any,
+        { model: "claude-sonnet-5" },
+      ) as any
+      assert(!("system" in withoutSystem), "no system field without a system prompt")
     },
   ],
   [
@@ -112,7 +124,8 @@ run([
         "openAI system flattened",
       )
       const ant = messagesToAnthropic(prompt, { model: "claude-sonnet-5" }) as any
-      assert(ant.system.includes("sys A") && ant.system.includes("sys B"), "anthropic system")
+      const antSystem = ant.system.map((block: any) => block.text).join("\n")
+      assert(antSystem.includes("sys A") && antSystem.includes("sys B"), "anthropic system")
     },
   ],
   [

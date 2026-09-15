@@ -212,6 +212,7 @@ nothing else to clean up.
   - [Deals intelligence](docs/TECHNICAL.md#deals-intelligence) — where allowances, benchmarks, and deals come from, and what happens when they are unavailable
   - [Reasoning support](docs/TECHNICAL.md#reasoning-support) — how thinking-effort levels reach the model
   - [Image input](docs/TECHNICAL.md#image-input) — which models accept images
+  - [Claude prompt caching](docs/TECHNICAL.md#claude-prompt-caching) — how repeated Claude turns reuse a cached prefix instead of re-billing it
   - [Pricing display](docs/TECHNICAL.md#pricing-display) — why some models show `$0` in OpenCode
   - [Environment variables](docs/TECHNICAL.md#environment-variables) — credentials, plan pinning, and test/mock overrides
   - [Development and testing](docs/TECHNICAL.md#development-and-testing) — build, test, and end-to-end commands
