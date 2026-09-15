@@ -11,6 +11,7 @@ import {
   ccEventToStreamPart,
   ccUsageToAiSdkUsage,
   openAIUsageToAiSdkUsage,
+  anthropicUsageToAiSdkUsage,
   createOpenAIStreamParser,
   createAnthropicStreamParser,
 } from "../src/provider/stream.js"
@@ -357,6 +358,60 @@ run([
         cacheRead: 700,
         cacheWrite: 0,
       })
+    },
+  ],
+
+  [
+    "anthropicUsageToAiSdkUsage treats input_tokens as cache-exclusive (issue #178)",
+    () => {
+      // Live /provider/v1/messages (2026-09-16): the cached prefix sits outside
+      // `input_tokens`, so the OpenAI-style arithmetic reported `total 13,
+      // noCache 0` for a 7155-token prompt — the fresh 13 collapsed into the
+      // cache bucket and the turn under-reported. @ai-sdk/anthropic maps
+      // `total = input + cacheWrite + cacheRead`, `noCache = input`.
+      assertEqual(
+        anthropicUsageToAiSdkUsage({
+          input_tokens: 13,
+          cache_creation_input_tokens: 7142,
+          output_tokens: 5,
+        })?.inputTokens,
+        { total: 7155, noCache: 13, cacheRead: 0, cacheWrite: 7142 },
+      )
+      assertEqual(
+        anthropicUsageToAiSdkUsage({
+          input_tokens: 13,
+          cache_read_input_tokens: 7142,
+          output_tokens: 5,
+        })?.inputTokens,
+        { total: 7155, noCache: 13, cacheRead: 7142, cacheWrite: 0 },
+      )
+    },
+  ],
+
+  [
+    "the same cached prompt maps to the same usage from either provider shape (issues #158, #178)",
+    () => {
+      // A 7618-token prompt that is 7296-cached. The two providers report it
+      // with different arithmetic — OpenAI's prompt_tokens is inclusive,
+      // Anthropic's input_tokens is not — and both must land on the same AI SDK
+      // usage, which is what the cost path bills.
+      const expected = { total: 7618, noCache: 322, cacheRead: 7296, cacheWrite: 0 }
+      assertEqual(
+        openAIUsageToAiSdkUsage({
+          prompt_tokens: 7618,
+          completion_tokens: 8,
+          prompt_tokens_details: { cached_tokens: 7296 },
+        })?.inputTokens,
+        expected,
+      )
+      assertEqual(
+        anthropicUsageToAiSdkUsage({
+          input_tokens: 322,
+          cache_read_input_tokens: 7296,
+          output_tokens: 8,
+        })?.inputTokens,
+        expected,
+      )
     },
   ],
 

@@ -666,6 +666,78 @@ run([
     },
   ],
   [
+    "provider: Anthropic transport maps cache-exclusive input_tokens to a cache-inclusive total (issue #178)",
+    async () => {
+      // Live /provider/v1/messages (2026-09-16): Anthropic reports
+      // `input_tokens` *excluding* the cached prefix, so the shared OpenAI-style
+      // arithmetic (which assumes an inclusive prompt total) collapsed
+      // `noCache` to 0 and reported only the fresh remainder as the whole
+      // prompt. @ai-sdk/anthropic maps `total = input + cacheWrite + cacheRead`,
+      // `noCache = input`.
+      const rates = { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 }
+      const cases = [
+        {
+          label: "warm cache read",
+          usage: { input_tokens: 322, cache_read_input_tokens: 7296, output_tokens: 8 },
+          expected: {
+            inputTokens: { total: 7618, noCache: 322, cacheRead: 7296, cacheWrite: 0 },
+            outputTokens: { total: 8, text: 8, reasoning: 0 },
+          },
+        },
+        {
+          label: "cold cache write",
+          usage: { input_tokens: 4, cache_creation_input_tokens: 1885, output_tokens: 2 },
+          expected: {
+            inputTokens: { total: 1889, noCache: 4, cacheRead: 0, cacheWrite: 1885 },
+            outputTokens: { total: 2, text: 2, reasoning: 0 },
+          },
+        },
+      ]
+      for (const { label, usage, expected } of cases) {
+        const mock = await startMockCc({
+          messagesStream: [
+            { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+            anthropicContentBlockDelta("Cached"),
+            { type: "content_block_stop", index: 0 },
+            anthropicMessageDelta(usage),
+            { type: "message_stop" },
+          ],
+        })
+        try {
+          const parts = await collect(
+            createCommandCode({ apiKey: "k", baseURL: mock.url }).languageModel("claude-sonnet-5"),
+            [{ role: "user", content: "hi" }],
+          )
+          assertEqual(mock.hits.messages, 1)
+          const finish = parts.find((p) => p.type === "finish") as {
+            usage?: typeof expected
+          }
+          assert(finish, `${label}: finish present`)
+          assertEqual(finish.usage, expected, label)
+
+          // The defect's headline: the fresh tokens are billed at the input
+          // rate. Before the fix `noCache` was 0 and the 322 fresh tokens were
+          // dropped from the turn entirely.
+          const cu = costUsageFromAiSdkUsage(finish.usage as never)
+          calculateCommandCodeCost({ cost: rates }, cu)
+          const trueCost =
+            (expected.inputTokens.noCache / 1_000_000) * rates.input +
+            (expected.outputTokens.total / 1_000_000) * rates.output +
+            (expected.inputTokens.cacheRead / 1_000_000) * rates.cacheRead +
+            (expected.inputTokens.cacheWrite / 1_000_000) * rates.cacheWrite
+          assertEqual(cu.cost.total.toFixed(8), trueCost.toFixed(8), `${label}: billed`)
+          const underReported =
+            (expected.outputTokens.total / 1_000_000) * rates.output +
+            (expected.inputTokens.cacheRead / 1_000_000) * rates.cacheRead +
+            (expected.inputTokens.cacheWrite / 1_000_000) * rates.cacheWrite
+          assert(cu.cost.total > underReported, `${label}: fresh input is billed`)
+        } finally {
+          await mock.close()
+        }
+      }
+    },
+  ],
+  [
     "provider: doGenerate non-streaming returns same content/usage/cost as doStream aggregated",
     async () => {
       await withEnv("max", async () => {

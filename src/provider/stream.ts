@@ -205,15 +205,28 @@ function extractUsageTokens(
   return { input, output, cacheRead, cacheWrite }
 }
 
-function usageToAiSdk(usage: unknown): LanguageModelV3Usage | undefined {
+/**
+ * How a provider's prompt total relates to the cached prefix it reports.
+ * OpenAI's `prompt_tokens` already counts the cached tokens; Anthropic's
+ * `input_tokens` counts only the fresh remainder (#158, #178).
+ */
+type InputTokenAccounting = "cache-inclusive" | "cache-exclusive"
+
+function usageToAiSdk(
+  usage: unknown,
+  inputAccounting: InputTokenAccounting,
+): LanguageModelV3Usage | undefined {
   const tokens = extractUsageTokens(usage)
   if (!tokens) return undefined
-  const totalInput = tokens.input
-  const noCache = Math.max(0, totalInput - tokens.cacheRead - tokens.cacheWrite)
+  // `total` is cache-inclusive by AI SDK v3 convention and `noCache` is the
+  // fresh remainder, whichever way the provider reports its prompt total.
+  const cacheInclusive = inputAccounting === "cache-inclusive"
   return {
     inputTokens: {
-      total: totalInput,
-      noCache,
+      total: cacheInclusive ? tokens.input : tokens.input + tokens.cacheRead + tokens.cacheWrite,
+      noCache: cacheInclusive
+        ? Math.max(0, tokens.input - tokens.cacheRead - tokens.cacheWrite)
+        : tokens.input,
       cacheRead: tokens.cacheRead,
       cacheWrite: tokens.cacheWrite,
     },
@@ -233,19 +246,29 @@ function deltaFromChoice(choice: Record<string, unknown>): Record<string, unknow
   return isRecord(delta) ? delta : undefined
 }
 
-export function openAIUsageToAiSdkUsage(
-  event: Record<string, unknown>,
-): LanguageModelV3Usage | undefined {
-  // event may be the full chunk or just the usage object
-  const usage = event.usage ?? event
-  return usageToAiSdk(usage)
+/** The usage object inside an event, or the value itself when it already is
+ * one: these mappers accept either ("event may be the full chunk or just the
+ * usage object"). */
+function usageArgOf(eventOrUsage: unknown): unknown {
+  return isRecord(eventOrUsage) ? (eventOrUsage.usage ?? eventOrUsage) : eventOrUsage
 }
 
-export function anthropicUsageToAiSdkUsage(
-  event: Record<string, unknown>,
-): LanguageModelV3Usage | undefined {
-  const usage = event.usage ?? event
-  return usageToAiSdk(usage)
+/**
+ * Maps OpenAI-shape usage: `prompt_tokens` counts the cached prefix
+ * (`prompt_tokens_details.cached_tokens`), so the fresh remainder is derived by
+ * subtracting it (issue #158).
+ */
+export function openAIUsageToAiSdkUsage(event: unknown): LanguageModelV3Usage | undefined {
+  return usageToAiSdk(usageArgOf(event), "cache-inclusive")
+}
+
+/**
+ * Maps Anthropic-shape usage: `input_tokens` excludes the cached prefix, so
+ * the cache-inclusive total the AI SDK expects is the sum of all three buckets
+ * and `noCache` is `input_tokens` itself (issue #178).
+ */
+export function anthropicUsageToAiSdkUsage(event: unknown): LanguageModelV3Usage | undefined {
+  return usageToAiSdk(usageArgOf(event), "cache-exclusive")
 }
 
 // --- Shared stream-part constructors ---
@@ -301,7 +324,7 @@ export function openAIEventToStreamPart(event: unknown): LanguageModelV3StreamPa
   // Extract usage if present (terminal chunk)
   const rawUsage = (event as Record<string, unknown>).usage
   const hasUsage = rawUsage !== undefined && rawUsage !== null
-  const usage = hasUsage ? usageToAiSdk(rawUsage) : undefined
+  const usage = hasUsage ? openAIUsageToAiSdkUsage(rawUsage) : undefined
 
   // Determine finish reason
   const choice = firstChoice(event as Record<string, unknown>)
@@ -401,7 +424,7 @@ export function anthropicEventToStreamPart(event: unknown): LanguageModelV3Strea
   if (type === "message_delta") {
     const delta = asRecord(event.delta)
     const stopReason = stringValue(delta?.stop_reason) ?? stringValue(delta?.stopReason) ?? "stop"
-    return [finishPart(mapFinishReason(stopReason), usageToAiSdk(event.usage))]
+    return [finishPart(mapFinishReason(stopReason), anthropicUsageToAiSdkUsage(event))]
   }
 
   // Alternative terminal: { type: "message_stop" } without usage — emit generic finish.
@@ -417,7 +440,7 @@ export function anthropicEventToStreamPart(event: unknown): LanguageModelV3Strea
 
   // Fallback: check for usage at top level without type (some providers send final usage as top-level)
   if (event.usage !== undefined) {
-    const usage = usageToAiSdk(event.usage)
+    const usage = anthropicUsageToAiSdkUsage(event)
     if (usage) {
       return [
         finishPart(
@@ -633,7 +656,7 @@ export function createOpenAIStreamParser(): StreamEventParser {
       // The usage-only trailing chunk carries no finish_reason; reuse the one
       // captured from the finish_reason chunk so the real reason survives.
       const reason = finishReason ?? lastFinishReason
-      parts.push(finishPart(reason, hasUsage ? usageToAiSdk(rawUsage) : undefined))
+      parts.push(finishPart(reason, hasUsage ? openAIUsageToAiSdkUsage(rawUsage) : undefined))
     }
     return parts
   }
