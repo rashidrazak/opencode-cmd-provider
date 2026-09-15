@@ -19,7 +19,7 @@ import {
 } from "./helpers/mock-cc.js"
 import { projectSlugFromPath } from "../src/provider/project-slug.js"
 import type { LanguageModelV3Prompt } from "../src/provider/aisdk-types.js"
-import { assert, assertEqual, run } from "./harness.js"
+import { assert, assertEqual, run, withEnvVars } from "./harness.js"
 import { calculateCommandCodeCost, costUsageFromAiSdkUsage } from "../src/provider/cost.js"
 import { MODEL_COSTS } from "../src/provider/pricing.js"
 
@@ -75,25 +75,6 @@ function dyingSseResponse(events: Array<Record<string, unknown>>): Response {
 }
 
 /** Sets/clears COMMANDCODE_* env vars for the duration of fn, restoring after. */
-function withEnvVars(
-  vars: Record<string, string | undefined>,
-  fn: () => Promise<void> | void,
-): Promise<void> {
-  const prev = new Map<string, string | undefined>()
-  for (const [key, value] of Object.entries(vars)) {
-    prev.set(key, process.env[key])
-    if (value === undefined) delete process.env[key]
-    else process.env[key] = value
-  }
-  const p = Promise.resolve().then(() => fn() as unknown as Promise<void>)
-  return p.finally(() => {
-    for (const [key, value] of prev) {
-      if (value === undefined) delete process.env[key]
-      else process.env[key] = value
-    }
-  })
-}
-
 function withEnv(plan: string | undefined, fn: () => Promise<void> | void): Promise<void> {
   return withEnvVars({ COMMANDCODE_PLAN: plan }, fn)
 }
@@ -1832,14 +1813,16 @@ run([
     },
   ],
   [
-    "transport: a finish_reason before the body ends is a complete turn, usage chunk or not (issue #170)",
+    "transport: a finish without its usage chunk fails the turn instead of reporting zeros (issues #170, #171)",
     async () => {
-      // Only a close with no terminal at all is a truncation. The Provider API
-      // reports finish_reason on the last content chunk and usage on a separate
-      // trailing chunk, so a body that stops between them has still declared the
-      // turn complete: the transport surfaces the finish it was given (zero
-      // usage) rather than a failure the provider never signalled. Losing that
-      // trailing usage chunk is the exact case the held finish exists for.
+      // #170 accepted a close between the OpenAI finish_reason chunk and its
+      // separate trailing usage-only chunk as a complete turn and surfaced the
+      // held finish with zeroed usage. #171 reverses that: the held finish was
+      // synthesized — the wire never reported the turn's usage — so emitting it
+      // claims a complete, zero-cost turn for a stream that never said what it
+      // spent. The failure is raised instead, as a truncation (retryable while
+      // nothing is visible; here the text was already consumed, so it surfaces
+      // as the error part).
       await withEnv("goat", async () => {
         const mock = await startMockCc({
           chatCompletionsStream: [
@@ -1855,14 +1838,12 @@ run([
           ])
           assertEqual(
             parts.map((p) => p.type),
-            ["text-start", "text-delta", "text-end", "finish"],
+            ["text-start", "text-delta", "text-end", "error"],
           )
-          const finish = parts[3] as {
-            finishReason: { unified: string }
-            usage: { inputTokens: { total: number } }
-          }
-          assertEqual(finish.finishReason.unified, "stop")
-          assertEqual(finish.usage.inputTokens.total, 0)
+          const failure = parts[3]!.error as Error & { status?: number }
+          assertEqual(failure.name, "MissingUsageError")
+          assertEqual(failure.status, 502)
+          assert(failure.message.includes("usage report"), failure.message)
         } finally {
           await mock.close()
         }

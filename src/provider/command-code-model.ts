@@ -34,6 +34,8 @@ import {
   ccEventIsTerminal,
   createOpenAIStreamParser,
   createAnthropicStreamParser,
+  finishCarriesReportedUsage,
+  ProviderStreamError,
   type StreamEventParser,
 } from "./stream.js"
 import { getApiBase, getCmdZdr } from "../env.js"
@@ -53,12 +55,17 @@ import {
 } from "./reasoning.js"
 import { modelSupportsImageInput } from "./modalities.js"
 import {
-  isRetryableStatus,
-  retryDelayMs,
+  classifyHttpFailure,
+  classifyStreamError,
+  retryBackoffMs,
   raceAbort,
   abortError,
   timeoutError,
   delay,
+  NETWORK_FAILURE,
+  TRUNCATION_FAILURE,
+  UPGRADE_REQUIRED_FAILURE,
+  type Failure,
 } from "./retry.js"
 import { projectSlugFromPath } from "./project-slug.js"
 
@@ -82,7 +89,17 @@ export interface CommandCodeModelOptions {
 
 const COMMAND_CODE_CLI_VERSION = "1.15.1"
 const DEFAULT_GENERATE_MAX_TOKENS = 64_000
-const DEFAULT_MAX_RETRIES = 0
+/**
+ * The plugin's own ladder is short and fast on purpose (issue #171): the hosts
+ * already run their own slower ladders outside the plugin (v1 1.18.30: 5
+ * retries, no partial-output guard; v2 2.0.3: 4 retries, hard
+ * `!outputStarted` gate), so replaying a transient failure twice here recovers
+ * the common 503/429 blip without stacking a second, host-sized wait. Upstream
+ * `command-code@1.54.0` sizes its ladder for the standalone CLI (10 attempts);
+ * this one is deliberately smaller. Override via provider `options.maxRetries`
+ * (v1) / `settings.maxRetries` (v2).
+ */
+const DEFAULT_MAX_RETRIES = 2
 const DEFAULT_MAX_RETRY_DELAY_MS = 60_000
 
 function isClaudeModel(modelId: string): boolean {
@@ -123,11 +140,18 @@ function errorStream(message: string): ReadableStream<LanguageModelV3StreamPart>
  * Internal marker (issue #56 safety net): the Provider API returned a
  * documented `403 upgrade_required` ("You're on the Go plan, the only plan
  * without API access"). The transport flips the session to the legacy
- * `/alpha/generate` transport and retries once. Never surfaced to callers.
+ * `/alpha/generate` transport and retries once. Never surfaced to callers —
+ * but it carries its failure kind like every other transport-raised error, so
+ * the vocabulary in `retry.ts` names the one failure the ladder never replays
+ * (issue #171).
  */
-class UpgradeRequiredError extends Error {
+class UpgradeRequiredError extends Error implements ClassifiedTransportError {
+  readonly transportError = true as const
+  readonly failure = UPGRADE_REQUIRED_FAILURE
+  readonly status = 403
   constructor() {
     super("Command Code Provider API requires a plan upgrade (403 upgrade_required)")
+    this.name = "UpgradeRequiredError"
   }
 }
 
@@ -141,11 +165,49 @@ interface TransportError extends Error {
   readonly transportError: true
 }
 
+/** A transport-raised error carrying the failure the ladder classifies. */
+interface ClassifiedTransportError extends TransportError {
+  readonly failure: Failure
+}
+
 function isTransportError(error: unknown): error is TransportError {
   return (
     error instanceof Error &&
     (error as Error & { transportError?: unknown }).transportError === true
   )
+}
+
+/** The classified failure behind a thrown error, when the transport raised it. */
+function failureOf(error: unknown): Failure | undefined {
+  return error instanceof Error ? (error as Partial<ClassifiedTransportError>).failure : undefined
+}
+
+/**
+ * The failure behind a caught error: the transport's own classification when it
+ * raised one, else the provider error event's own rule, else `fallback` — which
+ * the retry loop reads as a network failure, while the event loop (where only a
+ * codec error can be caught) treats its absence as fatal.
+ */
+function classifyCaught(error: unknown, fallback?: Failure): Failure | undefined {
+  return (
+    failureOf(error) ??
+    (error instanceof ProviderStreamError ? classifyStreamError(error.facts) : fallback)
+  )
+}
+
+/**
+ * A failure the transport itself classified (issue #171). The `Failure` rides
+ * on the error so the retry loop reads the cause instead of the catch site;
+ * the message is the transport's own, already redacted where it is built.
+ */
+class TransportFailureError extends Error implements ClassifiedTransportError {
+  readonly transportError = true as const
+  readonly failure: Failure
+  constructor(message: string, failure: Failure) {
+    super(message)
+    this.name = "TransportFailureError"
+    this.failure = failure
+  }
 }
 
 /**
@@ -156,8 +218,9 @@ function isTransportError(error: unknown): error is TransportError {
  * upstream `command-code@1.54.0` verbatim, and `name`/`status` ride on the
  * Error because an AI SDK v3 `error` part carries nothing else.
  */
-class TruncatedStreamError extends Error implements TransportError {
+class TruncatedStreamError extends Error implements ClassifiedTransportError {
   readonly transportError = true as const
+  readonly failure = TRUNCATION_FAILURE
   readonly status = 502
   constructor() {
     // Redacted where it is built, so `fail` may surface the instance as-is even
@@ -171,6 +234,28 @@ class TruncatedStreamError extends Error implements TransportError {
   }
 }
 
+/**
+ * The stream declared a finish but never reported the turn's usage: an OpenAI
+ * `finish_reason` chunk arrived and the trailing usage-only chunk never did.
+ * Emitting that held finish would report a complete turn at zero cost, so the
+ * failure is raised instead — retryable while nothing is visible, exactly like
+ * a truncation, since the body cannot be trusted to have ended the turn
+ * (issue #171).
+ */
+class MissingUsageError extends Error implements ClassifiedTransportError {
+  readonly transportError = true as const
+  readonly failure = TRUNCATION_FAILURE
+  readonly status = 502
+  constructor() {
+    super(
+      redactCommandCodeErrorText(
+        "Stream ended before the usage report arrived (no usage chunk) — response was truncated",
+      ),
+    )
+    this.name = "MissingUsageError"
+  }
+}
+
 /** One transport pass: endpoint, body, headers, event mapper, and whether a
  * documented `403 upgrade_required` on this endpoint flips the session to the
  * legacy transport. Only the Provider API descriptor flips; the legacy
@@ -180,18 +265,32 @@ class TruncatedStreamError extends Error implements TransportError {
 interface TransportDescriptor {
   url: string
   bodyStr: string
-  headers: Record<string, string>
-  eventToParts: (event: unknown) => LanguageModelV3StreamPart[]
-  /** Closes the parts a stateful parser still has open when the stream ends
-   * without a finish part (a mid-stream error, an abort, a truncated body —
-   * issue #72); the legacy codec holds no per-stream state and omits it. */
-  closeStream?: () => LanguageModelV3StreamPart[]
+  /** Rebuilt for every attempt, so a credential rotated mid-ladder is picked
+   * up by the next request (issue #171 — the Authorization header is not a
+   * per-stream constant any more). */
+  headersFor: () => Record<string, string>
+  /** A parser per attempt: a replay is a new stream, so per-stream state (block
+   * lifecycles, tool buffers, the OpenAI last finish reason) must not cross
+   * attempts (issue #171 — the ladder can newly replay after a synthesized
+   * finish, a state the "nothing follows a terminal" invariant never left
+   * room for). */
+  createParser: () => StreamEventParser
   /** True for events that end this transport's stream without a finish part —
    * the legacy `{"type":"abort"}` terminal. A close after one is not a
    * truncation, the parts still open are closed, and no finish is fabricated
    * for it (issue #170); the Provider API descriptors omit it. */
   isTerminalEvent?: (event: unknown) => boolean
   flipOnUpgradeRequired: boolean
+}
+
+/** The legacy codec holds no per-stream state: its "parser" is the stateless
+ * mapper, wrapped so every attempt gets an independent one (issue #171). */
+function statelessParser(
+  mapper: (event: unknown) => LanguageModelV3StreamPart[],
+): StreamEventParser {
+  const parse = ((event: unknown) => mapper(event)) as StreamEventParser
+  parse.closeStream = () => []
+  return parse
 }
 
 export class CommandCodeLanguageModel implements LanguageModelV3 {
@@ -304,21 +403,9 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
     options: ModelCallOptions,
   ): Promise<{ stream: ReadableStream<LanguageModelV3StreamPart>; error?: unknown }> {
     if (this.shouldUseProviderTransport(options)) {
-      const isClaude = isClaudeModel(this.modelId)
-      const body = this.providerBodyFor(options, isClaude)
-      const headers = this.providerHeadersFor(options)
-      return {
-        stream: this.providerRunStream(body, headers, options.abortSignal, options, isClaude),
-      }
+      return { stream: this.providerRunStream(options, isClaudeModel(this.modelId)) }
     }
-    return {
-      stream: this.runStream(
-        this.bodyFor(options),
-        this.headersFor(options),
-        options.abortSignal,
-        options,
-      ),
-    }
+    return { stream: this.runStream(options) }
   }
 
   /**
@@ -344,18 +431,9 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
     const parts: LanguageModelV3StreamPart[] = []
     let stream: ReadableStream<LanguageModelV3StreamPart>
     if (this.shouldUseProviderTransport(options)) {
-      const isClaude = isClaudeModel(this.modelId)
-      const body = this.providerBodyFor(options, isClaude)
-      const headers = this.providerHeadersFor(options)
-      stream = this.providerRunStream(body, headers, options.abortSignal, options, isClaude, parts)
+      stream = this.providerRunStream(options, isClaudeModel(this.modelId), parts)
     } else {
-      stream = this.runStream(
-        this.bodyFor(options),
-        this.headersFor(options),
-        options.abortSignal,
-        options,
-        parts,
-      )
+      stream = this.runStream(options, parts)
     }
     const reader = stream.getReader()
     for (;;) {
@@ -495,21 +573,12 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
   }
 
   private providerRunStream(
-    body: unknown,
-    headers: Record<string, string>,
-    signal: AbortSignal | undefined,
     options: ModelCallOptions,
     isClaude: boolean,
     sink?: LanguageModelV3StreamPart[],
   ): ReadableStream<LanguageModelV3StreamPart> {
     const url = this.providerEndpoint()
-    const bodyStr = JSON.stringify(body)
-    // Per-stream stateful parsers complete tool calls whose arguments arrive
-    // across multiple SSE events (issue #55 tool-call parity); the stateless
-    // mappers are kept for direct codec use.
-    const parser: StreamEventParser = isClaude
-      ? createAnthropicStreamParser()
-      : createOpenAIStreamParser()
+    const bodyStr = JSON.stringify(this.providerBodyFor(options, isClaude))
     // Safety net (issue #56): a documented `403 upgrade_required` pins this
     // session to the legacy transport and retries the same call once via
     // POST {base}/alpha/generate with the legacy CLI wire format. The legacy
@@ -517,8 +586,8 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
     const legacyFallback: TransportDescriptor = {
       url: `${this.apiBase()}/alpha/generate`,
       bodyStr: JSON.stringify(this.bodyFor(options)),
-      headers: this.headersFor(options),
-      eventToParts: ccEventToStreamPart,
+      headersFor: () => this.headersFor(options),
+      createParser: () => statelessParser(ccEventToStreamPart),
       isTerminalEvent: ccEventIsTerminal,
       flipOnUpgradeRequired: false,
     }
@@ -526,36 +595,33 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
       {
         url,
         bodyStr,
-        headers,
-        eventToParts: parser,
-        closeStream: () => parser.closeStream(),
+        headersFor: () => this.providerHeadersFor(options),
+        // Per-stream stateful parsers complete tool calls whose arguments
+        // arrive across multiple SSE events (issue #55 tool-call parity); the
+        // stateless mappers are kept for direct codec use.
+        createParser: isClaude ? createAnthropicStreamParser : createOpenAIStreamParser,
         flipOnUpgradeRequired: true,
       },
-      signal,
+      options.abortSignal,
       sink,
       legacyFallback,
     )
   }
 
   private runStream(
-    body: unknown,
-    headers: Record<string, string>,
-    signal: AbortSignal | undefined,
     options: ModelCallOptions,
     sink?: LanguageModelV3StreamPart[],
   ): ReadableStream<LanguageModelV3StreamPart> {
-    const url = `${this.apiBase()}/alpha/generate`
-    const bodyStr = JSON.stringify(body)
     return this.transportStream(
       {
-        url,
-        bodyStr,
-        headers,
-        eventToParts: ccEventToStreamPart,
+        url: `${this.apiBase()}/alpha/generate`,
+        bodyStr: JSON.stringify(this.bodyFor(options)),
+        headersFor: () => this.headersFor(options),
+        createParser: () => statelessParser(ccEventToStreamPart),
         isTerminalEvent: ccEventIsTerminal,
         flipOnUpgradeRequired: false,
       },
-      signal,
+      options.abortSignal,
       sink,
     )
   }
@@ -649,16 +715,26 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
           let heldFinish: Extract<LanguageModelV3StreamPart, { type: "finish" }> | undefined
           /** Set once the stream saw a terminal event: a finish held for
            * emission, or a terminal that carries no finish part (the legacy
-           * `abort`). Nothing resets it — a retry is unreachable after one. */
+           * `abort`). Cleared when a synthesized finish is replayed — nothing
+           * else can follow a terminal (issues #170, #171). */
           let terminalSeen = false
           /** Set by a terminal that carries no finish part: it ends the turn
            * *and* the read, since nothing after it belongs to the turn. */
           let terminalEndsRead = false
-          /** Closes the parts a stateful parser still has open — the last thing
-           * the consumer sees before an error part ends the stream, or before
-           * the clean end of a terminal that carries no finish (issue #170). */
+          /** True once the turn is settled the way the transport accepts it: a
+           * terminal was seen and, when it was a `finish`, the finish carried
+           * the provider's usage report. A finish whose usage the codec
+           * synthesized does not settle the turn, so the ladder may still
+           * replay the request while nothing is visible (issue #171). */
+          const turnSettled = (): boolean =>
+            terminalSeen && (heldFinish === undefined || finishCarriesReportedUsage(heldFinish))
+          /** The parts a stateful parser still has open — the last thing the
+           * consumer sees before an error part ends the stream, or before the
+           * clean end of a terminal that carries no finish (issue #170). Reads
+           * the current attempt's parser, replaced at every attempt. */
+          let parser: StreamEventParser | undefined
           const closeOpenParts = () => {
-            for (const part of t.closeStream?.() ?? []) emit(part)
+            for (const part of parser?.closeStream() ?? []) emit(part)
           }
           /** Handles one SSE event, recording the terminal it declared: a
            * `finish` held for emission (the read keeps draining for a trailing
@@ -666,9 +742,9 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
            * read together — nothing after the legacy `abort` belongs to the
            * turn. A mapper error ends the stream through `fail`. */
           const handleEvent = (event: unknown): void => {
-            if (!isRecord(event)) return
+            if (!isRecord(event) || parser === undefined) return
             try {
-              const parts = t.eventToParts(event)
+              const parts = parser(event)
               for (const part of parts) {
                 if (part.type === "finish") {
                   heldFinish = part
@@ -679,8 +755,14 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
               if (t.isTerminalEvent?.(event) ?? false) terminalEndsRead = true
               if (terminalEndsRead || heldFinish !== undefined) terminalSeen = true
             } catch (streamError) {
-              // The mapper threw on the event that failed the stream: close what
-              // it opened before the error part ends the stream (issue #72).
+              // The mapper threw on an error event. A failure the event itself
+              // flagged as retryable leaves through the ladder — the read
+              // loop's catch replays the request while nothing is visible
+              // (issue #171) — while a fatal one is surfaced here, after
+              // closing the parts this stream left open so the error part
+              // stays last (issue #72).
+              const failure = classifyCaught(streamError)
+              if (failure?.retryable) throw streamError
               closeOpenParts()
               fail(streamError)
               terminalSeen = true
@@ -695,6 +777,11 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
             if (signal?.aborted) throw abortError("Aborted")
             let response!: Response
             retryLoop: for (let attempt = 0; ; attempt++) {
+              // A fresh parser: a replay is a new stream, and the previous
+              // attempt's per-stream state (open blocks, tool buffers, the
+              // OpenAI last finish reason) belongs to a response this one
+              // replaces (issue #171).
+              parser = t.createParser()
               const attemptController = new AbortController()
               let attemptTimedOut = false
               let attemptTimeoutId: ReturnType<typeof setTimeout> | undefined
@@ -724,35 +811,20 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
                 try {
                   response = await fetchImpl(t.url, {
                     method: "POST",
-                    headers: t.headers,
+                    // Rebuilt per attempt (issue #171): a credential or header
+                    // rotated mid-ladder is picked up by the next request.
+                    headers: t.headersFor(),
                     body: t.bodyStr,
                     signal: attemptController.signal,
                   })
                 } catch (fetchError: unknown) {
                   if (controller.signal.aborted) throw abortError("Aborted")
-                  if (attemptTimedOut) {
-                    if (attempt < maxRetries) continue retryLoop
-                    throw timeoutError(timeoutMs)
-                  }
                   throw fetchError
                 }
 
-                // --- HTTP-level retry ---
-                if (!response.ok && isRetryableStatus(response.status)) {
-                  const retryAfter = response.headers.get("retry-after")
-                  const waitMs = retryDelayMs(attempt, retryAfter, maxRetryDelayMs)
-                  if (waitMs < 0) {
-                    throw new Error(
-                      `Command Code API error ${response.status}: Retry-After delay exceeds max retry delay`,
-                    )
-                  }
-                  if (attempt < maxRetries) {
-                    await response.text().catch(() => "")
-                    if (waitMs > 0) await delay(waitMs, controller.signal)
-                    continue retryLoop
-                  }
-                }
-
+                // One failure vocabulary for every non-OK response: the
+                // classification decides replay vs. surface, and the response's
+                // own Retry-After is only ever its wait (issue #171).
                 if (!response.ok) {
                   const errBody = await raceAttempt(response.text().catch(() => ""))
                   let parsedBody: unknown
@@ -775,11 +847,22 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
                   ) {
                     throw new UpgradeRequiredError()
                   }
+                  const failure = classifyHttpFailure({
+                    status: response.status,
+                    body: parsedBody,
+                    retryAfter: response.headers.get("retry-after"),
+                    maxDelayMs: maxRetryDelayMs,
+                  })
                   const safeBody = redactCommandCodeErrorText(errBody).slice(0, 500)
                   const detail = redactCommandCodeErrorText(
                     errorDetail ?? (safeBody || "Provider returned an error"),
                   )
-                  throw new Error(`Command Code API error ${response.status}: ${detail}`)
+                  throw new TransportFailureError(
+                    failure.kind === "retry-after-cap"
+                      ? `Command Code API error ${response.status}: Retry-After delay exceeds max retry delay`
+                      : `Command Code API error ${response.status}: ${detail}`,
+                    failure,
+                  )
                 }
 
                 // --- Read response stream ---
@@ -791,7 +874,7 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
 
                 readLoop: for (;;) {
                   if (controller.signal.aborted) throw abortError("Aborted")
-                  const { done, value } = await raceAbort(reader.read(), attemptController.signal)
+                  const { done, value } = await raceAttempt(reader.read())
                   if (done) {
                     if (!closed && buffer.trim()) handleEvent(parseStreamEventLine(buffer))
                     break
@@ -821,12 +904,24 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
                 // clean close without one is a truncated response and must not
                 // look like a successful stop (issue #170).
                 if (!terminalSeen && !closed) throw new TruncatedStreamError()
+                // A finish the codec had to synthesize carries no usage report:
+                // it came from an OpenAI `finish_reason` chunk whose trailing
+                // usage-only chunk never arrived, so holding it would report a
+                // complete turn at zero cost. Retryable while nothing is
+                // visible, exactly like a truncation (issue #171).
+                if (
+                  !closed &&
+                  heldFinish !== undefined &&
+                  !finishCarriesReportedUsage(heldFinish)
+                ) {
+                  throw new MissingUsageError()
+                }
                 // A finish-less terminal ends the read early, so the body may
                 // still be open: release it instead of waiting for a server that
                 // has already aborted the turn.
                 await reader.cancel().catch(() => {})
                 break retryLoop
-              } catch (streamError: unknown) {
+              } catch (caught: unknown) {
                 // Stream-level error (e.g. API returned 200 OK but sent an error
                 // event) or per-attempt timeout during stream reading.
                 await reader?.cancel().catch(() => {})
@@ -838,26 +933,52 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
                 // 403 upgrade_required is a transport flip, never a retry:
                 // fall back to the legacy transport immediately (issue #56),
                 // regardless of maxRetries.
-                if (streamError instanceof UpgradeRequiredError) throw streamError
+                if (caught instanceof UpgradeRequiredError) throw caught
 
-                if (controller.signal.aborted) throw streamError
+                if (controller.signal.aborted) throw caught
 
-                // Never retry after visible content was emitted (including
-                // timeout mid-stream, or a truncation that already delivered
-                // text): a replay would duplicate what the consumer saw. A
-                // parsed terminal also settles the decision — the terminal is in
-                // hand (issue #170).
-                const canRetry = !terminalSeen && !visibleEmitted && attempt < maxRetries
+                // The body died after an accepted terminal: the turn is already
+                // in hand — a finish that reported its usage, or a finish-less
+                // terminal — so a read failure arriving afterwards cannot change
+                // the answer. Complete the turn instead of discarding it
+                // (issue #171; the "read error after the finish part" finding it
+                // was raised from). An outer abort already left through the
+                // check above.
+                if (turnSettled() && !closed) break retryLoop
+
+                // A per-attempt timeout is a network failure, and the error it
+                // surfaces is the timeout's own wording — never the AbortError
+                // that carried it (the fetch path rejects with one; the read
+                // path is normalized by `raceAttempt`).
+                const streamError =
+                  attemptTimedOut && !isTransportError(caught)
+                    ? new TransportFailureError(timeoutError(timeoutMs).message, NETWORK_FAILURE)
+                    : caught
+
+                // The cause decides, never the catch site: a failure the
+                // transport classified carries its own kind, the provider's
+                // error event is classified from the facts it carried, and
+                // anything else is a network failure (issue #171).
+                const failure = classifyCaught(streamError) ?? NETWORK_FAILURE
+                // Replay only a failure whose own kind is transient, and never
+                // after visible content was emitted (a replay would duplicate
+                // what the consumer saw), after an accepted terminal settled
+                // the turn, or once the budget is spent (issues #170, #171).
+                const canRetry =
+                  failure.retryable && !turnSettled() && !visibleEmitted && attempt < maxRetries
                 if (canRetry) {
-                  // Nothing to carry over into the retry: reaching it means no
-                  // terminal was seen and nothing visible was emitted, so the
-                  // held finish, `terminalSeen` and `terminalEndsRead` are all
-                  // empty, and `visibleEmitted` must stay false.
-                  const waitMs = attemptTimedOut ? 0 : retryDelayMs(attempt, null, maxRetryDelayMs)
+                  // Nothing to carry over into the replay: reaching it means
+                  // nothing visible was emitted and no accepted terminal was
+                  // seen, so the attempt's terminal bookkeeping is cleared
+                  // rather than carried into the next request (a synthesized
+                  // finish is the one terminal-shaped state a retry follows).
+                  heldFinish = undefined
+                  terminalSeen = false
+                  terminalEndsRead = false
+                  const waitMs = failure.waitMs ?? retryBackoffMs(attempt, maxRetryDelayMs)
                   if (waitMs > 0) await delay(waitMs, controller.signal)
                   continue retryLoop
                 }
-                if (attemptTimedOut) throw timeoutError(timeoutMs)
                 throw streamError
               } finally {
                 controller.signal.removeEventListener("abort", onOuterAbort2)

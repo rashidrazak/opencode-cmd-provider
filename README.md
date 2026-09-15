@@ -146,6 +146,11 @@ a plan, add it to the question (for example `plan=pro`).
   Check the current
   [Command Code pricing](https://commandcode.ai/docs/resources/pricing-limits)
   before relying on the numbers.
+- **Transient failures are retried.** A dropped connection or a temporary server
+  error is replayed a couple of times before OpenCode sees a failure, so a blip
+  does not end your turn. Permanent answers — a usage-window limit, a rejected
+  request — come straight back as errors, and a turn that already streamed text
+  is never replayed.
 
 ## Keep it up to date
 

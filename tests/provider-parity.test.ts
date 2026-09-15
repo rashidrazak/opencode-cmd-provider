@@ -21,7 +21,7 @@ import {
   textDelta,
   toolCall,
 } from "./helpers/mock-cc.js"
-import { assert, assertEqual, rejects, run } from "./harness.js"
+import { assert, assertEqual, rejects, run, withEnvVars } from "./harness.js"
 import { calculateCommandCodeCost, costUsageFromAiSdkUsage } from "../src/provider/cost.js"
 import { MODEL_COSTS } from "../src/provider/pricing.js"
 import { MODEL_EFFORTS } from "../src/provider/reasoning.js"
@@ -96,25 +96,6 @@ async function collect(
 }
 
 /** Sets/clears COMMANDCODE_* env vars for the duration of fn, restoring after. */
-function withEnvVars(
-  vars: Record<string, string | undefined>,
-  fn: () => Promise<void> | void,
-): Promise<void> {
-  const prev = new Map<string, string | undefined>()
-  for (const [key, value] of Object.entries(vars)) {
-    prev.set(key, process.env[key])
-    if (value === undefined) delete process.env[key]
-    else process.env[key] = value
-  }
-  const p = Promise.resolve().then(() => fn() as unknown as Promise<void>)
-  return p.finally(() => {
-    for (const [key, value] of prev) {
-      if (value === undefined) delete process.env[key]
-      else process.env[key] = value
-    }
-  })
-}
-
 // --- Legacy wire-format golden (issue #55 acceptance 1) ---
 //
 // Captured once from the pre-51 baseline (6df7653, release 1.2.2) by running
@@ -1049,6 +1030,10 @@ run([
           fetch: neverResolvingFetch,
           plan,
           timeout: 30,
+          // The subject is the timeout's wording, not the ladder: pin the
+          // budget off so each transport answers on its first attempt (the
+          // ladder's own timeout replay is pinned in tests/provider-retry.test.ts).
+          maxRetries: 0,
         })
         const parts = await collect(provider.languageModel(modelId), {
           prompt: [{ role: "user", content: "hi" }],

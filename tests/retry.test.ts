@@ -1,21 +1,30 @@
 // tests/retry.test.ts — retry, abort and timeout helpers (PLAN #4, port of pi's
-// test-retry math tests + abort/timeout races)
+// test-retry math tests + abort/timeout races), plus the causal failure
+// classification the transport's ladder replays on (issue #171): a failure is
+// retried only when its own kind says so.
 import {
   abortError,
+  classifyHttpFailure,
+  classifyStreamError,
   delay,
+  hasTerminalErrorMarker,
   isRetryableStatus,
   parseRetryAfterSeconds,
   raceAbort,
   raceAbortWithTimeout,
-  retryDelayMs,
+  resolveUsageWindow,
+  retryAfterGate,
+  retryBackoffMs,
   timeoutError,
+  UPGRADE_REQUIRED_FAILURE,
 } from "../src/provider/retry.js"
 import { assert, assertEqual, rejects, run } from "./harness.js"
 
 run([
   [
-    "429 and 5xx are retryable",
+    "408, 429 and 5xx are retryable",
     () => {
+      assertEqual(isRetryableStatus(408), true)
       assertEqual(isRetryableStatus(429), true)
       assertEqual(isRetryableStatus(500), true)
       assertEqual(isRetryableStatus(503), true)
@@ -34,30 +43,230 @@ run([
   ],
 
   [
-    "backoff doubles with jitter capped by max",
+    "the ladder is min(10 s, max(1 s, 500 ms·2^attempt)) with no jitter",
     () => {
-      const delays = new Set<number>()
-      for (let i = 0; i < 200; i++) {
-        delays.add(retryDelayMs(0, null, 1000))
-        delays.add(retryDelayMs(1, null, 1000))
+      assertEqual(retryBackoffMs(0, 60_000), 1000)
+      assertEqual(retryBackoffMs(1, 60_000), 1000)
+      assertEqual(retryBackoffMs(2, 60_000), 2000)
+      assertEqual(retryBackoffMs(3, 60_000), 4000)
+      assertEqual(retryBackoffMs(4, 60_000), 8000)
+      assertEqual(retryBackoffMs(5, 60_000), 10_000)
+      assertEqual(retryBackoffMs(9, 60_000), 10_000)
+    },
+  ],
+
+  [
+    "maxRetryDelayMs bounds the ladder too, so a lowered cap shortens the wait",
+    () => {
+      assertEqual(retryBackoffMs(0, 0), 0)
+      assertEqual(retryBackoffMs(4, 1500), 1500)
+    },
+  ],
+
+  [
+    "Retry-After is a gate: wait, exceeds-cap, or absent",
+    () => {
+      assertEqual(retryAfterGate(null, 60_000), { kind: "none" })
+      assertEqual(retryAfterGate("abc", 60_000), { kind: "none" })
+      assertEqual(retryAfterGate("3", 60_000), { kind: "wait", waitMs: 3000 })
+      assertEqual(retryAfterGate("0", 0), { kind: "wait", waitMs: 0 })
+      assertEqual(retryAfterGate("9999", 60_000), { kind: "exceeds-cap", waitMs: 9_999_000 })
+    },
+  ],
+
+  [
+    "HTTP classification: fatal 4xx, retryable 408/429/5xx, window limits",
+    () => {
+      for (const status of [400, 401, 403, 404, 422]) {
+        assertEqual(
+          classifyHttpFailure({ status, maxDelayMs: 60_000 }),
+          { kind: "fatal-status", retryable: false, status },
+          `status ${status}`,
+        )
       }
-      for (const d of delays) {
-        assert(d >= 500 && d <= 1000, `delay ${d} out of range`)
+      assertEqual(classifyHttpFailure({ status: 408, maxDelayMs: 60_000 }), {
+        kind: "retryable-status",
+        retryable: true,
+        status: 408,
+      })
+      assertEqual(classifyHttpFailure({ status: 503, maxDelayMs: 60_000 }), {
+        kind: "retryable-status",
+        retryable: true,
+        status: 503,
+      })
+      // A plain 429 is a burst limit: transient, unlike the window limit below.
+      assertEqual(
+        classifyHttpFailure({
+          status: 429,
+          body: { error: { message: "rate limited" } },
+          maxDelayMs: 60_000,
+        }),
+        { kind: "retryable-status", retryable: true, status: 429 },
+      )
+    },
+  ],
+
+  [
+    "HTTP classification: a usage-window 429 is fatal, whatever its Retry-After",
+    () => {
+      // Upstream's parseWindowLimitError: RATE_LIMITED or 429 plus a window
+      // label — from rateLimit.window or from the message.
+      assertEqual(
+        classifyHttpFailure({
+          status: 429,
+          body: {
+            error: {
+              message: "You've reached your weekly usage limit for your plan. Resets Monday.",
+            },
+          },
+          retryAfter: "120",
+          maxDelayMs: 60_000,
+        }),
+        { kind: "window-limit", retryable: false, status: 429 },
+      )
+      assertEqual(
+        classifyHttpFailure({
+          status: 429,
+          body: { error: { code: "RATE_LIMITED", rateLimit: { window: "fiveHour" } } },
+          maxDelayMs: 60_000,
+        }),
+        { kind: "window-limit", retryable: false, status: 429 },
+      )
+      // RATE_LIMITED without a window label is not a window limit (upstream
+      // returns null from parseWindowLimitError), so it stays retryable.
+      assertEqual(
+        classifyHttpFailure({
+          status: 429,
+          body: { error: { code: "RATE_LIMITED", message: "slow down" } },
+          maxDelayMs: 60_000,
+        }),
+        { kind: "retryable-status", retryable: true, status: 429 },
+      )
+    },
+  ],
+
+  [
+    "HTTP classification: Retry-After above the cap is fatal, never a blind retry",
+    () => {
+      assertEqual(classifyHttpFailure({ status: 503, retryAfter: "9999", maxDelayMs: 60_000 }), {
+        kind: "retry-after-cap",
+        retryable: false,
+        waitMs: 9_999_000,
+        status: 503,
+      })
+      // A Retry-After the cap admits becomes the retry's wait.
+      assertEqual(classifyHttpFailure({ status: 429, retryAfter: "2", maxDelayMs: 60_000 }), {
+        kind: "retryable-status",
+        retryable: true,
+        waitMs: 2000,
+        status: 429,
+      })
+    },
+  ],
+
+  [
+    "stream classification: the server's own flag enters the ladder",
+    () => {
+      // The probe shape from issue #171: isRetryable on the error event.
+      assertEqual(
+        classifyStreamError({
+          message: "Invalid error response format: Gateway request failed",
+          reportedStatus: 520,
+          retryableFlag: true,
+        }),
+        { kind: "stream-error", retryable: true, status: 520 },
+      )
+      // A reported transient status is retryable without the flag.
+      assertEqual(classifyStreamError({ message: "upstream exploded", reportedStatus: 503 }), {
+        kind: "stream-error",
+        retryable: true,
+        status: 503,
+      })
+      // A reported fatal status is not.
+      assertEqual(classifyStreamError({ message: "bad request", reportedStatus: 400 }), {
+        kind: "stream-error",
+        retryable: false,
+        status: 400,
+      })
+    },
+  ],
+
+  [
+    "stream classification: absent signals default-retryable unless terminal",
+    () => {
+      assertEqual(classifyStreamError({ message: "upstream exploded" }), {
+        kind: "stream-error",
+        retryable: true,
+      })
+      assertEqual(classifyStreamError({ message: "boom", retryableFlag: false }), {
+        kind: "stream-error",
+        retryable: false,
+      })
+      for (const marker of [
+        "premium_credits_exhausted",
+        "model_not_in_plan",
+        "insufficient credits",
+      ]) {
+        assertEqual(
+          classifyStreamError({ message: `request failed: ${marker.toUpperCase()}` }),
+          { kind: "stream-error", retryable: false },
+          marker,
+        )
       }
     },
   ],
 
   [
-    "Retry-After above max returns -1",
+    "stream classification: the window gate outranks the server's retry flag",
     () => {
-      assertEqual(retryDelayMs(0, "9999", 60_000), -1)
+      // Upstream's composite rule (isModelCallRetryable) is
+      // `isRetryable && !parseWindowLimitError`, so a window limit is never
+      // replayed even when the event claims it is retryable.
+      assertEqual(
+        classifyStreamError({
+          message: "You've reached your weekly usage limit for your plan",
+          reportedStatus: 429,
+          retryableFlag: true,
+        }),
+        { kind: "window-limit", retryable: false, status: 429 },
+      )
+      assertEqual(
+        classifyStreamError({
+          message: "usage limit reached",
+          code: "RATE_LIMITED",
+          window: "weekly",
+          retryableFlag: true,
+        }),
+        { kind: "window-limit", retryable: false },
+      )
     },
   ],
 
   [
-    "Retry-After within max is used directly",
+    "usage-window vocabulary mirrors upstream resolveWindowLabel",
     () => {
-      assertEqual(retryDelayMs(0, "3", 60_000), 3000)
+      assertEqual(resolveUsageWindow("fiveHour", ""), "5-hour")
+      assertEqual(resolveUsageWindow("weekly", ""), "weekly")
+      assertEqual(resolveUsageWindow("daily", ""), "daily")
+      assertEqual(resolveUsageWindow(undefined, "usage limit for your plan"), "5-hour")
+      assertEqual(resolveUsageWindow(undefined, "Weekly usage limit for your plan"), "weekly")
+      assertEqual(resolveUsageWindow(undefined, "rate limited"), undefined)
+      assertEqual(resolveUsageWindow("monthly", ""), undefined)
+      assertEqual(hasTerminalErrorMarker("Payment required: insufficient credits"), true)
+      assertEqual(hasTerminalErrorMarker("transient overload"), false)
+    },
+  ],
+
+  [
+    "the transport-flip failure is classified as such and never replayed",
+    () => {
+      // The one kind the ladder must not handle: the model flips the session to
+      // the legacy transport instead (issue #56), so `retryable` is false.
+      assertEqual(UPGRADE_REQUIRED_FAILURE, {
+        kind: "upgrade-required",
+        retryable: false,
+        status: 403,
+      })
     },
   ],
 

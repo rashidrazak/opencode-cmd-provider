@@ -29,6 +29,67 @@ import type {
 } from "@ai-sdk/provider"
 import { isRecord, stringValue, numberValue, recordOrEmpty } from "./converters.js"
 import { commandCodeErrorMessage, redactCommandCodeErrorText } from "./redact.js"
+import type { StreamErrorFacts } from "./retry.js"
+
+type FinishPart = Extract<LanguageModelV3StreamPart, { type: "finish" }>
+
+/**
+ * Marks a `finish` part whose usage this codec had to synthesize because the
+ * wire reported none. Such a part is not a complete turn report — the usage
+ * chunk the codec was waiting for never arrived — and the transport refuses to
+ * emit it as one (issue #171). Symbol-keyed on purpose: the marker is internal
+ * to this package and never shows up on a part a consumer serializes.
+ */
+const SYNTHESIZED_USAGE = Symbol("commandcode.synthesizedUsage")
+
+/**
+ * True when a held `finish` part carries usage the provider actually reported.
+ * A finish whose usage this module invented (`zeroedUsage()`) is a lie about
+ * the turn's cost, so the transport fails (and may retry) instead of emitting
+ * it (issue #171).
+ */
+export function finishCarriesReportedUsage(part: FinishPart): boolean {
+  return (part as FinishPart & { [SYNTHESIZED_USAGE]?: true })[SYNTHESIZED_USAGE] !== true
+}
+
+/**
+ * The server's own `error` event, surfaced as a failure the transport can
+ * classify (issue #171). The AI SDK `error` part has room for the message
+ * only, so the event's retryability signals — its `isRetryable` flag, the
+ * status it reported, its code and rate-limit window — ride on the instance.
+ * The message is redacted where the error is built.
+ */
+export class ProviderStreamError extends Error {
+  readonly facts: StreamErrorFacts
+  constructor(message: string, facts: StreamErrorFacts) {
+    super(message)
+    this.name = "ProviderStreamError"
+    this.facts = facts
+  }
+}
+
+/**
+ * The facts an error event gives about its own failure. Both wire envelopes
+ * carry them under `error` (the OpenAI `{error:{message,type,statusCode,
+ * isRetryable}}` shape and the Anthropic `{type:"error",error:{…}}` one); a
+ * string `error` carries a message and nothing else. A message the event never
+ * gave stays empty: classification must not invent wording to match on.
+ */
+function streamErrorFacts(event: Record<string, unknown>): StreamErrorFacts {
+  const inner = isRecord(event.error) ? event.error : event
+  return {
+    message: commandCodeErrorMessage(event.error) ?? commandCodeErrorMessage(event.message) ?? "",
+    reportedStatus: numberValue(inner.statusCode) ?? numberValue(inner.status),
+    retryableFlag: typeof inner.isRetryable === "boolean" ? inner.isRetryable : undefined,
+    code: stringValue(inner.code),
+    window: isRecord(inner.rateLimit) ? inner.rateLimit.window : undefined,
+  }
+}
+
+/** Throws the redacted, classified failure an error event describes. */
+function throwStreamError(event: Record<string, unknown>, message: string): never {
+  throw new ProviderStreamError(redactCommandCodeErrorText(message), streamErrorFacts(event))
+}
 
 export function parseStreamEventLine(line: string): unknown | undefined {
   let trimmed = line.trim()
@@ -124,24 +185,17 @@ export function ccEventToStreamPart(event: unknown): LanguageModelV3StreamPart[]
       ]
     }
     case "finish": {
-      const usage = ccUsageToAiSdkUsage(event)
-      return [
-        {
-          type: "finish",
-          finishReason: mapFinishReason(event.finishReason),
-          usage: usage ?? {
-            inputTokens: { total: 0, noCache: 0, cacheRead: 0, cacheWrite: 0 },
-            outputTokens: { total: 0, text: 0, reasoning: 0 },
-          },
-        },
-      ]
+      // The legacy codec's terminal carries its usage inline
+      // (`totalUsage`): a finish without one has none to report.
+      return [finishPart(mapFinishReason(event.finishReason), ccUsageToAiSdkUsage(event))]
     }
     case "error": {
-      const message =
+      throwStreamError(
+        event,
         commandCodeErrorMessage(event.error) ??
-        commandCodeErrorMessage(event.message) ??
-        "Command Code stream error"
-      throw new Error(redactCommandCodeErrorText(message))
+          commandCodeErrorMessage(event.message) ??
+          "Command Code stream error",
+      )
     }
     default:
       // Events with no part of their own. That includes the finish-less
@@ -308,15 +362,28 @@ function zeroedUsage(): LanguageModelV3Usage {
   }
 }
 
+/** Records that a finish part's usage was invented, not reported (#171). */
+function markSynthesizedUsage(part: FinishPart): FinishPart {
+  ;(part as FinishPart & { [SYNTHESIZED_USAGE]?: true })[SYNTHESIZED_USAGE] = true
+  return part
+}
+
+/**
+ * The one finish-part constructor. A `usage` the codec could not read means
+ * the wire reported none, so the part is zero-filled *and* marked as
+ * synthesized: the transport fails such a turn instead of reporting it as a
+ * complete one with zero cost (issue #171).
+ */
 function finishPart(
   finishReason: LanguageModelV3FinishReason | undefined,
   usage: LanguageModelV3Usage | undefined,
-): LanguageModelV3StreamPart {
-  return {
+): FinishPart {
+  const part: FinishPart = {
     type: "finish",
     finishReason: finishReason ?? { unified: "stop", raw: "stop" },
     usage: usage ?? zeroedUsage(),
   }
+  return usage === undefined ? markSynthesizedUsage(part) : part
 }
 
 function textDeltaPart(id: unknown, delta: string): LanguageModelV3StreamPart {
@@ -332,18 +399,20 @@ export function openAIEventToStreamPart(event: unknown): LanguageModelV3StreamPa
   if (!isRecord(event)) return []
   // Error handling — OpenAI errors have { error: { message, type, code } } or top-level error
   if (event.error !== undefined) {
-    const message =
+    throwStreamError(
+      event,
       commandCodeErrorMessage(event.error) ??
-      commandCodeErrorMessage(event) ??
-      "Provider stream error"
-    throw new Error(redactCommandCodeErrorText(message))
+        commandCodeErrorMessage(event) ??
+        "Provider stream error",
+    )
   }
   if (stringValue(event.type) === "error") {
-    const message =
+    throwStreamError(
+      event,
       commandCodeErrorMessage(event.error) ??
-      commandCodeErrorMessage(event.message) ??
-      "Provider stream error"
-    throw new Error(redactCommandCodeErrorText(message))
+        commandCodeErrorMessage(event.message) ??
+        "Provider stream error",
+    )
   }
 
   // Extract usage if present (terminal chunk)
@@ -420,11 +489,12 @@ export function anthropicEventToStreamPart(event: unknown): LanguageModelV3Strea
   const type = stringValue(event.type)
 
   if (type === "error" || event.error !== undefined) {
-    const message =
+    throwStreamError(
+      event,
       commandCodeErrorMessage(event.error) ??
-      commandCodeErrorMessage(event.message) ??
-      "Provider stream error"
-    throw new Error(redactCommandCodeErrorText(message))
+        commandCodeErrorMessage(event.message) ??
+        "Provider stream error",
+    )
   }
 
   // Content blocks belong to createAnthropicStreamParser, the only Anthropic
@@ -681,7 +751,15 @@ export function createOpenAIStreamParser(): StreamEventParser {
       // The usage-only trailing chunk carries no finish_reason; reuse the one
       // captured from the finish_reason chunk so the real reason survives.
       const reason = finishReason ?? lastFinishReason
-      parts.push(finishPart(reason, hasUsage ? openAIUsageToAiSdkUsage(rawUsage) : undefined))
+      // A usage chunk we cannot read is still a reported usage chunk: the
+      // turn is complete and reports zeros, unlike a finish_reason chunk whose
+      // trailing usage chunk never arrived (issue #171).
+      parts.push(
+        finishPart(
+          reason,
+          hasUsage ? (openAIUsageToAiSdkUsage(rawUsage) ?? zeroedUsage()) : undefined,
+        ),
+      )
     }
     return parts
   }

@@ -208,22 +208,56 @@ prompt: that gateway injects its own 1-hour breakpoint and replaces the client's
 
 A turn ends only on a terminal event. A `finish` part is held until the response
 body is drained, so a trailing usage-only chunk (OpenAI `choices: []`) or
-`message_delta` (Anthropic) can replace it. The legacy `{"type":"abort"}` event is
-the other terminal: it carries no finish part, so the transport closes the parts
-the parser still holds open and ends the turn without inventing one — `ai@6`
-tolerates a missing finish, as upstream's own consumer does (`!finish && !abort`
-is its truncation check). Anything else is a failure: a body that closes with no
-terminal — truncated by a proxy, or ended early by the server — raises
-`TruncatedStreamError` (upstream's wording, `status` 502, `name` on the Error) and
-surfaces it as the `error` part instead of a `finish(stop)` with zeroed usage.
-`doGenerate` fails the same way, off the same transport.
+`message_delta` (Anthropic) can replace it. A held finish is emitted only when it
+carries usage the provider actually reported: a body that dies after a
+usage-bearing finish (the legacy codec's `totalUsage`, Anthropic's
+`message_delta`) has declared the turn complete, while a finish synthesized from
+an OpenAI `finish_reason` chunk — its trailing usage chunk never arrived — fails
+the turn with `MissingUsageError` (`status` 502) instead of reporting a complete,
+zero-cost answer. The legacy `{"type":"abort"}` event is the other terminal: it
+carries no finish part, so the transport closes the parts the parser still holds
+open and ends the turn without inventing one — `ai@6` tolerates a missing finish,
+as upstream's own consumer does (`!finish && !abort` is its truncation check).
+Anything else is a failure: a body that closes with no terminal — truncated by a
+proxy, or ended early by the server — raises `TruncatedStreamError` (upstream's
+wording, `status` 502, `name` on the Error). Both failures surface as the `error`
+part; `doGenerate` fails the same way, off the same transport.
 
-Retries (`maxRetries`, default 0) only replay a request the consumer has seen
-nothing from: any emitted part other than `finish` — a bare `text-start` or
-`tool-input-start` included — rules the retry out, because part lifecycles cannot
-be replayed either. A body that ends after a `finish_reason` or `message_delta`
-has declared the turn complete, so the finish it sent is surfaced as-is; a
-missing trailing usage chunk reports zero usage rather than a failure.
+Retries are causal: every failure is classified first, and only the kinds whose
+own shape says "transient" are replayed. The vocabulary and the rules are ported
+from upstream `command-code@1.54.0` (`isModelCallRetryable`,
+`isStreamErrorRetryable`, `parseWindowLimitError`):
+
+| failure                                                                                                                                                                                           | kind             | replayed                      |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- | ----------------------------- |
+| fetch rejection, read failure, per-attempt timeout                                                                                                                                                | network          | yes                           |
+| HTTP 408 / 429 / 5xx                                                                                                                                                                              | retryable status | yes                           |
+| HTTP 400 / 401 / 403 / 404 / 422, and every other status                                                                                                                                          | fatal status     | no                            |
+| 429 (or a `RATE_LIMITED` code) naming a usage window                                                                                                                                              | window limit     | no                            |
+| `Retry-After` beyond `maxRetryDelayMs`                                                                                                                                                            | retry-after cap  | no                            |
+| documented `403 upgrade_required`                                                                                                                                                                 | transport flip   | flipped once, never replayed  |
+| body ended with no terminal, or with only a synthesized finish                                                                                                                                    | truncation       | yes, while nothing is visible |
+| server `error` event: `isRetryable: true`, else a reported 408/429/5xx, else retryable unless it says `false` or names `premium_credits_exhausted` / `model_not_in_plan` / `insufficient credits` | stream error     | per that rule                 |
+
+`maxRetries` defaults to **2**: the hosts already run their own slower ladders
+outside the plugin (v1 1.18.30: 5 retries; v2 2.0.3: 4, behind a hard
+`!outputStarted` gate), so this ladder is deliberately short and fast — upstream
+`command-code@1.54.0` sizes its 10-attempt ladder for the standalone CLI. The
+option is reachable as `provider.commandcode.options.maxRetries` (v1) /
+`providers.commandcode.settings.maxRetries` (v2), alongside `maxRetryDelayMs`
+(default 60 s) which caps both the ladder's own backoff and any `Retry-After` the
+transport is willing to honour. `maxRetries: 0` disables the ladder.
+
+The backoff is `min(10 s, max(1 s, 500 ms·2^attempt))`, no jitter, bounded by
+`maxRetryDelayMs`. A response's own `Retry-After` replaces it for that attempt
+(0 means retry immediately), and a delay beyond the cap fails the request rather
+than being thrown into a generic retry. Request headers are rebuilt for every
+attempt, so a credential rotated mid-ladder is picked up by the next request.
+
+A replay only ever happens while the consumer has seen nothing: any emitted part
+other than `finish` — a bare `text-start` or `tool-input-start` included — rules
+it out, because part lifecycles cannot be replayed either. A terminal that
+carries the turn's usage report settles the turn the same way.
 
 ## Pricing display
 

@@ -68,6 +68,31 @@ export async function rejects(
     }
   }
 }
+/**
+ * Runs `fn` with `vars` set (`undefined` deletes the variable) and restores
+ * every touched variable afterwards. The env sandbox the provider tests share:
+ * routing, credentials, and the mock-endpoint overrides are all read from the
+ * process environment.
+ */
+export function withEnvVars(
+  vars: Record<string, string | undefined>,
+  fn: () => Promise<void> | void,
+): Promise<void> {
+  const prev = new Map<string, string | undefined>()
+  for (const [key, value] of Object.entries(vars)) {
+    prev.set(key, process.env[key])
+    if (value === undefined) delete process.env[key]
+    else process.env[key] = value
+  }
+  const p = Promise.resolve().then(() => fn() as unknown as Promise<void>)
+  return p.finally(() => {
+    for (const [key, value] of prev) {
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+  })
+}
+
 export async function run(suite: Array<[string, () => Promise<void> | void]>): Promise<void> {
   for (const [name, fn] of suite) {
     try {

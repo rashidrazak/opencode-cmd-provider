@@ -270,6 +270,10 @@ run([
           baseURL: "https://x",
           fetch,
           plan: "goat",
+          // The subject here is the flip, not the ladder: 429/500 are transient
+          // and the default ladder replays them (issue #171), so the budget is
+          // pinned off to count provider calls exactly.
+          maxRetries: 0,
         })
         const parts = await collect(provider.languageModel("gpt-5.6-terra"))
         const err = parts.find((p) => p.type === "error") as { error?: Error }
