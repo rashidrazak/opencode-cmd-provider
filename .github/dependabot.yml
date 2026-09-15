@@ -15,6 +15,16 @@ updates:
         update-types:
           - "minor"
           - "patch"
+    # Two dependencies cannot float, because upstream pins them exactly instead
+    # of with a range: `@opentui/solid` peer-requires `solid-js@1.9.12` and
+    # `@opencode-ai/plugin` depends on `zod@4.1.8`. Raising either side installs
+    # a second copy — `npm ci` then dies on ERESOLVE for solid-js (exact peer)
+    # and `tsc` on the tool schema for zod (its `$ZodType` carries the exact
+    # version, so the host's copy and ours stop being assignable). Bump these by
+    # hand in the PR that widens the pin upstream, never on their own.
+    ignore:
+      - dependency-name: "solid-js"
+      - dependency-name: "zod"
 
   # Third-party Actions are pinned to immutable commit SHAs in the workflows;
   # without these updates a pinned Action never receives upstream patches.
