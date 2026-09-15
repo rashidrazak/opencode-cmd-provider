@@ -1,5 +1,14 @@
 ## Unreleased
 
+### Compatibility
+
+- **OpenCode v1 and v2 are both fully supported.** One install serves either
+  line: auto-registration of `provider.commandcode` and every model, the
+  credential (browser `/connect` on v1; `COMMANDCODE_API_KEY` or a pasted key on
+  v2), the `cmd_plan_summary` tool, and provider streaming. This release closes
+  the last gap — the `Command Code` sidebar on v2 — so both lines now show the
+  same session panel (see Deals intelligence below).
+
 ### Documentation
 
 - **`README.md` is now a first-time-user guide**: what the plugin does, which
@@ -26,6 +35,14 @@
   both contracts against the built bundle.
 
 ## 1.7.6 - 2026-09-14
+
+### Compatibility
+
+- **OpenCode v2 support.** The plugin's default export now carries both host
+  halves — `server()` for v1 and `setup(context)` for v2 — so a v2 install gets
+  provider auto-registration, all Snapshot models, the credential methods, and
+  `cmd_plan_summary`. Noted after the fact: this shipped in 1.7.6 without a
+  release note, and the TUI sidebar followed in the next release.
 
 ### Deals intelligence
 
