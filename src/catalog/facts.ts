@@ -9,7 +9,7 @@
 export const FACTS_SOURCE_URL = "https://unpkg.com/command-code@1.54.0/dist/bundled/command-code-knowledge/reference/models.md"
 export const MODALITIES_SOURCE_URL = "https://unpkg.com/command-code@1.54.0/dist/cli.mjs"
 export const FACTS_PACKAGE_VERSION = "1.54.0"
-export const FACTS_LAST_REFRESHED = "2026-09-14"
+export const FACTS_LAST_REFRESHED = "2026-09-15"
 
 export const MODEL_EFFORTS: Readonly<Record<string, readonly string[]>> = {
   "deepseek/deepseek-v4-pro": ["high","max"],

@@ -1,4 +1,84 @@
+## 2.0.0 - 2026-09-15
+
+### Compatibility
+
+- **OpenCode v1 and v2 are both fully supported.** One install serves either
+  line: auto-registration of `provider.commandcode` and every model, the
+  credential (browser `/connect` on v1; `COMMANDCODE_API_KEY` or a pasted key on
+  v2), the `cmd_plan_summary` tool, and provider streaming. This release closes
+  the last gap — the `Command Code` sidebar on v2 — so both lines now show the
+  same session panel (see Deals intelligence below).
+
+### Fixes
+
+- **`cmd_plan_summary` no longer reports the wrong plan.** `GET /alpha/whoami`
+  stopped returning `planId`/`plan`, so plan resolution always fell through to
+  its default and every account was shown Go's credits, windows and deal table
+  regardless of what it had purchased
+  ([#159](https://github.com/rashidrazak/opencode-cmd-provider/issues/159)).
+  Plan identity now comes from the billing endpoints the official CLI uses —
+  `GET /alpha/billing/subscriptions`, org-scoped via the whoami org id and
+  status-gated to `active`/`trialing`/`past_due`, with `credits.planId` as
+  fallback — and an unresolved plan renders `# Command Code plan: unknown` with
+  the override instructions instead of a guess, because a wrong answer presented
+  as a detected fact is worse than no answer. Transport selection no longer
+  consults the network at all: it reads an explicit pin only (per-call
+  `providerOptions.plan` → the model's `plan` option → `COMMANDCODE_PLAN`), so
+  no request is made to route (ADR-0011).
+- **Cache reads are read from the OpenAI nested usage detail.**
+  `extractUsageTokens` read only top-level cache fields
+  (`cache_read_input_tokens`, `cacheReadTokens`, `cacheRead`), so every
+  OpenAI-shape model served by `/provider/v1/chat/completions` reported
+  `cacheRead: 0` even when upstream reported a prefix-cache hit in
+  `usage.prompt_tokens_details.cached_tokens`. `usageToAiSdk` then derived
+  `noCache` from the cache-inclusive prompt total, billing the whole prompt as
+  fresh input — a 52000-input / 50000-cached turn was reported at 5.8×–12.7× the
+  true cost on the shipped rates, and the displayed cache-hit rate read 0% on
+  sessions that were ~96% cache reads
+  ([#158](https://github.com/rashidrazak/opencode-cmd-provider/issues/158)). The
+  `cacheRead` chain now also covers the DeepSeek top-level alias
+  (`prompt_cache_hit_tokens`), with the explicit top-level fields still ahead of
+  both, so existing precedence is unchanged.
+
+### Deals intelligence
+
+- **The `Command Code` sidebar is back on OpenCode v2.** `dist/tui.js` only
+  implemented the v1 TUI contract (`{ id, tui(api) }` with the snake_case
+  `sidebar_content` slot), and the v2 TUI host rejects any plugin module whose
+  default export lacks `setup()` ("Invalid V2 TUI plugin module"). v2 loaded the
+  module and dropped it, so the sidebar silently disappeared while v1 kept
+  working and no test noticed. The default export now carries both halves
+  (ADR-0010): v1 registers `sidebar_content` off `options.cmd`, v2 claims the
+  dot-separated `"sidebar.content"` path with `ui.slot` and reads the same Deals
+  payload from `settings.cmd`. `src/plugin/v2-tui-types.ts` mirrors the v2 TUI
+  context, and `tests/tui-deals-panel.test.ts` plus `tests/contract.test.ts` pin
+  both contracts against the built bundle.
+- **Deals catalog refresh — 2026-09-15.** Upstream re-scaled its intelligence
+  index: 59 of 70 models moved, all downward (mean −5.4, range −1.9 to −8.1),
+  while the coding index held steady (68 of 70 unchanged). Model membership,
+  pricing, tiers and the GOAT/Pro allowances are unchanged, so only the
+  sidebar's `Intelligence` and `Tok/s` rows move.
+
+### Documentation
+
+- **`README.md` is now a first-time-user guide**: what the plugin does, which
+  OpenCode version you are on, separate install sections for v1 and v2, how to
+  connect, how to use it, updating, uninstalling, and troubleshooting — with no
+  implementation detail. Everything technical moved to
+  [`docs/TECHNICAL.md`](docs/TECHNICAL.md): host/entry-point contracts, install
+  mechanics and caching, generated catalogs and the refresh pipeline, Deals
+  intelligence internals, environment overrides, development and the e2e gates,
+  maintainer troubleshooting, and the ADR index.
+
 ## 1.7.6 - 2026-09-14
+
+### Compatibility
+
+- **OpenCode v2 support.** The plugin's default export now carries both host
+  halves — `server()` for v1 and `setup(context)` for v2 — so a v2 install gets
+  provider auto-registration, all Snapshot models, the credential methods, and
+  `cmd_plan_summary`. Noted after the fact: this shipped in 1.7.6 without a
+  release note, and the TUI sidebar followed in the next release.
 
 ### Deals intelligence
 

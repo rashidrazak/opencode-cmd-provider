@@ -34,8 +34,11 @@ the default export's `server()` and consumes the returned hook map) or **v2**
 (the 2.0.x line, which calls `setup(context)` and registers transforms). One
 default export serves both; each Host reads only its own key, and the two
 halves are independent implementations of the same capabilities rather than one
-translating the other. The TUI Host is neither — it loads the `./tui` export.
-See ADR-0010.
+translating the other. The **TUI Host** is neither — it loads the `./tui` export
+— and it splits the same way: v1 reads `{ id, tui(api) }` and renders the
+snake_case `sidebar_content` slot, v2 reads `{ id, setup(context) }` and claims
+the dot-separated `"sidebar.content"` path, reading the Deals payload from
+`settings.cmd` rather than `options.cmd`. See ADR-0010.
 _Avoid_: version, runtime, platform, shim
 
 **Declared models**:

@@ -7,9 +7,15 @@
 //
 // This build compiles the TSX with @opentui/solid's solid transform instead
 // (deferred prop getters + reactive inserts, the same transform opencode's own
-// TUI uses), which keeps the panel live. The host runtime rewrites
-// `@opentui/*` / `solid-js` imports to its own module instances at plugin load
-// time, so they are marked external.
+// TUI uses), which keeps the panel live. Both TUI hosts rewrite
+// `@opentui/*` / `solid-js` imports to their own module instances at plugin load
+// time (v1 in its TUI plugin loader, v2 via
+// `@opentui/solid/runtime-plugin-support`), so they are marked external — and
+// the whole slice must stay one bundle, because that rewrite covers the entry's
+// imports and nothing else.
+//
+// The emitted default export carries both host contracts (ADR-0010): v1's
+// `tui(api)` and v2's `setup(context)` (see src/deals/tui.tsx).
 import { createSolidTransformPlugin } from "@opentui/solid/bun-plugin"
 
 const out = await Bun.build({

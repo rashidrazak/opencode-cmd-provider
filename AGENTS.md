@@ -83,7 +83,14 @@ fixtures (see `scripts/check-deals-coverage.mjs` and
   TUI host reads `tui.json` (`src/deals/tui.tsx`, package export `"./tui"` →
   `dist/tui.js`). The TUI host never reads `opencode.json` (verified, ADR-0004).
   The v1/v2 server halves are separate implementations of the same three
-  capabilities — v2 does not translate v1 hooks (ADR-0010).
+  capabilities — v2 does not translate v1 hooks (ADR-0010). The TUI host splits
+  the same way and one default export carries both contracts: v1
+  `{ id, tui(api) }` registering the snake_case `sidebar_content` slot off
+  `options.cmd`, v2 `{ id, setup(context) }` claiming the dot-separated
+  `"sidebar.content"` path off `settings.cmd`. A v1-only TUI module is rejected
+  by v2 ("Invalid V2 TUI plugin module") and the sidebar silently disappears —
+  `src/plugin/v2-tui-types.ts` mirrors the v2 TUI context, and
+  `tests/tui-deals-panel.test.ts` plus `tests/contract.test.ts` pin both halves.
 - **`src/deals/` is the excisable Deals slice.** Deleting it plus the two
   registration lines in `src/plugin/index.ts` (`enrichCatalog` and `tools` in
   the v2 `setup`, `enrichCommandCodeModels` and `planSummaryTool` in the v1
@@ -100,8 +107,10 @@ fixtures (see `scripts/check-deals-coverage.mjs` and
   are worse: the v2 context is _injected_, so nothing needs them at all. Mirror
   their shapes in `src/plugin/v2-types.ts` and reference the v1 packages only via
   `import type`. Enforced by `tests/contract.test.ts` for both scopes.
-- The install command is `opencode plugin <pkg>` — **there is no `add`
-  subcommand** on opencode 1.18+.
+- The v1 install command is `opencode plugin <pkg>` — **there is no `add`
+  subcommand** on opencode 1.18+. v2 renamed it: `opencode plugin add <pkg>`
+  (with `list`, `check`, `update`, and `remove` siblings) and writes the global
+  `plugins` entry.
 
 ## Conventions
 
@@ -109,6 +118,10 @@ fixtures (see `scripts/check-deals-coverage.mjs` and
 - Use `CONTEXT.md` vocabulary (Model catalog, Snapshot, Auto-registration, Deals
   catalog, Deals intelligence, Core, Display name); don't drift to the "avoid"
   synonyms listed there.
+- **Docs split:** `README.md` is for users — install, connect, use, update,
+  troubleshoot — and stays free of internals (no ADRs, no `src/…` paths, no
+  config schema variants). Internals live in `docs/TECHNICAL.md`, linked from the
+  README; design decisions stay in `docs/adr/`.
 
 ## Agent skills
 
