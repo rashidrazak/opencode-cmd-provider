@@ -564,6 +564,54 @@ export function upgradeRequiredBody(): string {
 }
 
 /**
+ * The live plan message both Provider API endpoints carry (issue #175): the
+ * OpenAI envelope adds `"code":"upgrade_required"`, the Anthropic one says
+ * `type: permission_error` and omits the code.
+ */
+const LIVE_PLAN_MESSAGE =
+  "Your Go plan doesn't include API access. Upgrade to Provider or higher at https://commandcode.ai/billing to use these endpoints."
+
+/**
+ * The live `403` observed on `/provider/v1/messages` (issue #175): the
+ * Anthropic envelope carries `type: permission_error` and the plan phrasing,
+ * but **no** `error.code` — `/messages` never emits the code for any 403.
+ * Both shapes must flip to the legacy transport.
+ */
+export function liveMessagesUpgradeBody(): string {
+  return JSON.stringify({
+    type: "error",
+    error: { type: "permission_error", message: LIVE_PLAN_MESSAGE },
+  })
+}
+
+/**
+ * The live `403` observed on `/provider/v1/chat/completions` (issue #175): the
+ * same plan message, plus the documented `"code":"upgrade_required"` — the one
+ * envelope that reaches the matcher's code branch.
+ */
+export function liveChatUpgradeBody(): string {
+  return JSON.stringify({
+    error: { code: "upgrade_required", message: LIVE_PLAN_MESSAGE },
+  })
+}
+
+/**
+ * The version-gate `403` (issue #175): it collides with the plan gate on
+ * `code: "upgrade_required"` and is distinguishable only by its `minVersion`
+ * field and "out of date" message. It asks for a client update, never a plan
+ * change, so it must not flip the session to the legacy transport.
+ */
+export function versionGateBody(): string {
+  return JSON.stringify({
+    error: {
+      code: "upgrade_required",
+      message: "Your Command Code CLI is out of date. Update to 0.18.10 or higher.",
+      minVersion: "0.18.10",
+    },
+  })
+}
+
+/**
  * Documented Provider API `422 cmd_zdr_no_providers` body — the model has no
  * ZDR-capable upstream, so a request carrying `x-cmd-zdr: 1` fails (rather
  * than silently falling back to a non-ZDR provider). Served under

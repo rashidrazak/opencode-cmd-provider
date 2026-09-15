@@ -34,14 +34,48 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * Detects the documented Provider API `403 upgrade_required` signal — "You're
- * on the Go plan, the only plan without API access. Upgrade to GOAT or
- * higher." (https://commandcode.ai/docs/provider). Tolerant to the documented
- * variants: the JSON `error.code` / `error.type` may be `upgrade_required` and
- * the message may phrase the same upgrade intent ("without API access",
- * "Upgrade to GOAT"). A 403 that merely mentions the Go plan without that
- * intent (e.g. "forbidden") is not a flip signal, and any status other than
- * 403 (401, 422 cmd_zdr_no_providers, 429, 5xx, ...) never is either.
+ * The plan gate's own words, not its envelope: `upgrade_required` (the
+ * documented OpenAI-shape code), or the plan phrasing the message carries when
+ * the code is absent — the live `/provider/v1/messages` 403 says "Your Go plan
+ * doesn't include API access. Upgrade to Provider or higher ..." (issue #175).
+ */
+const PLAN_UPGRADE_PATTERN =
+  /upgrade_required|upgrade to (?:goat|provider)|without api access|doesn['’]t include api access/i
+
+/**
+ * The version gate's markers: a body naming a minimum accepted CLI version, or
+ * a message saying the client is out of date. Such a 403 asks for a client
+ * update, never a plan change — and the live version gate collides with the
+ * plan gate on `code: "upgrade_required"`, so these markers decide first
+ * (issue #175).
+ */
+const VERSION_GATE_PATTERN = /\bminversion\b|out[-\s]of[-\s]date/i
+
+/** True when the envelope names the minimum accepted CLI version. */
+function namesMinimumVersion(record: Record<string, unknown>): boolean {
+  return typeof record.minVersion === "string" || typeof record.minVersion === "number"
+}
+
+/**
+ * Detects the Provider API plan gate: the `403` that flips the session to the
+ * legacy transport (issue #56). The same refusal reaches the two endpoints in
+ * different envelopes (issue #175):
+ *
+ * - `/provider/v1/chat/completions` carries
+ *   `{"error":{"code":"upgrade_required", …}}` — the documented shape;
+ * - `/provider/v1/messages` carries the Anthropic envelope
+ *   `{"type":"error","error":{"type":"permission_error","message":"Your Go plan
+ *   doesn't include API access. Upgrade to Provider or higher …"}}` — no `code`
+ *   for any 403.
+ *
+ * The plan phrasing is therefore the signal; `permission_error` alone is not,
+ * because the model gate (`MODEL_NOT_IN_PLAN`) shares that type. The
+ * documented plain message ("You're on the Go plan, the only plan without API
+ * access. Upgrade to GOAT or higher.") is still caught. A version-gate body
+ * collides with the plan gate on `code: "upgrade_required"` and is
+ * distinguishable only by its `minVersion` field or "out of date" wording —
+ * those markers are checked first and never flip. Any status other than 403
+ * (401, 422 cmd_zdr_no_providers, 429, 5xx, ...) never flips either.
  */
 export function isUpgradeRequiredError(status: number, body: unknown): boolean {
   if (status !== 403) return false
@@ -60,12 +94,20 @@ export function isUpgradeRequiredError(status: number, body: unknown): boolean {
       // keep the raw text as the only candidate below
     }
   }
+  let versionGate = false
   if (isRecord(body)) {
     const error = body.error
-    if (isRecord(error)) pushStrings(error)
+    if (isRecord(error)) {
+      pushStrings(error)
+      versionGate ||= namesMinimumVersion(error)
+    }
     pushStrings(body)
+    versionGate ||= namesMinimumVersion(body)
   }
-  return candidates.some((c) => /upgrade_required|upgrade to goat|without api access/i.test(c))
+  // The version-gate guard runs first: a body that names a minimum version is
+  // a client gate even when its wording borrows the plan phrasing.
+  if (versionGate || candidates.some((c) => VERSION_GATE_PATTERN.test(c))) return false
+  return candidates.some((c) => PLAN_UPGRADE_PATTERN.test(c))
 }
 
 export function commandCodeErrorMessage(value: unknown): string | undefined {

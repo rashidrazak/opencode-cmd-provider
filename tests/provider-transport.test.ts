@@ -14,6 +14,7 @@ import {
   finishEvent,
   eventsEnd,
   upgradeRequiredBody,
+  liveMessagesUpgradeBody,
   headersToRecord,
   type MockCcOptions,
 } from "./helpers/mock-cc.js"
@@ -1264,6 +1265,44 @@ run([
               "legacy headers carry the project slug",
             )
             assertEqual(legacyHeaders?.["x-taste-learning"], "true")
+          },
+        )
+      } finally {
+        await mock.close()
+      }
+    },
+  ],
+  [
+    "transport: a Go account flips on the live /provider/v1/messages 403 (permission_error, no code) (issue #175)",
+    async () => {
+      // The Anthropic endpoint answers the plan refusal in the Anthropic
+      // envelope — plan phrasing with no `error.code` — so the flip may not
+      // depend on the documented `upgrade_required` code.
+      const mock = await startMockCc({
+        messagesStatus: 403,
+        messagesErrorBody: liveMessagesUpgradeBody(),
+        stream: [textDelta("hi"), finishEvent()],
+      })
+      try {
+        await withEnvVars(
+          { COMMANDCODE_PLAN: undefined, COMMANDCODE_API_KEY: "k", COMMANDCODE_API_BASE: mock.url },
+          async () => {
+            const provider = createCommandCode({ apiKey: "k", baseURL: mock.url })
+            const parts = await collect(provider.languageModel("claude-sonnet-5"), [
+              { role: "user", content: "hi" },
+            ])
+            assertEqual(mock.hits.messages, 1, "Provider API /messages is tried first")
+            assertEqual(mock.hits.generate, 1, "the live 403 → one legacy retry")
+            assertEqual(
+              mock.hits.chatCompletions,
+              0,
+              "the Anthropic route never hits chat/completions",
+            )
+            assert(
+              parts.some((p) => p.type === "text-delta"),
+              "legacy delta emitted",
+            )
+            assert(!parts.some((p) => p.type === "error"), "no error part — the retry succeeded")
           },
         )
       } finally {

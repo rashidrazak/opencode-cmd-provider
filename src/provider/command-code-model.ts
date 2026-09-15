@@ -137,13 +137,13 @@ function errorStream(message: string): ReadableStream<LanguageModelV3StreamPart>
 }
 
 /**
- * Internal marker (issue #56 safety net): the Provider API returned a
- * documented `403 upgrade_required` ("You're on the Go plan, the only plan
- * without API access"). The transport flips the session to the legacy
- * `/alpha/generate` transport and retries once. Never surfaced to callers —
- * but it carries its failure kind like every other transport-raised error, so
- * the vocabulary in `retry.ts` names the one failure the ladder never replays
- * (issue #171).
+ * Internal marker (issue #56 safety net): the Provider API answered its
+ * plan-gate `403` — the documented `upgrade_required` envelope, or the live
+ * `/messages` `permission_error` phrasing that omits the code (issue #175).
+ * The transport flips the session to the legacy `/alpha/generate` transport
+ * and retries once. Never surfaced to callers — but it carries its failure
+ * kind like every other transport-raised error, so the vocabulary in
+ * `retry.ts` names the one failure the ladder never replays (issue #171).
  */
 class UpgradeRequiredError extends Error implements ClassifiedTransportError {
   readonly transportError = true as const
@@ -256,12 +256,12 @@ class MissingUsageError extends Error implements ClassifiedTransportError {
   }
 }
 
-/** One transport pass: endpoint, body, headers, event mapper, and whether a
- * documented `403 upgrade_required` on this endpoint flips the session to the
+/** One transport pass: endpoint, body, headers, event mapper, and whether the
+ * Provider API plan-gate `403` on this endpoint flips the session to the
  * legacy transport. Only the Provider API descriptor flips; the legacy
- * descriptor never does, so a 403 on `/alpha/generate` flows through the
- * existing error pipeline instead of re-entering the fallback (issue #56
- * "retries once"). */
+ * descriptor never does, so a 403 on `/alpha/generate` — a stale-client
+ * version gate included — flows through the existing error pipeline instead of
+ * re-entering the fallback (issue #56 "retries once"). */
 interface TransportDescriptor {
   url: string
   bodyStr: string
@@ -317,8 +317,9 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
   }
 
   /**
-   * Safety-net flag (issue #56): once the Provider API answers a documented
-   * `403 upgrade_required`, the session is pinned to the legacy
+   * Safety-net flag (issue #56): once the Provider API answers its plan-gate
+   * `403` — the documented `upgrade_required` envelope or the code-less live
+   * `/messages` body (issue #175) — the session is pinned to the legacy
    * `/alpha/generate` transport for the lifetime of this model instance —
    * subsequent turns stay on legacy without re-hitting the Provider API (no
    * second 403). The Provider API has no path for Go-plan users (that is
@@ -333,7 +334,7 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
    * `plan` option → `COMMANDCODE_PLAN`. Only an explicit `go` pin selects the
    * legacy transport; with no pin — and for every other plan — the session
    * starts on the Provider API, where a Go account flips to legacy through the
-   * documented `403 upgrade_required` fallback above. No plan lookup is ever
+   * plan-gate `403` fallback above. No plan lookup is ever
    * made to route, so this path needs neither a credential nor the network.
    */
   private shouldUseProviderTransport(options: ModelCallOptions): boolean {
@@ -579,10 +580,11 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
   ): ReadableStream<LanguageModelV3StreamPart> {
     const url = this.providerEndpoint()
     const bodyStr = JSON.stringify(this.providerBodyFor(options, isClaude))
-    // Safety net (issue #56): a documented `403 upgrade_required` pins this
-    // session to the legacy transport and retries the same call once via
-    // POST {base}/alpha/generate with the legacy CLI wire format. The legacy
-    // descriptor itself never flips, so the retry is bounded to one.
+    // Safety net (issue #56): the plan-gate `403` — either envelope, issue
+    // #175 — pins this session to the legacy transport and retries the same
+    // call once via POST {base}/alpha/generate with the legacy CLI wire
+    // format. The legacy descriptor itself never flips, so the retry is
+    // bounded to one.
     const legacyFallback: TransportDescriptor = {
       url: `${this.apiBase()}/alpha/generate`,
       bodyStr: JSON.stringify(this.bodyFor(options)),
@@ -635,12 +637,12 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
    * the seam (CC vs OpenAI vs Anthropic) while the transport stays fixed.
    *
    * The optional legacyFallback implements the issue #56 safety net: when the
-   * Provider API answers a documented `403 upgrade_required` (Go plan, no API
-   * access), the session is pinned to the legacy `/alpha/generate` transport
-   * and the same call retries once there — the retry is bounded because only
-   * the provider descriptor carries flipOnUpgradeRequired. The pin is sticky
-   * for the lifetime of this model instance (no second Provider API hit on
-   * later turns).
+   * Provider API answers its plan-gate `403` (Go plan, no API access — in
+   * either endpoint's envelope, issue #175), the session is pinned to the
+   * legacy `/alpha/generate` transport and the same call retries once there —
+   * the retry is bounded because only the provider descriptor carries
+   * flipOnUpgradeRequired. The pin is sticky for the lifetime of this model
+   * instance (no second Provider API hit on later turns).
    */
   private transportStream(
     descriptor: TransportDescriptor,
@@ -836,11 +838,13 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
                     // Preserve useful plain-text provider errors only after secret
                     // redaction; upstream/proxy bodies may echo credentials.
                   }
-                  // Safety net (issue #56): a documented 403 upgrade_required
-                  // on the Provider API flips the session to the legacy
-                  // transport; the legacy descriptor itself never flips (so
-                  // the retry is bounded to one), and any other status flows
-                  // through the existing error/redaction pipeline unchanged.
+                  // Safety net (issue #56): the plan-gate 403 on the Provider
+                  // API flips the session to the legacy transport — the
+                  // documented `upgrade_required` envelope or the live
+                  // `/messages` phrasing without a code (issue #175); the
+                  // legacy descriptor itself never flips (so the retry is
+                  // bounded to one), and any other status flows through the
+                  // existing error/redaction pipeline unchanged.
                   if (
                     t.flipOnUpgradeRequired &&
                     isUpgradeRequiredError(response.status, parsedBody ?? errBody)
@@ -930,7 +934,7 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
                 } catch {}
                 reader = undefined
 
-                // 403 upgrade_required is a transport flip, never a retry:
+                // The plan-gate 403 is a transport flip, never a retry:
                 // fall back to the legacy transport immediately (issue #56),
                 // regardless of maxRetries.
                 if (caught instanceof UpgradeRequiredError) throw caught

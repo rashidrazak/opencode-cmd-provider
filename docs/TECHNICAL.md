@@ -161,7 +161,11 @@ surfaces in two places:
   ([ADR-0011](adr/0011-billing-derived-plan-identity.md)). Plan detection does
   not choose a transport: requests start on the Provider API unless `plan=go` is
   pinned, and a Go account switches to the legacy endpoint automatically when the
-  Provider API answers `403 upgrade_required`.
+  Provider API answers the plan-gate `403` — `/chat/completions` sends
+  `error.code: upgrade_required`, while `/messages` sends the Anthropic envelope
+  (`type: permission_error`) with the plan phrasing and no code (issue #175). A
+  stale-client version gate (`minVersion` / "out of date") is never read as a
+  plan flip.
 - **Visible degradation:** when the bundled Deals catalog is empty (upstream
   fetch failed or the RSC shape changed), the sidebar shows a
   `Deals unavailable` banner with placeholder rows and the tool says no deal data
@@ -235,7 +239,7 @@ from upstream `command-code@1.54.0` (`isModelCallRetryable`,
 | HTTP 400 / 401 / 403 / 404 / 422, and every other status                                                                                                                                          | fatal status     | no                            |
 | 429 (or a `RATE_LIMITED` code) naming a usage window                                                                                                                                              | window limit     | no                            |
 | `Retry-After` beyond `maxRetryDelayMs`                                                                                                                                                            | retry-after cap  | no                            |
-| documented `403 upgrade_required`                                                                                                                                                                 | transport flip   | flipped once, never replayed  |
+| the plan-gate 403: `upgrade_required`, `upgrade to GOAT/provider`, or "without / doesn't include API access"                                                                                      | transport flip   | flipped once, never replayed  |
 | body ended with no terminal, or with only a synthesized finish                                                                                                                                    | truncation       | yes, while nothing is visible |
 | server `error` event: `isRetryable: true`, else a reported 408/429/5xx, else retryable unless it says `false` or names `premium_credits_exhausted` / `model_not_in_plan` / `insufficient credits` | stream error     | per that rule                 |
 

@@ -4,6 +4,7 @@ import {
   commandCodeErrorMessage,
   isUpgradeRequiredError,
 } from "../src/provider/redact.js"
+import { liveChatUpgradeBody, liveMessagesUpgradeBody, versionGateBody } from "./helpers/mock-cc.js"
 import { assertEqual, run } from "./harness.js"
 
 run([
@@ -123,6 +124,77 @@ run([
       assertEqual(
         isUpgradeRequiredError(403, {
           error: { message: "You're on the Go plan. Contact support." },
+        }),
+        false,
+      )
+    },
+  ],
+
+  [
+    "isUpgradeRequiredError: the live /provider/v1/messages 403 flips (permission_error, no error.code)",
+    () => {
+      // Issue #175: /messages answers the Anthropic envelope — the plan
+      // phrasing, `type: permission_error`, and no `error.code` at all (the
+      // OpenAI endpoint is the one that adds `"code":"upgrade_required"`).
+      assertEqual(isUpgradeRequiredError(403, JSON.parse(liveMessagesUpgradeBody())), true)
+      // The raw, unparsed body is detected too.
+      assertEqual(isUpgradeRequiredError(403, liveMessagesUpgradeBody()), true)
+      // The live OpenAI envelope: the same message plus the code.
+      assertEqual(isUpgradeRequiredError(403, JSON.parse(liveChatUpgradeBody())), true)
+    },
+  ],
+
+  [
+    "isUpgradeRequiredError: permission_error alone is not a plan flip (the model gate shares it)",
+    () => {
+      // /messages never emits upgrade_required for any 403, and the model gate
+      // (MODEL_NOT_IN_PLAN) carries the same permission_error type — the plan
+      // phrasing is what decides, not the type (issue #175).
+      assertEqual(
+        isUpgradeRequiredError(403, {
+          type: "error",
+          error: {
+            type: "permission_error",
+            message:
+              "MODEL_NOT_IN_PLAN: Claude Sonnet 4.6 available in Pro and above plans or extra on demand usage",
+          },
+        }),
+        false,
+      )
+      assertEqual(
+        isUpgradeRequiredError(403, {
+          type: "error",
+          error: { type: "permission_error", message: "forbidden" },
+        }),
+        false,
+      )
+    },
+  ],
+
+  [
+    "isUpgradeRequiredError: a version-gate 403 (minVersion / out of date) is never a plan flip",
+    () => {
+      // The live version gate collides with the plan gate: it carries the same
+      // `upgrade_required` code and is distinguishable only by its `minVersion`
+      // field and "out of date" message. It asks for a client update, not a
+      // plan change (issue #175).
+      assertEqual(isUpgradeRequiredError(403, JSON.parse(versionGateBody())), false)
+      assertEqual(isUpgradeRequiredError(403, versionGateBody()), false)
+      assertEqual(
+        isUpgradeRequiredError(403, {
+          error: { message: "Your Command Code CLI is out of date." },
+        }),
+        false,
+      )
+      // The guard wins over plan phrasing in the same body: a body naming a
+      // minimum version is a client gate, never a transport flip.
+      assertEqual(
+        isUpgradeRequiredError(403, {
+          error: {
+            code: "upgrade_required",
+            message: "Upgrade to Provider or higher.",
+            minVersion: "1.15.1",
+          },
         }),
         false,
       )
