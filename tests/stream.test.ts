@@ -542,6 +542,195 @@ run([
       )
     },
   ],
+
+  [
+    "createAnthropicStreamParser never closes a block it did not open (issue #72)",
+    () => {
+      // A block type this parser does not model — Anthropic's redacted_thinking,
+      // a server tool block, a future addition — is still a block. Its stop must
+      // not fall through to `text-end` for a part that was never opened: the
+      // consumer rejects an end for an unknown id ("text part text-N not found",
+      // #69).
+      const parser = createAnthropicStreamParser()
+      assertEqual(
+        parser({
+          type: "content_block_start",
+          index: 0,
+          content_block: { type: "redacted_thinking", data: "..." },
+        }),
+        [],
+      )
+      assertEqual(parser({ type: "content_block_stop", index: 0 }), [])
+      // A stop whose start never arrived is the same shape of nothing-to-close.
+      assertEqual(createAnthropicStreamParser()({ type: "content_block_stop", index: 3 }), [])
+    },
+  ],
+
+  [
+    "createAnthropicStreamParser opens the part a stranded delta implies (issue #72)",
+    () => {
+      // The start event can be lost (unparseable SSE line, a reconnect). The
+      // delta's own kind says which part it belongs to, so open it rather than
+      // feed the consumer a delta for an id it never saw start.
+      const parser = createAnthropicStreamParser()
+      assertEqual(
+        parser({
+          type: "content_block_delta",
+          index: 0,
+          delta: { type: "text_delta", text: "hi" },
+        }),
+        [
+          { type: "text-start", id: "text-0" },
+          { type: "text-delta", id: "text-0", delta: "hi" },
+        ],
+      )
+      assertEqual(parser({ type: "content_block_stop", index: 0 }), [
+        { type: "text-end", id: "text-0" },
+      ])
+      assertEqual(
+        parser({
+          type: "content_block_delta",
+          index: 1,
+          delta: { type: "thinking_delta", thinking: "hmm" },
+        }),
+        [
+          { type: "reasoning-start", id: "thinking-1" },
+          { type: "reasoning-delta", id: "thinking-1", delta: "hmm" },
+        ],
+      )
+      assertEqual(parser({ type: "content_block_stop", index: 1 }), [
+        { type: "reasoning-end", id: "thinking-1" },
+      ])
+      // A tool-argument fragment with no tool block carries neither an id nor a
+      // name, so there is no call to open: drop it rather than emit an orphan
+      // tool-input-delta the consumer cannot match.
+      assertEqual(
+        createAnthropicStreamParser()({
+          type: "content_block_delta",
+          index: 2,
+          delta: { type: "input_json_delta", partial_json: '{"a":' },
+        }),
+        [],
+      )
+    },
+  ],
+
+  [
+    "createOpenAIStreamParser buffers tool arguments until the call is named (issue #72)",
+    () => {
+      const parser = createOpenAIStreamParser()
+      // A gateway may stream `arguments` before `function.name`. The consumer
+      // rejects a tool-input-delta for a call it never saw started, so the
+      // fragment waits here and is flushed once the name opens the part.
+      assertEqual(
+        parser({
+          id: "gen_tool",
+          choices: [
+            {
+              delta: { tool_calls: [{ index: 0, id: "call_9", function: { arguments: '{"a":' } }] },
+            },
+          ],
+        }),
+        [],
+      )
+      assertEqual(
+        parser({
+          id: "gen_tool",
+          choices: [{ delta: { tool_calls: [{ index: 0, function: { name: "do_thing" } }] } }],
+        }),
+        [
+          { type: "tool-input-start", id: "call_9", toolName: "do_thing" },
+          { type: "tool-input-delta", id: "call_9", delta: '{"a":' },
+        ],
+      )
+      assertEqual(
+        parser({
+          id: "gen_tool",
+          choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: "1}" } }] } }],
+        }),
+        [
+          { type: "tool-input-delta", id: "call_9", delta: "1}" },
+          { type: "tool-input-end", id: "call_9" },
+          { type: "tool-call", toolCallId: "call_9", toolName: "do_thing", input: '{"a":1}' },
+        ],
+      )
+      // A call whose name never arrives stays unopened: the finish flush must
+      // not close it with an end/call pair the consumer never saw start.
+      const stranded = createOpenAIStreamParser()
+      stranded({
+        id: "gen_stranded",
+        choices: [
+          { delta: { tool_calls: [{ index: 0, id: "call_x", function: { arguments: "{}" } }] } },
+        ],
+      })
+      const flushed = stranded({
+        id: "gen_stranded",
+        choices: [{ delta: {}, finish_reason: "stop" }],
+        usage: { prompt_tokens: 1, completion_tokens: 1 },
+      })
+      assertEqual(
+        flushed.filter((p) => p.type !== "finish"),
+        [],
+      )
+    },
+  ],
+
+  [
+    "stream parsers close their open parts on demand (issue #72)",
+    () => {
+      // The transport closes a stream on error/abort without ever seeing a
+      // finish event, so the parsers expose the closers directly: an open
+      // reasoning/text part must not outlive the stream that opened it.
+      const openai = createOpenAIStreamParser()
+      assertEqual(
+        openai({ id: "gen_a", choices: [{ delta: { reasoning_content: "t" } }] }).length,
+        2,
+      )
+      assertEqual(openai.closeStream(), [{ type: "reasoning-end", id: "gen_a" }])
+      assertEqual(openai.closeStream(), [])
+
+      const openaiText = createOpenAIStreamParser()
+      openaiText({ id: "gen_b", choices: [{ delta: { content: "hi" } }] })
+      assertEqual(openaiText.closeStream(), [{ type: "text-end", id: "gen_b" }])
+
+      const anthropic = createAnthropicStreamParser()
+      anthropic({
+        type: "content_block_start",
+        index: 0,
+        content_block: { type: "thinking", thinking: "" },
+      })
+      anthropic({
+        type: "content_block_delta",
+        index: 0,
+        delta: { type: "thinking_delta", thinking: "..." },
+      })
+      anthropic({
+        type: "content_block_start",
+        index: 1,
+        content_block: { type: "text", text: "" },
+      })
+      assertEqual(anthropic.closeStream(), [
+        { type: "reasoning-end", id: "thinking-0" },
+        { type: "text-end", id: "text-1" },
+      ])
+      assertEqual(anthropic.closeStream(), [])
+
+      // Unmodelled (redacted) and tool blocks have no close part: a tool call is
+      // settled by its own tool-call part, never by a bare end.
+      const unmodelled = createAnthropicStreamParser()
+      unmodelled({
+        type: "content_block_start",
+        index: 0,
+        content_block: { type: "redacted_thinking" },
+      })
+      unmodelled({
+        type: "content_block_start",
+        index: 1,
+        content_block: { type: "tool_use", id: "call_1", name: "read" },
+      })
+      assertEqual(unmodelled.closeStream(), [])
+    },
+  ],
 ])
 
 // --- Mock CC server harness smoke test (used by #8/#9/#12) ---

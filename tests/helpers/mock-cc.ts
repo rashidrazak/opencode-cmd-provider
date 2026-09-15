@@ -6,6 +6,14 @@
 import { createServer, type Server } from "node:http"
 import type { AddressInfo } from "node:net"
 
+/**
+ * Mock SSE script for the streaming endpoints. A record is written as one
+ * `data:` line; `"end"` closes the response; `"stall"` holds the connection
+ * open with nothing further, so the client has to abort or time out — used to
+ * exercise the mid-stream abort and error paths (issue #72).
+ */
+export type MockEvents = Array<Record<string, unknown> | "end" | "stall">
+
 export interface MockCcOptions {
   models?: unknown
   /** status served by GET /provider/v1/models when set (e.g. 500 to exercise the note-only divergence path) */
@@ -13,7 +21,7 @@ export interface MockCcOptions {
   /** body served by GET /provider/v1/models as-is (e.g. non-JSON to exercise the note-only divergence path) */
   modelsRaw?: string
   /** events to emit for POST /alpha/generate; last event wins for infinite repetition */
-  stream?: Array<Record<string, unknown> | "end">
+  stream?: MockEvents
   status?: number
   errorBody?: string
   /** Retry-After seconds sent with a non-OK /alpha/generate response (mirrored on provider endpoints) */
@@ -23,7 +31,7 @@ export interface MockCcOptions {
   /** called with the parsed /alpha/generate request body and headers */
   onGenerate?: (body: Record<string, unknown>, headers: Record<string, string>) => void
   /** OpenAI chat completions SSE events for POST /provider/v1/chat/completions */
-  chatCompletionsStream?: Array<Record<string, unknown> | "end">
+  chatCompletionsStream?: MockEvents
   chatCompletionsStatus?: number
   chatCompletionsErrorBody?: string
   /** Retry-After seconds sent with a non-OK /provider/v1/chat/completions response */
@@ -32,7 +40,7 @@ export interface MockCcOptions {
   chatCompletionsErrorCount?: number
   onChatCompletions?: (body: Record<string, unknown>, headers: Record<string, string>) => void
   /** Anthropic messages SSE events for POST /provider/v1/messages */
-  messagesStream?: Array<Record<string, unknown> | "end">
+  messagesStream?: MockEvents
   messagesStatus?: number
   messagesErrorBody?: string
   /** Retry-After seconds sent with a non-OK /provider/v1/messages response */
@@ -254,6 +262,10 @@ export function startMockCc(
         let index = 0
         const timer = setInterval(() => {
           const evt = events[index]
+          if (evt === "stall") {
+            clearInterval(timer)
+            return
+          }
           if (evt === "end" || index >= events.length || res.writableEnded) {
             clearInterval(timer)
             res.end()
@@ -295,6 +307,10 @@ export function startMockCc(
         let index = 0
         const timer = setInterval(() => {
           const evt = events[index]
+          if (evt === "stall") {
+            clearInterval(timer)
+            return
+          }
           if (evt === "end" || index >= events.length || res.writableEnded) {
             clearInterval(timer)
             res.end()
@@ -337,6 +353,10 @@ export function startMockCc(
         let index = 0
         const timer = setInterval(() => {
           const evt = events[index]
+          if (evt === "stall") {
+            clearInterval(timer)
+            return
+          }
           if (evt === "end" || index >= events.length || res.writableEnded) {
             clearInterval(timer)
             res.end()

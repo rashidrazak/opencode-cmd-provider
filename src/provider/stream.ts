@@ -454,7 +454,18 @@ interface ToolCallBuffer {
   emitted: boolean
 }
 
-export function createOpenAIStreamParser(): (event: unknown) => LanguageModelV3StreamPart[] {
+/**
+ * A per-stream event parser: one SSE event in, stream parts out. `closeStream`
+ * closes every part the stream still has open when the transport ends it
+ * without a terminal event — a mid-stream error, an abort, or a body that stops
+ * early (issue #72). It is idempotent.
+ */
+export interface StreamEventParser {
+  (event: unknown): LanguageModelV3StreamPart[]
+  closeStream(): LanguageModelV3StreamPart[]
+}
+
+export function createOpenAIStreamParser(): StreamEventParser {
   const toolBuffers = new Map<number, ToolCallBuffer>()
   let nextIndex = 0
   // OpenAI streams finish_reason on the last content chunk, then the real
@@ -485,7 +496,7 @@ export function createOpenAIStreamParser(): (event: unknown) => LanguageModelV3S
     return []
   }
 
-  return (event) => {
+  const parse: StreamEventParser = (event) => {
     if (!isRecord(event)) return []
     // Error events flow through the stateless mapper (redacted throw).
     if (event.error !== undefined || stringValue(event.type) === "error") {
@@ -552,15 +563,24 @@ export function createOpenAIStreamParser(): (event: unknown) => LanguageModelV3S
           }
           if (id) buffer.id = id
           if (name) buffer.name = name
+          if (args && !buffer.emitted) buffer.input += args
           if (!buffer.started && buffer.name) {
             buffer.started = true
             parts.push({ type: "tool-input-start", id: buffer.id, toolName: buffer.name })
-          }
-          if (args && !buffer.emitted) {
-            buffer.input += args
+            // Arguments that arrived before the name opened the part still
+            // belong to this call, so they are flushed now: the consumer rejects
+            // a tool-input-delta for a call it never saw started (issue #72).
+            if (buffer.input) {
+              parts.push({ type: "tool-input-delta", id: buffer.id, delta: buffer.input })
+            }
+          } else if (args && !buffer.emitted && buffer.started) {
             parts.push({ type: "tool-input-delta", id: buffer.id, delta: args })
-            // Complete as soon as the accumulated arguments parse as JSON; the
-            // finish chunk below flushes anything that never completes.
+          }
+          // Complete as soon as the accumulated arguments parse as JSON; the
+          // finish chunk below flushes anything that never completes. A call
+          // that never got a name stays unopened — a bare end would close a part
+          // the consumer never saw start.
+          if (buffer.started && !buffer.emitted) {
             try {
               JSON.parse(buffer.input)
               buffer.emitted = true
@@ -614,18 +634,47 @@ export function createOpenAIStreamParser(): (event: unknown) => LanguageModelV3S
     }
     return parts
   }
+
+  // The transport ends a stream on error/abort without ever seeing a finish, so
+  // the open content parts have to be closable from outside this reducer
+  // (issue #72).
+  parse.closeStream = () => [...closeReasoning(), ...closeText()]
+  return parse
 }
 
-export function createAnthropicStreamParser(): (event: unknown) => LanguageModelV3StreamPart[] {
+export function createAnthropicStreamParser(): StreamEventParser {
   const toolBlocks = new Map<number, ToolCallBuffer>()
   // Per-index block state. `type` decides which end part `content_block_stop`
   // emits; `id` is the part id chosen at `content_block_start`, reused by the
   // delta and stop events so they close the part the consumer saw opened.
   // Anthropic's thinking blocks carry no `id` today, but a gateway may add one,
   // and re-deriving the id from the index at every event would then orphan the
-  // open reasoning part (issue #71).
-  const blocks = new Map<number, { type: "text" | "tool_use" | "thinking"; id: string }>()
-  return (event) => {
+  // open reasoning part (issue #71). A block type this parser does not model is
+  // recorded as "other" so its stop closes nothing (issue #72).
+  const blocks = new Map<number, { type: "text" | "tool_use" | "thinking" | "other"; id: string }>()
+
+  /**
+   * Resolves the part a delta of `kind` belongs to at `index`, synthesizing the
+   * start when the delta's own start never arrived (a dropped or unparseable
+   * SSE line). The synthesized part is recorded so the matching stop closes the
+   * part this stream opened. Returns undefined when the index holds a part of a
+   * different kind — a delta for it would be an orphan (issue #72).
+   */
+  function openPart(
+    index: number,
+    kind: "text" | "thinking",
+  ): { parts: LanguageModelV3StreamPart[]; id: string } | undefined {
+    const existing = blocks.get(index)
+    if (existing) return existing.type === kind ? { parts: [], id: existing.id } : undefined
+    const id = `${kind === "text" ? "text" : "thinking"}-${index}`
+    blocks.set(index, { type: kind, id })
+    return {
+      parts: [{ type: kind === "text" ? "text-start" : "reasoning-start", id }],
+      id,
+    }
+  }
+
+  const parse: StreamEventParser = (event) => {
     if (!isRecord(event)) return []
     const type = stringValue(event.type)
     if (type === "content_block_start") {
@@ -649,6 +698,10 @@ export function createAnthropicStreamParser(): (event: unknown) => LanguageModel
         blocks.set(index, { type: "text", id })
         return [{ type: "text-start", id }]
       }
+      // redacted_thinking, server tool blocks, a future addition: recorded as
+      // unmodelled so its stop does not fall through to a text-end for a part
+      // that was never opened (issue #72).
+      blocks.set(index, { type: "other", id: stringValue(block?.id) ?? `block-${index}` })
       return []
     }
     if (type === "content_block_delta") {
@@ -656,45 +709,46 @@ export function createAnthropicStreamParser(): (event: unknown) => LanguageModel
       const index = numberValue(event.index) ?? 0
       const text = stringValue(delta?.text)
       if (typeof text === "string" && text.length > 0) {
-        return [{ type: "text-delta", id: blocks.get(index)?.id ?? `text-${index}`, delta: text }]
+        const part = openPart(index, "text")
+        if (!part) return []
+        return [...part.parts, { type: "text-delta", id: part.id, delta: text }]
       }
       const thinking = stringValue(delta?.thinking)
       if (typeof thinking === "string" && thinking.length > 0) {
-        return [
-          {
-            type: "reasoning-delta",
-            id: blocks.get(index)?.id ?? `thinking-${index}`,
-            delta: thinking,
-          },
-        ]
+        const part = openPart(index, "thinking")
+        if (!part) return []
+        return [...part.parts, { type: "reasoning-delta", id: part.id, delta: thinking }]
       }
       const partial = stringValue(delta?.partial_json)
       if (typeof partial === "string" && partial.length > 0) {
         const block = toolBlocks.get(index)
-        if (block) {
-          if (block.emitted) return []
-          block.input += partial
-          const out: LanguageModelV3StreamPart[] = [
-            { type: "tool-input-delta", id: block.id, delta: partial },
-          ]
-          // Complete early when a single delta already carries valid JSON;
-          // content_block_stop below flushes multi-delta accumulation.
-          try {
-            JSON.parse(block.input)
-            block.emitted = true
-            out.push({ type: "tool-input-end", id: block.id })
-            out.push({
-              type: "tool-call",
-              toolCallId: block.id,
-              toolName: block.name,
-              input: block.input,
-            })
-          } catch {
-            // fragment — keep accumulating until stop
-          }
-          return out
+        if (!block) {
+          // A fragment carries neither the call id nor its name, so there is no
+          // tool part to open when its block start was lost: drop it rather than
+          // emit a tool-input-delta the consumer cannot match (issue #72).
+          return []
         }
-        return [{ type: "tool-input-delta", id: `tool-${index}`, delta: partial }]
+        if (block.emitted) return []
+        block.input += partial
+        const out: LanguageModelV3StreamPart[] = [
+          { type: "tool-input-delta", id: block.id, delta: partial },
+        ]
+        // Complete early when a single delta already carries valid JSON;
+        // content_block_stop below flushes multi-delta accumulation.
+        try {
+          JSON.parse(block.input)
+          block.emitted = true
+          out.push({ type: "tool-input-end", id: block.id })
+          out.push({
+            type: "tool-call",
+            toolCallId: block.id,
+            toolName: block.name,
+            input: block.input,
+          })
+        } catch {
+          // fragment — keep accumulating until stop
+        }
+        return out
       }
       return []
     }
@@ -719,6 +773,11 @@ export function createAnthropicStreamParser(): (event: unknown) => LanguageModel
         }
       } else if (entry?.type === "thinking") {
         return [{ type: "reasoning-end", id: entry.id }]
+      } else if (entry?.type === "text") {
+        return [{ type: "text-end", id: entry.id }]
+      } else if (entry) {
+        // Unmodelled block: it opened no part, so it closes none.
+        return []
       }
       const block = toolBlocks.get(index)
       if (block) {
@@ -734,12 +793,29 @@ export function createAnthropicStreamParser(): (event: unknown) => LanguageModel
           },
         ]
       }
-      return [{ type: "text-end", id: entry?.id ?? `text-${index}` }]
+      // Nothing this stream opened at that index (a stop whose start was lost):
+      // emitting an end would close a part the consumer never saw start — the
+      // #69 failure mode (issue #72).
+      return []
     }
     // Everything else (message_delta, message_stop, ping, error, …) shares the
     // stateless mapper's handling.
     return anthropicEventToStreamPart(event)
   }
+
+  // A tool call is settled by its own tool-call part, never by a bare end, so
+  // tool blocks are left to the consumer's cleanup; only the content parts this
+  // stream opened are closed here (issue #72).
+  parse.closeStream = () => {
+    const parts: LanguageModelV3StreamPart[] = []
+    for (const entry of blocks.values()) {
+      if (entry.type === "thinking") parts.push({ type: "reasoning-end", id: entry.id })
+      else if (entry.type === "text") parts.push({ type: "text-end", id: entry.id })
+    }
+    blocks.clear()
+    return parts
+  }
+  return parse
 }
 
 // Canonical stream entry points. The transport wires in the stateful parsers
