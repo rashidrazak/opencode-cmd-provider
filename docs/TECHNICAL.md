@@ -204,6 +204,27 @@ requested. The legacy `/alpha/generate` body keeps its plain-string system
 prompt: that gateway injects its own 1-hour breakpoint and replaces the client's
 5-minute one, so the port would be inert.
 
+## Stream termination and retries
+
+A turn ends only on a terminal event. A `finish` part is held until the response
+body is drained, so a trailing usage-only chunk (OpenAI `choices: []`) or
+`message_delta` (Anthropic) can replace it. The legacy `{"type":"abort"}` event is
+the other terminal: it carries no finish part, so the transport closes the parts
+the parser still holds open and ends the turn without inventing one — `ai@6`
+tolerates a missing finish, as upstream's own consumer does (`!finish && !abort`
+is its truncation check). Anything else is a failure: a body that closes with no
+terminal — truncated by a proxy, or ended early by the server — raises
+`TruncatedStreamError` (upstream's wording, `status` 502, `name` on the Error) and
+surfaces it as the `error` part instead of a `finish(stop)` with zeroed usage.
+`doGenerate` fails the same way, off the same transport.
+
+Retries (`maxRetries`, default 0) only replay a request the consumer has seen
+nothing from: any emitted part other than `finish` — a bare `text-start` or
+`tool-input-start` included — rules the retry out, because part lifecycles cannot
+be replayed either. A body that ends after a `finish_reason` or `message_delta`
+has declared the turn complete, so the finish it sent is surfaced as-is; a
+missing trailing usage chunk reports zero usage rather than a failure.
+
 ## Pricing display
 
 The Command Code Provider API does not include prices in its model catalog, so

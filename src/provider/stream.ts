@@ -144,8 +144,33 @@ export function ccEventToStreamPart(event: unknown): LanguageModelV3StreamPart[]
       throw new Error(redactCommandCodeErrorText(message))
     }
     default:
+      // Events with no part of their own. That includes the finish-less
+      // terminals `ccEventIsTerminal` owns (`CC_FINISHLESS_TERMINALS`): their
+      // meaning is the end of the turn, not a part (issue #170).
       return []
   }
+}
+
+/**
+ * The legacy `/alpha/generate` event types that end a stream *without* a finish
+ * part — `{"type":"abort"}`, the server's "generation aborted" terminal. The
+ * single authority for that vocabulary: `ccEventIsTerminal` reads it, and
+ * `ccEventToStreamPart` leaves them to the `default` branch.
+ */
+const CC_FINISHLESS_TERMINALS = new Set(["abort"])
+
+/**
+ * True for an event in `CC_FINISHLESS_TERMINALS`. Upstream's AI SDK consumer
+ * treats such an event as a clean end — its truncation check is
+ * `!finish && !abort` (`consumeFullStream`) — and ai@6 tolerates a missing
+ * finish (its part transform closes the stream), so the transport closes the
+ * parts the parser still holds open and ends the turn, instead of fabricating
+ * a `finish` or reporting the close as a truncation (issue #170).
+ */
+export function ccEventIsTerminal(event: unknown): boolean {
+  if (!isRecord(event)) return false
+  const type = stringValue(event.type)
+  return type !== undefined && CC_FINISHLESS_TERMINALS.has(type)
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {

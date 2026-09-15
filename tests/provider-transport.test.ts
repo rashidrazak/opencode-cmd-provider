@@ -15,6 +15,7 @@ import {
   eventsEnd,
   upgradeRequiredBody,
   headersToRecord,
+  type MockCcOptions,
 } from "./helpers/mock-cc.js"
 import { projectSlugFromPath } from "../src/provider/project-slug.js"
 import type { LanguageModelV3Prompt } from "../src/provider/aisdk-types.js"
@@ -43,6 +44,34 @@ async function collect(
     parts.push(value as unknown as Record<string, unknown>)
   }
   return parts
+}
+
+/** The transport's truncation failure, mirrored from upstream
+ * `command-code@1.54.0` (issue #170). */
+const TRUNCATION_MESSAGE =
+  "Stream ended unexpectedly before completion (no finish event) — response was truncated"
+
+/**
+ * A 200 SSE response whose body dies right after the queued events were read —
+ * a socket reset mid-stream, which rejects the reader rather than closing it.
+ * The queued events are delivered first: the stream only errors once the
+ * consumer has drained the queue.
+ */
+function dyingSseResponse(events: Array<Record<string, unknown>>): Response {
+  const encoder = new TextEncoder()
+  return new Response(
+    new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const event of events) {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`))
+        }
+      },
+      pull(controller) {
+        controller.error(new Error("socket reset"))
+      },
+    }),
+    { status: 200, headers: { "content-type": "text/event-stream" } },
+  )
 }
 
 /** Sets/clears COMMANDCODE_* env vars for the duration of fn, restoring after. */
@@ -1561,15 +1590,261 @@ run([
     },
   ],
   [
-    "transport: a stream that ends without a finish event closes open parts first (issue #72)",
+    'transport: the legacy {"type":"abort"} terminal ends the stream cleanly (issue #170)',
+    async () => {
+      // The server aborted the generation: that is a terminal, not a
+      // truncation. It carries no finish part of its own (upstream's consumer
+      // checks `!finish && !abort`), so the transport must not fabricate one,
+      // must not report a truncation, and must not replay the turn.
+      const mock = await startMockCc({
+        stream: [textDelta("half an ans"), { type: "abort" }, eventsEnd],
+      })
+      try {
+        const provider = createCommandCode({
+          apiKey: "test_key",
+          baseURL: mock.url,
+          maxRetries: 2,
+          maxRetryDelayMs: 0,
+        })
+        const parts = await collect(
+          provider.languageModel("claude-sonnet-5"),
+          [{ role: "user", content: "hi" }],
+          { commandcode: { plan: "go" } },
+        )
+        assertEqual(
+          parts.map((p) => p.type),
+          ["text-delta"],
+        )
+        assertEqual(mock.hits.generate, 1, "a clean abort is not retried")
+
+        // The terminal ends the *read*, not just the turn: a server that keeps
+        // the connection open after aborting must not hold the consumer to the
+        // timeout. `timeout` is set low so a non-terminating read fails fast.
+        const stalled = await startMockCc({
+          stream: [textDelta("half an ans"), { type: "abort" }, "stall"],
+        })
+        try {
+          const stalledParts = await collect(
+            createCommandCode({
+              apiKey: "test_key",
+              baseURL: stalled.url,
+              timeout: 500,
+            }).languageModel("claude-sonnet-5"),
+            [{ role: "user", content: "hi" }],
+            { commandcode: { plan: "go" } },
+          )
+          assertEqual(
+            stalledParts.map((p) => p.type),
+            ["text-delta"],
+          )
+        } finally {
+          await stalled.close()
+        }
+      } finally {
+        await mock.close()
+      }
+    },
+  ],
+  [
+    "transport: an opened text part already rules a retry replay out (issue #170)",
+    async () => {
+      // A bare text-start counts as visible, deliberately: part lifecycles
+      // cannot be replayed either, so a re-request would append a second
+      // text-start (and a second text-end) for the same id. The Anthropic
+      // `content_block_start` is exactly that — a part opened before any delta.
+      await withEnv("goat", async () => {
+        let requests = 0
+        const fetchImpl: typeof fetch = async () => {
+          requests++
+          return dyingSseResponse([
+            { type: "content_block_start", index: 0, content_block: { type: "text" } },
+          ])
+        }
+        const provider = createCommandCode({
+          apiKey: "test_key",
+          baseURL: "https://api.commandcode.ai",
+          fetch: fetchImpl,
+          maxRetries: 1,
+          maxRetryDelayMs: 0,
+        })
+        const parts = await collect(provider.languageModel("claude-sonnet-5"), [
+          { role: "user", content: "hi" },
+        ])
+        assertEqual(requests, 1, "no re-request once a part was opened")
+        assertEqual(
+          parts.map((p) => p.type),
+          ["text-start", "text-end", "error"],
+        )
+      })
+    },
+  ],
+  [
+    "transport: a mid-stream read failure after visible content is never replayed (issue #170)",
+    async () => {
+      // maxRetries > 0 must not re-run a request whose text the consumer has
+      // already seen: the replay appends a second text-delta to the same part,
+      // so the user reads FIRSTFIRST.
+      await withEnv("goat", async () => {
+        let requests = 0
+        const fetchImpl: typeof fetch = async () => {
+          requests++
+          return dyingSseResponse([openAIChunk("FIRST")])
+        }
+        const provider = createCommandCode({
+          apiKey: "test_key",
+          baseURL: "https://api.commandcode.ai",
+          fetch: fetchImpl,
+          maxRetries: 2,
+          maxRetryDelayMs: 0,
+        })
+        const parts = await collect(provider.languageModel("gpt-5.6-terra"), [
+          { role: "user", content: "hi" },
+        ])
+        assertEqual(requests, 1, "no re-request once content is visible")
+        assertEqual(
+          parts.map((p) => p.type),
+          ["text-start", "text-delta", "text-end", "error"],
+        )
+        assertEqual(parts.filter((p) => p.type === "text-delta").length, 1)
+        assertEqual((parts[1] as { delta: string }).delta, "FIRST")
+        assert(
+          ((parts[3] as { error: Error }).error as Error).message.includes("socket reset"),
+          "the read failure is surfaced",
+        )
+      })
+    },
+  ],
+  [
+    "transport: a truncated stream with nothing visible is re-requested within the retry budget (issue #170)",
+    async () => {
+      // A clean truncation that delivered no parts yet is safe to replay: the
+      // consumer saw nothing, so the retry only replaces a body that never
+      // reached it. The first attempt serves an empty body, the second a
+      // complete answer — the hit count proves the re-request happened.
+      await withEnv("goat", async () => {
+        let requests = 0
+        const options: MockCcOptions = { chatCompletionsStream: [eventsEnd] }
+        options.onChatCompletions = () => {
+          requests++
+          if (requests === 2) {
+            options.chatCompletionsStream = [openAIChunk("hello"), openAIFinishChunk()]
+          }
+        }
+        const mock = await startMockCc(options)
+        try {
+          const provider = createCommandCode({
+            apiKey: "test_key",
+            baseURL: mock.url,
+            maxRetries: 1,
+            maxRetryDelayMs: 0,
+          })
+          const parts = await collect(provider.languageModel("gpt-5.6-terra"), [
+            { role: "user", content: "hi" },
+          ])
+          assertEqual(mock.hits.chatCompletions, 2)
+          assertEqual(
+            parts.map((p) => p.type),
+            ["text-start", "text-delta", "text-end", "finish"],
+          )
+          assertEqual((parts[1] as { delta: string }).delta, "hello")
+        } finally {
+          await mock.close()
+        }
+      })
+    },
+  ],
+  [
+    "transport: doGenerate fails on a truncated body exactly as doStream does (issue #170)",
+    async () => {
+      await withEnv("goat", async () => {
+        const mock = await startMockCc({
+          chatCompletionsStream: [openAIChunk("half an ans"), eventsEnd],
+        })
+        try {
+          const provider = createCommandCode({ apiKey: "test_key", baseURL: mock.url })
+          let error: (Error & { status?: number }) | undefined
+          try {
+            await provider.languageModel("gpt-5.6-terra").doGenerate({
+              prompt: [{ role: "user", content: "hi" }],
+              mode: { type: "regular" },
+            } as never)
+          } catch (generateError: unknown) {
+            error = generateError as Error & { status?: number }
+          }
+          assert(error, "doGenerate rejects a truncated body")
+          assertEqual(error.name, "TruncatedStreamError")
+          assertEqual(error.status, 502)
+          assertEqual(error.message, TRUNCATION_MESSAGE)
+        } finally {
+          await mock.close()
+        }
+      })
+    },
+  ],
+  [
+    "transport: a stream that ends without a finish event is truncated, and closes open parts first (issues #72, #170)",
     async () => {
       // A dropped connection is the other half of "failed mid-generation": the
-      // transport synthesizes a finish to terminate the stream, and the parts
-      // the server never closed must be closed before it.
+      // body ended cleanly with no terminal event, so the turn is truncated —
+      // never a synthesized finish that masks it as a successful stop (issue
+      // #170) — and the parts the server never closed are closed before the
+      // error part that ends the stream (issue #72).
       await withEnv("goat", async () => {
         const mock = await startMockCc({
           chatCompletionsStream: [
             { id: "gen_cut", choices: [{ delta: { content: "half an ans" } }] },
+            eventsEnd,
+          ],
+          stream: [textDelta("half an ans"), eventsEnd],
+        })
+        try {
+          const provider = createCommandCode({ apiKey: "test_key", baseURL: mock.url })
+          const parts = await collect(provider.languageModel("gpt-5.6-terra"), [
+            { role: "user", content: "hi" },
+          ])
+          assertEqual(
+            parts.map((p) => p.type),
+            ["text-start", "text-delta", "text-end", "error"],
+          )
+          assertEqual((parts[0] as { id: string }).id, "gen_cut")
+          assertEqual((parts[2] as { id: string }).id, "gen_cut")
+          const truncation = parts[3]!.error as Error & { status?: number }
+          assertEqual(truncation.message, TRUNCATION_MESSAGE)
+          assertEqual(truncation.name, "TruncatedStreamError")
+          assertEqual(truncation.status, 502)
+
+          // The legacy /alpha/generate transport truncates identically: its
+          // codec emits no text-start, and it has no open parts to close.
+          const legacyParts = await collect(
+            provider.languageModel("gpt-5.6-terra"),
+            [{ role: "user", content: "hi" }],
+            { commandcode: { plan: "go" } },
+          )
+          assertEqual(
+            legacyParts.map((p) => p.type),
+            ["text-delta", "error"],
+          )
+          assertEqual((legacyParts[1]!.error as Error).message, TRUNCATION_MESSAGE)
+        } finally {
+          await mock.close()
+        }
+      })
+    },
+  ],
+  [
+    "transport: a finish_reason before the body ends is a complete turn, usage chunk or not (issue #170)",
+    async () => {
+      // Only a close with no terminal at all is a truncation. The Provider API
+      // reports finish_reason on the last content chunk and usage on a separate
+      // trailing chunk, so a body that stops between them has still declared the
+      // turn complete: the transport surfaces the finish it was given (zero
+      // usage) rather than a failure the provider never signalled. Losing that
+      // trailing usage chunk is the exact case the held finish exists for.
+      await withEnv("goat", async () => {
+        const mock = await startMockCc({
+          chatCompletionsStream: [
+            openAIChunk("hello"),
+            { id: "chatcmpl-test", choices: [{ delta: {}, finish_reason: "stop" }] },
             eventsEnd,
           ],
         })
@@ -1582,8 +1857,12 @@ run([
             parts.map((p) => p.type),
             ["text-start", "text-delta", "text-end", "finish"],
           )
-          assertEqual((parts[0] as { id: string }).id, "gen_cut")
-          assertEqual((parts[2] as { id: string }).id, "gen_cut")
+          const finish = parts[3] as {
+            finishReason: { unified: string }
+            usage: { inputTokens: { total: number } }
+          }
+          assertEqual(finish.finishReason.unified, "stop")
+          assertEqual(finish.usage.inputTokens.total, 0)
         } finally {
           await mock.close()
         }

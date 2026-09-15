@@ -31,6 +31,7 @@ import {
 import {
   parseStreamEventLine,
   ccEventToStreamPart,
+  ccEventIsTerminal,
   createOpenAIStreamParser,
   createAnthropicStreamParser,
   type StreamEventParser,
@@ -130,6 +131,46 @@ class UpgradeRequiredError extends Error {
   }
 }
 
+/**
+ * Errors the transport raises itself, which `fail` surfaces without re-wrapping
+ * (issue #170). The marker carries the invariant: the message is the
+ * transport's own, already redacted where it is built, and the metadata an AI
+ * SDK v3 `error` part has room for — `name`, `status` — rides on the instance.
+ */
+interface TransportError extends Error {
+  readonly transportError: true
+}
+
+function isTransportError(error: unknown): error is TransportError {
+  return (
+    error instanceof Error &&
+    (error as Error & { transportError?: unknown }).transportError === true
+  )
+}
+
+/**
+ * The response body ended cleanly without a terminal event — a proxy/CDN
+ * truncation, or a server that flushed partial work and ended the body. It is
+ * raised instead of fabricating a `finish(stop)` with zeroed usage, which
+ * masked a dropped turn as a complete answer (issue #170). The message mirrors
+ * upstream `command-code@1.54.0` verbatim, and `name`/`status` ride on the
+ * Error because an AI SDK v3 `error` part carries nothing else.
+ */
+class TruncatedStreamError extends Error implements TransportError {
+  readonly transportError = true as const
+  readonly status = 502
+  constructor() {
+    // Redacted where it is built, so `fail` may surface the instance as-is even
+    // if the wording ever grows a provider-supplied part.
+    super(
+      redactCommandCodeErrorText(
+        "Stream ended unexpectedly before completion (no finish event) — response was truncated",
+      ),
+    )
+    this.name = "TruncatedStreamError"
+  }
+}
+
 /** One transport pass: endpoint, body, headers, event mapper, and whether a
  * documented `403 upgrade_required` on this endpoint flips the session to the
  * legacy transport. Only the Provider API descriptor flips; the legacy
@@ -142,9 +183,14 @@ interface TransportDescriptor {
   headers: Record<string, string>
   eventToParts: (event: unknown) => LanguageModelV3StreamPart[]
   /** Closes the parts a stateful parser still has open when the stream ends
-   * without a terminal event (error, abort, truncated body — issue #72); the
-   * legacy codec holds no per-stream state and omits it. */
+   * without a finish part (a mid-stream error, an abort, a truncated body —
+   * issue #72); the legacy codec holds no per-stream state and omits it. */
   closeStream?: () => LanguageModelV3StreamPart[]
+  /** True for events that end this transport's stream without a finish part —
+   * the legacy `{"type":"abort"}` terminal. A close after one is not a
+   * truncation, the parts still open are closed, and no finish is fabricated
+   * for it (issue #170); the Provider API descriptors omit it. */
+  isTerminalEvent?: (event: unknown) => boolean
   flipOnUpgradeRequired: boolean
 }
 
@@ -473,6 +519,7 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
       bodyStr: JSON.stringify(this.bodyFor(options)),
       headers: this.headersFor(options),
       eventToParts: ccEventToStreamPart,
+      isTerminalEvent: ccEventIsTerminal,
       flipOnUpgradeRequired: false,
     }
     return this.transportStream(
@@ -500,7 +547,14 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
     const url = `${this.apiBase()}/alpha/generate`
     const bodyStr = JSON.stringify(body)
     return this.transportStream(
-      { url, bodyStr, headers, eventToParts: ccEventToStreamPart, flipOnUpgradeRequired: false },
+      {
+        url,
+        bodyStr,
+        headers,
+        eventToParts: ccEventToStreamPart,
+        isTerminalEvent: ccEventIsTerminal,
+        flipOnUpgradeRequired: false,
+      },
       signal,
       sink,
     )
@@ -535,22 +589,32 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
 
     return new ReadableStream<LanguageModelV3StreamPart>({
       start: async (streamController) => {
+        // True once any part other than `finish` reached the consumer. A
+        // retried attempt replays the request from the start, so it may only
+        // happen while the consumer has seen nothing — part lifecycles cannot
+        // be replayed either (issue #170). Per stream: never reset per attempt.
+        let visibleEmitted = false
         const emit = (part: LanguageModelV3StreamPart) => {
+          if (part.type !== "finish") visibleEmitted = true
           sink?.push(part)
           streamController.enqueue(part)
         }
         // Set once an error part has ended the stream: nothing may be emitted
         // afterwards, and the controller must not be closed twice.
         let closed = false
+        /** The `error` part's payload for a failure: a transport-raised error
+         * (already redacted, and carrying the `name`/`status` an AI SDK v3
+         * `error` part has no room for) is surfaced as-is, everything else is
+         * re-wrapped with its message redacted (issue #170). */
+        const surfacedError = (error: unknown): Error =>
+          isTransportError(error)
+            ? error
+            : new Error(
+                redactCommandCodeErrorText(error instanceof Error ? error.message : String(error)),
+              )
         const fail = (error: unknown) => {
           if (closed) return
-          const message = error instanceof Error ? error.message : String(error)
-          const part: LanguageModelV3StreamPart = {
-            type: "error",
-            error: new Error(redactCommandCodeErrorText(message)),
-          }
-          sink?.push(part)
-          streamController.enqueue(part)
+          emit({ type: "error", error: surfacedError(error) })
           streamController.close()
           closed = true
         }
@@ -583,13 +647,26 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
            * lets a later usage-bearing finish replace the earlier one.
            */
           let heldFinish: Extract<LanguageModelV3StreamPart, { type: "finish" }> | undefined
+          /** Set once the stream saw a terminal event: a finish held for
+           * emission, or a terminal that carries no finish part (the legacy
+           * `abort`). Nothing resets it — a retry is unreachable after one. */
+          let terminalSeen = false
+          /** Set by a terminal that carries no finish part: it ends the turn
+           * *and* the read, since nothing after it belongs to the turn. */
+          let terminalEndsRead = false
           /** Closes the parts a stateful parser still has open — the last thing
-           * the consumer sees before an error part or a synthesized finish. */
+           * the consumer sees before an error part ends the stream, or before
+           * the clean end of a terminal that carries no finish (issue #170). */
           const closeOpenParts = () => {
             for (const part of t.closeStream?.() ?? []) emit(part)
           }
-          const handleEvent = (event: unknown): boolean => {
-            if (!isRecord(event)) return false
+          /** Handles one SSE event, recording the terminal it declared: a
+           * `finish` held for emission (the read keeps draining for a trailing
+           * usage chunk), or a finish-less terminal that ends the turn and the
+           * read together — nothing after the legacy `abort` belongs to the
+           * turn. A mapper error ends the stream through `fail`. */
+          const handleEvent = (event: unknown): void => {
+            if (!isRecord(event)) return
             try {
               const parts = t.eventToParts(event)
               for (const part of parts) {
@@ -599,13 +676,14 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
                   emit(part)
                 }
               }
-              return heldFinish !== undefined
+              if (t.isTerminalEvent?.(event) ?? false) terminalEndsRead = true
+              if (terminalEndsRead || heldFinish !== undefined) terminalSeen = true
             } catch (streamError) {
               // The mapper threw on the event that failed the stream: close what
               // it opened before the error part ends the stream (issue #72).
               closeOpenParts()
               fail(streamError)
-              return true
+              terminalSeen = true
             }
           }
 
@@ -616,7 +694,6 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
             signal?.addEventListener("abort", onOuterAbort, { once: true })
             if (signal?.aborted) throw abortError("Aborted")
             let response!: Response
-            let finished = false
             retryLoop: for (let attempt = 0; ; attempt++) {
               const attemptController = new AbortController()
               let attemptTimedOut = false
@@ -716,9 +793,7 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
                   if (controller.signal.aborted) throw abortError("Aborted")
                   const { done, value } = await raceAbort(reader.read(), attemptController.signal)
                   if (done) {
-                    if (!closed && buffer.trim()) {
-                      if (handleEvent(parseStreamEventLine(buffer))) finished = true
-                    }
+                    if (!closed && buffer.trim()) handleEvent(parseStreamEventLine(buffer))
                     break
                   }
                   if (controller.signal.aborted) throw abortError("Aborted")
@@ -729,18 +804,27 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
 
                   for (const line of lines) {
                     if (controller.signal.aborted) throw abortError("Aborted")
-                    if (handleEvent(parseStreamEventLine(line))) finished = true
+                    handleEvent(parseStreamEventLine(line))
                     // Do NOT break on a finish event: an OpenAI Provider stream
                     // may send the terminal `usage`-only chunk (choices:[]) after
                     // a finish_reason chunk. Keep draining so heldFinish is
                     // replaced with the usage-bearing finish before we emit it.
-                    // An error event does end the stream: the error part is the
-                    // last thing the consumer may see (issue #72).
-                    if (closed) break readLoop
+                    // A finish-less terminal and an error event do end the read:
+                    // nothing after them belongs to the turn (issue #170), and
+                    // the error part is the last thing the consumer may see
+                    // (issue #72).
+                    if (closed || terminalEndsRead) break readLoop
                   }
                 }
 
-                // Stream completed successfully.
+                // The body ended. Only a terminal event completes a turn: a
+                // clean close without one is a truncated response and must not
+                // look like a successful stop (issue #170).
+                if (!terminalSeen && !closed) throw new TruncatedStreamError()
+                // A finish-less terminal ends the read early, so the body may
+                // still be open: release it instead of waiting for a server that
+                // has already aborted the turn.
+                await reader.cancel().catch(() => {})
                 break retryLoop
               } catch (streamError: unknown) {
                 // Stream-level error (e.g. API returned 200 OK but sent an error
@@ -758,10 +842,17 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
 
                 if (controller.signal.aborted) throw streamError
 
-                // Never retry after visible content was emitted (including timeout mid-stream).
-                const canRetry = !finished && attempt < maxRetries
+                // Never retry after visible content was emitted (including
+                // timeout mid-stream, or a truncation that already delivered
+                // text): a replay would duplicate what the consumer saw. A
+                // parsed terminal also settles the decision — the terminal is in
+                // hand (issue #170).
+                const canRetry = !terminalSeen && !visibleEmitted && attempt < maxRetries
                 if (canRetry) {
-                  finished = false
+                  // Nothing to carry over into the retry: reaching it means no
+                  // terminal was seen and nothing visible was emitted, so the
+                  // held finish, `terminalSeen` and `terminalEndsRead` are all
+                  // empty, and `visibleEmitted` must stay false.
                   const waitMs = attemptTimedOut ? 0 : retryDelayMs(attempt, null, maxRetryDelayMs)
                   if (waitMs > 0) await delay(waitMs, controller.signal)
                   continue retryLoop
@@ -786,20 +877,12 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
                 costUsageFromAiSdkUsage(heldFinish.usage),
               )
               emit(heldFinish)
-            } else if (!finished) {
-              // The server closed the stream without a finish event; the AI SDK
-              // expects a finish part to terminate a stream. Parts the server
-              // never closed are closed first, so the consumer is not left
-              // holding an open part past the finish (issue #72).
+            } else {
+              // A terminal that carries no finish part — the legacy
+              // `{"type":"abort"}` event. The stream ends cleanly: no finish is
+              // fabricated for it (issue #170), but the parts the server left
+              // open are closed before the consumer sees the end (issue #72).
               closeOpenParts()
-              emit({
-                type: "finish",
-                finishReason: { unified: "stop", raw: "stop" },
-                usage: {
-                  inputTokens: { total: 0, noCache: 0, cacheRead: 0, cacheWrite: 0 },
-                  outputTokens: { total: 0, text: 0, reasoning: 0 },
-                },
-              })
             }
             streamController.close()
           } catch (error: unknown) {
