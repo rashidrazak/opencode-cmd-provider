@@ -1,5 +1,16 @@
 ## Unreleased
 
+### Documentation
+
+- **`README.md` is now a first-time-user guide**: what the plugin does, which
+  OpenCode version you are on, separate install sections for v1 and v2, how to
+  connect, how to use it, updating, uninstalling, and troubleshooting — with no
+  implementation detail. Everything technical moved to
+  [`docs/TECHNICAL.md`](docs/TECHNICAL.md): host/entry-point contracts, install
+  mechanics and caching, generated catalogs and the refresh pipeline, Deals
+  intelligence internals, environment overrides, development and the e2e gates,
+  maintainer troubleshooting, and the ADR index.
+
 ### Deals intelligence
 
 - **The `Command Code` sidebar is back on OpenCode v2.** `dist/tui.js` only

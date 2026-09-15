@@ -3,381 +3,204 @@
 [![CI](https://github.com/rashidrazak/opencode-cmd-provider/actions/workflows/ci.yml/badge.svg)](https://github.com/rashidrazak/opencode-cmd-provider/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/opencode-cmd-provider)](https://www.npmjs.com/package/opencode-cmd-provider)
 
-A provider and plugin for [OpenCode](https://opencode.ai) that connects to the [Command Code](https://commandcode.ai) Provider API. This enables you to use ALL Command Code plans — Go, GOAT, Pro, Max 10×, Max 20×, Provider, Team, and Enterprise — with OpenCode.
+Use your [Command Code](https://commandcode.ai) plan inside
+[OpenCode](https://opencode.ai).
 
-One package serves both OpenCode lines: **v1** (1.18.x and the object-entrypoint
-releases before it) and **v2** (2.0.x). Auto-registration, `COMMANDCODE_API_KEY`
-auth, `provider/*` streaming, and `cmd_plan_summary` behave the same in either
-host; the two halves are recorded in [ADR-0010](docs/adr/0010-dual-v1-v2-plugin-entrypoint.md).
+This plugin connects OpenCode to Command Code and adds every Command Code model
+to the model picker, so you can use your Go, GOAT, Pro, Max 10×, Max 20×,
+Provider, Team, or Enterprise plan from OpenCode. It also adds a **Command
+Code** section to the session sidebar with your plan's allowances, benchmarks,
+and current deals.
 
-> **Disclaimer:** This is an unofficial, community-maintained integration. It is not affiliated with, endorsed by, or supported by Command Code. You need your own Command Code account and API key or subscription. Command Code's terms, availability, and pricing apply.
+> **Disclaimer:** This is an unofficial, community-maintained integration. It is
+> not affiliated with, endorsed by, or supported by Command Code. You need your
+> own Command Code account, and Command Code's terms, availability, and pricing
+> apply.
 
-## Install
+## Before you start
+
+- **OpenCode** installed — [opencode.ai](https://opencode.ai).
+- **A Command Code account and API key** — [commandcode.ai](https://commandcode.ai).
+
+Not sure which OpenCode version you have? Run:
+
+```sh
+opencode --version
+```
+
+- Prints `1.18.x` (or lower) → follow **[Install on OpenCode v1](#install-on-opencode-v1)**.
+- Prints `2.0.x` → follow **[Install on OpenCode v2](#install-on-opencode-v2)**.
+
+## Install on OpenCode v1
 
 ```sh
 opencode plugin opencode-cmd-provider
 ```
 
-On OpenCode **v2** the config key is `plugins` (not `plugin`) and a
-package-plus-options entry is an object rather than a tuple:
-
-```jsonc
-// opencode.json (v2)
-{
-  "$schema": "https://opencode.ai/config.json",
-  "plugins": ["opencode-cmd-provider"],
-}
-```
-
-Update an existing install — OpenCode caches the plugin package and reuses it
-on every startup without checking for a newer version, so updating means
-deleting the cache:
-
-```sh
-rm -rf ~/.cache/opencode/packages/opencode-cmd-provider*
-```
-
-The runtime provider is registered under this package's exact version
-(`opencode-cmd-provider@<version>`), so it lives in its own cache directory and
-can never drift away from the plugin that registered it — the wildcard above
-removes those directories too. Nothing updates by itself: without the delete,
-both halves stay at the version you installed.
-
-Restart OpenCode afterwards. The plugin is re-downloaded, so that first launch
-takes a little longer than usual; subsequent startups are fast again. The first
-Command Code request after an update also fetches the matching runtime provider.
-
-Install globally (available in every project):
+Run it inside the project where you want the plugin, or add `--global` to make
+it available in every project:
 
 ```sh
 opencode plugin opencode-cmd-provider --global
 ```
 
-Manual config also works:
+That one command adds the plugin to your OpenCode configuration, registers
+Command Code and all of its models, and adds the sidebar section. **Restart
+OpenCode** when it finishes.
 
-```jsonc
-// opencode.json
-{
-  "$schema": "https://opencode.ai/config.json",
-  "plugin": ["opencode-cmd-provider"],
-}
+## Install on OpenCode v2
+
+OpenCode v2 uses a different command — note the `add`:
+
+```sh
+opencode plugin add opencode-cmd-provider
 ```
 
-Then authenticate:
+This adds the plugin to your global OpenCode configuration, so it works in every
+project, registers Command Code and all of its models, and adds the sidebar
+section. **Restart OpenCode** when it finishes.
+
+If an install command fails on your machine, you can add the plugin to your
+configuration by hand — see
+[Installation mechanics](docs/TECHNICAL.md#installation-mechanics-and-caching) in
+the technical reference.
+
+## Connect your Command Code account
+
+### OpenCode v1: sign in from the browser
+
+In OpenCode, run:
 
 ```txt
 /connect
 ```
 
-Select **Command Code**, complete the browser flow, and pick a model with `/models`.
+Select **Command Code** and finish the sign-in in your browser. That's it — the
+key is stored by OpenCode and reused from then on.
 
-## Authentication
+### OpenCode v2: use your API key
 
-### Browser login
-
-Run `/connect` in OpenCode and select **Command Code**. The browser flow stores the returned credential in OpenCode's auth store.
-
-The credential is also mirrored under `command-code` in OpenCode's auth store and to `~/.commandcode/auth.json` (official CLI layout, only written when that file does not already hold a different credential). Ecosystem consumers such as OpenChamber's Usage page read those locations. Mirroring is best-effort; if it fails, `/connect` still succeeds.
-
-If automatic transfer from the browser fails, copy the API key shown by Command Code and export it as `COMMANDCODE_API_KEY` (see below).
-
-### Environment variable
+OpenCode v2 has no browser sign-in for Command Code. Set your API key before
+starting OpenCode:
 
 ```sh
 export COMMANDCODE_API_KEY="user_..."
 ```
 
-### Legacy auth files
+Or run `/connect` inside OpenCode and paste the key when asked.
 
-The provider also reads existing credentials from:
+### Already signed in with the Command Code CLI?
 
-- `~/.commandcode/auth.json`
-- `~/.omp/agent/auth.json`
-- `~/.pi/agent/auth.json`
+OpenCode reuses an existing Command Code CLI login automatically, so you may not
+need to connect at all.
 
-Supported examples:
+## Start using it
 
-```json
-{
-  "apiKey": "user_..."
-}
-```
+1. Pick a model: run `/models` and choose any entry starting with `[CMD]`,
+   for example `[CMD] Claude Sonnet 5`.
+2. Start chatting. Your Command Code plan handles the requests.
 
-```json
-{
-  "command-code": {
-    "type": "api",
-    "key": "user_..."
-  }
-}
-```
-
-```json
-{
-  "commandcode": "user_..."
-}
-```
-
-## Usage
-
-Pick a model with `/models`, or run non-interactively:
+Prefer the command line? Run a single prompt without the interactive interface:
 
 ```sh
 opencode run --model commandcode/claude-sonnet-5 "hello"
 ```
 
-## Deals intelligence
+## What you get
 
-Every Command Code model ships with deal/allowance/benchmark intelligence
-(bundled in `src/deals/catalog.ts`), extracted from the Command Code docs'
-React Server Components (RSC) stream — the structured payload the docs site
-serves for `rsc: 1` requests (see ADR-0005). It surfaces in two places:
+### The Command Code sidebar
 
-- **Sidebar** — in a session, the OpenCode sidebar (`ctrl+x b`) shows a
-  `Command Code` section for the selected model: tier, GOAT/Pro allowance,
-  benchmark (intelligence, tok/s), deal discounts (`was`/`now` rates), and
-  peak/off-peak windows.
-- **`cmd_plan_summary` tool** — plan-aware allowances and deal rates, to
-  estimate monthly requests.
+While a session uses a `[CMD]` model, the sidebar shows a **Command Code**
+section for that model:
 
-The tool detects your plan from the account's billing subscription
-(`GET /alpha/billing/subscriptions`, org-scoped through `/alpha/whoami`), using
-the credential OpenCode already holds — no exported env var required. Pass the
-`plan` argument or set `COMMANDCODE_PLAN`
-(`go|goat|pro|max|max20|teampro|provider`) to pin it and skip the lookup
-entirely. When no plan can be detected the summary says so — it never falls
-back to a plan you may not be on (ADR-0011). Plan detection is not used to
-choose a transport: inference starts on the Provider API unless you explicitly
-pin `plan=go`, and a Go account switches to the legacy endpoint automatically
-when the Provider API answers `403 upgrade_required`.
+- your plan tier and monthly allowances
+- benchmark scores (intelligence, tokens/second)
+- current deals and `was`/`now` rates
+- peak / off-peak windows
 
-Delivery is zero-step on both hosts: the package exports both a `server` and a
-`tui` target (`exports["./tui"]` → `dist/tui.js`), and `opencode plugin
-opencode-cmd-provider` writes both `opencode.json(c)` and `tui.json` from one
-spec — on v2 the installer writes the global `plugins` entry instead and the TUI
-host loads the package's `./tui` entrypoint itself. Installs made before the
-`./tui` export only wrote the server target and never showed a sidebar; re-run
-`opencode plugin opencode-cmd-provider --force` (v1) or `opencode plugin add
-opencode-cmd-provider` (v2) to add it (this only rewrites the config entry — see
-[Update and remove](#update-and-remove) for refreshing the cached package).
+Toggle the sidebar with `ctrl+x b`. Switch to a model that isn't from Command
+Code and the section disappears — there is nothing to show for other providers.
 
-`dist/tui.js` carries one default export with both TUI host contracts — v1's
-`{ id, tui(api) }` registering the `sidebar_content` slot, and v2's
-`{ id, setup(context) }` claiming the dot-separated `"sidebar.content"` path
-(ADR-0010). Shipping only one half is invisible on the other host: the v2 TUI
-rejects a module without `setup()` with `Invalid V2 TUI plugin module` and the
-sidebar silently never appears — the missing-v2-sidebar bug this package fixed by
-shipping both halves.
+### Plan and deal summaries
 
-When the Deals catalog is empty (the upstream fetch failed or the RSC shape
-changed), the feature degrades visibly rather than silently: the sidebar shows
-a `Deals unavailable` banner with placeholder rows, and `cmd_plan_summary`
-reports that no deal data is bundled. Core (models, auth, streaming) is
-unaffected.
+Ask OpenCode something like _"How many requests does my Command Code plan cover
+this month?"_ and it uses the built-in `cmd_plan_summary` tool: your plan's
+allowances and the current deals, turned into an estimate. If you want to force
+a plan, add it to the question (for example `plan=pro`).
 
-## Model discovery and offline behavior
+### Everyday details
 
-The plugin ships two bundled catalogs and auto-registers every model into
-OpenCode's config at startup, with the `[CMD]` display-name prefix (e.g.
-`[CMD] Claude Sonnet 5`) so they aren't confused with same-named models from
-other providers. Free-tier variants that share an upstream display name with a
-paid model (e.g. the MiniMax M3 free tier) get a `(free)` suffix —
-`[CMD] MiniMax M3 (free)` — so the two are distinguishable in the model
-picker. The suffix is derived from the bundled pricing table: a model is
-labeled free only when the catalog carries an explicit zero-cost entry. Model
-availability changes when the package is updated — but note that OpenCode's
-plugin cache can hold a stale copy after a release if new models don't appear
-(see [Update and remove](#update-and-remove)). You can still declare your
-own `provider.commandcode` entry; your declarations always win and the
-snapshot fills in only what's missing (`whitelist`/`blacklist` on a declared
-entry filter the auto-registered models too).
+- **Reasoning models** show their effort levels in OpenCode, so you can pick how
+  hard the model should think.
+- **Vision models** accept image input; text-only models will tell you instead of
+  silently ignoring the image.
+- **Costs** shown in OpenCode are estimates from Command Code's published
+  pricing, and some models show `$0` because no price is published for them.
+  Check the current
+  [Command Code pricing](https://commandcode.ai/docs/resources/pricing-limits)
+  before relying on the numbers.
 
-The `[CMD] ` display-name prefix is configurable through the declared
-provider entry's options:
+## Keep it up to date
 
-```jsonc
-{
-  "provider": {
-    "commandcode": {
-      "options": {
-        "display_prefix": "", // default "[CMD] "; empty string disables
-      },
-    },
-  },
-}
+A new release only reaches you after OpenCode refreshes its cached copy of the
+plugin.
+
+**OpenCode v2:**
+
+```sh
+opencode plugin update
 ```
 
-On OpenCode **v2** the same knob lives one schema level over — providers are
-`providers` and the free-form bag is `settings`:
-
-```jsonc
-{
-  "providers": {
-    "commandcode": {
-      "settings": {
-        "display_prefix": "",
-      },
-    },
-  },
-}
-```
-
-Declared model entries are never renamed; the prefix applies to
-auto-registered models only.
-
-- Snapshot — `src/catalog/snapshot.ts` (model ids, names, context lengths) plus
-  `src/catalog/facts.ts` (reasoning efforts, per-1M-token rates, input
-  modalities). Regenerated from the live catalog via `npm run refresh:snapshot`.
-- Classification — `src/catalog/classification.ts` (per-model reasoning
-  capability, derived from the `reasoning` flag on the docs' RSC slug
-  records; ADR-0006). Regenerated via `npm run refresh:classification`; the
-  runtime derives its reasoning metadata from this module, so upstream
-  classification changes land as data, never as hand edits.
-- Deals — `src/deals/catalog.ts` (per-model tier, benchmarks, deal
-  discounts, `was`/`now` rates, peak/off-peak windows, and GOAT/Pro monthly
-  allowances for every model). Extracted from the Command Code docs' RSC
-  stream (the `pricing-limits`, `plans/goat`, `plans/pro` pages fetched with
-  an `rsc: 1` header; fixtures in `tests/fixtures/rsc-*.txt`) via
-  `npm run refresh:deals`. Standalone live runs fall back to the committed
-  fixtures on 5xx/network failure and fail loudly on 4xx; add
-  `-- --fixtures` to regenerate offline from the committed fixtures.
-
-Run `npm run refresh` to regenerate everything at once: the snapshot and
-facts come from the live Command Code catalog, the RSC fixtures are
-re-captured from the live docs pages (`npm run refresh:fixtures`), and the
-classification module and deals catalog are regenerated from the fresh
-fixtures — so fixtures, catalogs, and tests stay in lockstep. A daily GitHub
-Actions cron
-(`.github/workflows/catalog-refresh.yml`, 06:00 UTC, also manually
-triggerable via `workflow_dispatch`) runs the same pipeline: when upstream
-moved it opens a `chore: catalog refresh` PR whose body is the human-readable
-diff from `scripts/diff-catalog.mjs` — model catalog (change table plus
-removed-models, pending-enrichment, carried-forward-context, cost-fallback,
-API-divergence, and banded-pricing subsections), reasoning
-classification (flips, new reasoning models, retirements, active overrides),
-and deals sections; when nothing meaningful drifted it exits silently (a
-run whose only change is the refreshed-date stamps opens no PR).
-
-Auto-registration adds no network latency to OpenCode startup — the snapshot is
-bundled, and the plugin never contacts the Command Code API to list models. The
-plugin works fully offline; model availability never depends on the catalog
-endpoint being reachable.
-
-The following environment variables are intended for tests, local mocks, and
-compatible API endpoints:
-
-| Variable                      | Purpose                                    |
-| ----------------------------- | ------------------------------------------ |
-| `COMMANDCODE_API_BASE`        | Override the Command Code API base URL     |
-| `COMMANDCODE_FACTS_URL`       | Override the bundled `models.md` URL       |
-| `COMMANDCODE_MODALITIES_URL`  | Override the CLI bundle URL                |
-| `COMMANDCODE_RSC_PRICING_URL` | Override the `pricing-limits` RSC page URL |
-| `COMMANDCODE_RSC_GOAT_URL`    | Override the `plans/goat` RSC page URL     |
-| `COMMANDCODE_RSC_PRO_URL`     | Override the `plans/pro` RSC page URL      |
-
-### Reasoning support
-
-Reasoning metadata is derived from the generated catalogs (ADR-0006): models
-upstream flags as reasoning-capable advertise `reasoning: true`
-automatically — with explicit effort variants when the generated facts list
-effort levels, and without variants otherwise. Supported levels are sent as
-the documented `reasoning_effort` request field; `off`, unsupported levels,
-and newly discovered models without metadata do not add reasoning fields to
-the request. No prompt instructions are injected.
-
-Reasoning blocks from completed assistant turns are not replayed to Command Code in later requests; only the user-visible text and completed tool calls are sent back as history. This prevents prior private reasoning traces from interfering with reasoning on follow-up turns.
-
-## Image input
-
-Image input is advertised only for models marked with the `image` input modality in the Command Code CLI bundle. The release-time refresh generates this map into `src/catalog/facts.ts`; unknown models default to text-only until their upstream metadata is reviewed.
-
-For vision-capable models, image blocks from user messages and tool results are forwarded in Command Code's data-URL wire format. Text-only models reject image content before making a network request instead of silently dropping it.
-
-## Pricing display
-
-The Command Code Provider API does not currently include prices in its model catalog. This provider generates a table from the bundled `models.md` catalog so OpenCode can display estimated request costs.
-
-Models missing from that table display zero cost in OpenCode. This does **not** mean Command Code will bill the request at zero. Check the current [Command Code pricing](https://commandcode.ai/docs/resources/pricing-limits) before relying on the displayed value.
-
-## Update and remove
-
-### Updating
-
-OpenCode caches the plugin package (`~/.cache/opencode/packages/`) and reuses
-the cached copy on every startup without checking for a newer version — so a
-new release won't appear until you delete the cache:
+**OpenCode v1:** delete the cached copy and restart OpenCode:
 
 ```sh
 rm -rf ~/.cache/opencode/packages/opencode-cmd-provider*
 ```
 
-Then restart OpenCode. The plugin is re-downloaded, so that first launch takes
-a little longer than usual; subsequent startups are fast again. If new Command
-Code models stop appearing in `/models` after a release, a stale cache entry is
-the most likely cause.
+The first start after an update takes a little longer because the plugin is
+downloaded again. You never need to sign in again.
 
-The runtime provider is registered under this package's exact version, so it
-lives in its own `opencode-cmd-provider@<version>` directory — the wildcard
-above removes those copies too. Nothing updates by itself: without the delete,
-both the plugin and its runtime provider stay at the version you installed.
+New Command Code models come with plugin updates, so if a model is missing from
+`/models`, updating is the fix.
 
-- **OpenChamber users:** click **Reload OpenCode** in OpenChamber's settings
-  instead of restarting manually — the running OpenCode server keeps the old
-  plugin loaded until it is restarted.
-- **No re-authentication needed.** Your API key is stored by OpenCode's
-  `/connect` flow in OpenCode's auth store (and mirrored to
-  `~/.commandcode/auth.json`), not inside the plugin package — the plugin reads
-  it from there (or the `COMMANDCODE_API_KEY` env var) at request time, so
-  deleting the plugin cache does not affect your login.
+## Uninstall
 
-### Removing
-
-Remove it from the `plugin` array in your `opencode.json` (the auto-registered
-`provider.commandcode` entry is injected by the plugin, so there is no config
-block to remove). The npm package is cached under OpenCode's plugin cache
-(`~/.cache/opencode/packages/`); remove the cached directory to fully
-uninstall.
-
-## Development
-
-Build, then run the full suite:
+**OpenCode v2:**
 
 ```sh
-npm install
-npm run build
-npm test
-npm run format:check
+opencode plugin remove opencode-cmd-provider
 ```
 
-`npm run build` needs [bun](https://bun.sh) on PATH — it compiles `src/deals/tui.tsx` with the solid transform (`scripts/build-tui.ts`), so the TUI panel's JSX props are reactive and the sidebar repaints on mid-session model switches.
+**OpenCode v1:** remove `opencode-cmd-provider` from the plugin list in your
+`opencode.json` (and from `tui.json` if it is listed there).
 
-The headless end-to-end test runs the real OpenCode CLI against a mock Command Code server through the built package:
+Then remove the cached copy to free the space:
 
 ```sh
-npm run build && npm run test:e2e      # OpenCode v1 host
-npm run build && npm run test:e2e:v2   # OpenCode v2 host
+rm -rf ~/.cache/opencode/packages/opencode-cmd-provider*
 ```
 
-Both scripts take the binary from `PATH` and accept `OPENCODE_BIN` to point at a
-specific install — each skips when that binary belongs to the other host's line,
-so a v1 and a v2 install can sit side by side:
+The provider and models this plugin registered disappear with it; there is
+nothing else to clean up.
 
-```sh
-# Keep a v1 binary next to the v2 install. npm skips the package's own
-# postinstall in some environments (it fetches the platform binary) — run it
-# yourself if `opencode --version` prints that hint.
-mkdir -p /tmp/ocv1 && npm install --prefix /tmp/ocv1 opencode-ai@1.18.30
-(cd /tmp/ocv1/node_modules/opencode-ai && node postinstall.mjs)
+## Troubleshooting
 
-OPENCODE_BIN=/tmp/ocv1/node_modules/.bin/opencode npm run test:e2e   # v1 host
-npm run test:e2e:v2                                                  # v2 host
-```
+| What you see                                | What to try                                                                                                                                       |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| No `[CMD]` models in `/models`              | Check that your API key is set (or that `/connect` succeeded), restart OpenCode, and update the plugin if your install is old.                    |
+| The sidebar has no **Command Code** section | Make sure the session uses a `[CMD]` model, and press `ctrl+x b` — the sidebar may be hidden.                                                     |
+| Browser sign-in fails (v1)                  | Set `COMMANDCODE_API_KEY` instead and restart OpenCode.                                                                                           |
+| A model shows `$0` cost                     | No published price for that model, so the estimate is `0`. See [Command Code pricing](https://commandcode.ai/docs/resources/pricing-limits).      |
+| Something else                              | See the [technical reference](docs/TECHNICAL.md#troubleshooting) or [open an issue](https://github.com/rashidrazak/opencode-cmd-provider/issues). |
 
-`scripts/opencode-fixture.mjs` writes a throwaway `opencode.json` wiring only the local build as a plugin — no declared provider or models — so `opencode models` proves auto-registration against a real opencode v1 binary. `test:e2e` is a local dev gate and is excluded from `npm test`.
+## Learn more
 
-`test:e2e:v2` does the same for v2. It installs the build at the documented v2 local-plugin path (`.opencode/plugins/commandcode/`), runs a headless session, and asserts what the host itself reports back — the provider, every Snapshot model, and the `/connect` integration. The final `opencode run` leg is known to hang against a local/mock base URL (upstream bug, anomalyco/opencode #14956, #5674, the same one the v1 script documents), so a hang there is reported as a skip rather than a failure. See [ADR-0010](docs/adr/0010-dual-v1-v2-plugin-entrypoint.md) for the dual-entrypoint design.
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for local setup and tests. See [RELEASE.md](RELEASE.md) for the release process.
+- **[Technical reference](docs/TECHNICAL.md)** — how the plugin works, where the
+  model and deals data comes from, configuration options, development, tests, and
+  the design decisions behind it.
+- **[CHANGELOG.md](CHANGELOG.md)** — what changed in each release.
+- **[CONTRIBUTING.md](CONTRIBUTING.md)** and **[RELEASE.md](RELEASE.md)** — for
+  contributors and maintainers.
 
 ## Credits
 

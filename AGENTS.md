@@ -107,8 +107,10 @@ fixtures (see `scripts/check-deals-coverage.mjs` and
   are worse: the v2 context is _injected_, so nothing needs them at all. Mirror
   their shapes in `src/plugin/v2-types.ts` and reference the v1 packages only via
   `import type`. Enforced by `tests/contract.test.ts` for both scopes.
-- The install command is `opencode plugin <pkg>` — **there is no `add`
-  subcommand** on opencode 1.18+.
+- The v1 install command is `opencode plugin <pkg>` — **there is no `add`
+  subcommand** on opencode 1.18+. v2 renamed it: `opencode plugin add <pkg>`
+  (with `list`, `check`, `update`, and `remove` siblings) and writes the global
+  `plugins` entry.
 
 ## Conventions
 
@@ -116,6 +118,10 @@ fixtures (see `scripts/check-deals-coverage.mjs` and
 - Use `CONTEXT.md` vocabulary (Model catalog, Snapshot, Auto-registration, Deals
   catalog, Deals intelligence, Core, Display name); don't drift to the "avoid"
   synonyms listed there.
+- **Docs split:** `README.md` is for users — install, connect, use, update,
+  troubleshoot — and stays free of internals (no ADRs, no `src/…` paths, no
+  config schema variants). Internals live in `docs/TECHNICAL.md`, linked from the
+  README; design decisions stay in `docs/adr/`.
 
 ## Agent skills
 
