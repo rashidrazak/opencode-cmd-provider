@@ -7,6 +7,10 @@
 //   Both emit usage at end without extra opt-in; errors use OpenAI {error:{message,type}} vs
 //   Anthropic {type:"error",error:{type,message}} envelopes (see #errors).
 //
+// Event mapping is split by scope: the stateful parsers own content (block
+// lifecycles, part ids, fragmented tool arguments) and the stateless mappers
+// cover only events that are complete in a single message.
+//
 // Port of pi's parseStreamEventLine / usage parsing / event mapping, emitting
 // the installed @ai-sdk/provider (3.x) v3 stream part shapes:
 //   - text-delta / reasoning-delta carry { id, delta }
@@ -375,80 +379,22 @@ export function anthropicEventToStreamPart(event: unknown): LanguageModelV3Strea
     throw new Error(redactCommandCodeErrorText(message))
   }
 
-  // Content delta: { type: "content_block_delta", delta: { type: "text_delta", text: "..." } }
-  if (type === "content_block_delta") {
-    const delta = asRecord(event.delta)
-    const text = stringValue(delta?.text)
-    if (typeof text === "string" && text.length > 0) {
-      const index = numberValue(event.index) ?? 0
-      const id = `text-${index}`
-      return [{ type: "text-delta", id, delta: text }]
-    }
-    // Tool input delta: { type: "input_json_delta", partial_json: "..." }
-    const partial = stringValue(delta?.partial_json)
-    if (typeof partial === "string" && partial.length > 0) {
-      const index = numberValue(event.index) ?? 0
-      const id = `tool-${index}`
-      // Emit as tool-input-delta; caller may have started tool
-      return [{ type: "tool-input-delta", id, delta: partial }]
-    }
+  // Content blocks belong to createAnthropicStreamParser, the only Anthropic
+  // entry point that sees a whole stream. A per-event mapper cannot complete
+  // them: `content_block_stop` carries just the block index — never the type —
+  // so the correct end part (`text-end`, `reasoning-end` or `tool-input-end`)
+  // is unknowable here, and a tool call whose `input_json_delta` fragments span
+  // events cannot be completed at all. Emitting a partial lifecycle (starts and
+  // deltas with no matching end) would orphan parts for any stateless caller,
+  // which is the failure #71 describes, so this codec stays silent for content
+  // and maps only the events that are complete in one message: errors, the
+  // terminal finish, ping, and the top-level usage fallback below.
+  if (
+    type === "content_block_start" ||
+    type === "content_block_delta" ||
+    type === "content_block_stop"
+  ) {
     return []
-  }
-
-  if (type === "content_block_start") {
-    const block = asRecord(event.content_block)
-    const blockType = stringValue(block?.type)
-    const index = numberValue(event.index) ?? 0
-    if (blockType === "text") {
-      const id = `text-${index}`
-      return [{ type: "text-start", id }]
-    }
-    if (blockType === "thinking") {
-      const id = stringValue(block?.id) ?? `thinking-${index}`
-      return [{ type: "reasoning-start", id }]
-    }
-    if (blockType === "tool_use") {
-      const id = stringValue(block?.id) ?? `tool-${index}`
-      const name = stringValue(block?.name) ?? ""
-      return [{ type: "tool-input-start", id, toolName: name }]
-    }
-    return []
-  }
-
-  if (type === "content_block_delta") {
-    const delta = asRecord(event.delta)
-    const index = numberValue(event.index) ?? 0
-    const text = stringValue(delta?.text)
-    if (typeof text === "string" && text.length > 0) {
-      const id = `text-${index}`
-      return [{ type: "text-delta", id, delta: text }]
-    }
-    const thinking = stringValue(delta?.thinking)
-    if (typeof thinking === "string" && thinking.length > 0) {
-      const id = `thinking-${index}`
-      return [{ type: "reasoning-delta", id, delta: thinking }]
-    }
-    // Tool input delta: { type: "input_json_delta", partial_json: "..." }
-    const partial = stringValue(delta?.partial_json)
-    if (typeof partial === "string" && partial.length > 0) {
-      const id = `tool-${index}`
-      // Emit as tool-input-delta; caller may have started tool
-      return [{ type: "tool-input-delta", id, delta: partial }]
-    }
-    return []
-  }
-
-  if (type === "content_block_stop") {
-    // Stateless codec: the STOP event carries only `index`, not the block type.
-    // Anthropic streams either `text`, `thinking` or `tool_use` blocks; the AI SDK expects
-    // `text-end` for text, `reasoning-end` for thinking, and `tool-input-end` for tool_use.
-    const index = numberValue(event.index) ?? 0
-    const idText = `text-${index}`
-    const idTool = `tool-${index}`
-    return [
-      { type: "text-end", id: idText },
-      { type: "tool-input-end", id: idTool },
-    ]
   }
 
   // Terminal message_delta: { type: "message_delta", delta: { stop_reason }, usage: { ... } }
@@ -488,10 +434,13 @@ export function anthropicEventToStreamPart(event: unknown): LanguageModelV3Strea
 // arrive in multiple SSE events (OpenAI streams `arguments` fragments across
 // chunks; Anthropic streams `input_json_delta` fragments before
 // `content_block_stop`): the final `tool-call` part would never be emitted
-// and fragment deltas would carry empty/index-only ids. These factories close
-// over per-stream tool-call buffers so one stream produces the same
-// observable parts as the legacy transport: tool-input-start / tool-input-
-// delta / tool-input-end / tool-call with the real tool id, then finish.
+// and fragment deltas would carry empty/index-only ids. They cannot complete a
+// content-block lifecycle either — `content_block_stop` names only the block
+// index, not its type (issue #71). These factories are the sole owners of
+// content: they close over per-stream state (block types and ids, tool-call
+// buffers) so one stream produces the same observable parts as the legacy
+// transport: text/reasoning/tool lifecycles with matching part ids and a final
+// tool-call carrying the real tool id, then finish.
 
 // Per-stream tool-call accumulator shared by both provider parsers: OpenAI
 // keys by tool-call `index` (fragmented `arguments`), Anthropic by content
@@ -669,7 +618,13 @@ export function createOpenAIStreamParser(): (event: unknown) => LanguageModelV3S
 
 export function createAnthropicStreamParser(): (event: unknown) => LanguageModelV3StreamPart[] {
   const toolBlocks = new Map<number, ToolCallBuffer>()
-  const blockTypes = new Map<number, "text" | "tool_use" | "thinking">()
+  // Per-index block state. `type` decides which end part `content_block_stop`
+  // emits; `id` is the part id chosen at `content_block_start`, reused by the
+  // delta and stop events so they close the part the consumer saw opened.
+  // Anthropic's thinking blocks carry no `id` today, but a gateway may add one,
+  // and re-deriving the id from the index at every event would then orphan the
+  // open reasoning part (issue #71).
+  const blocks = new Map<number, { type: "text" | "tool_use" | "thinking"; id: string }>()
   return (event) => {
     if (!isRecord(event)) return []
     const type = stringValue(event.type)
@@ -678,20 +633,21 @@ export function createAnthropicStreamParser(): (event: unknown) => LanguageModel
       const index = numberValue(event.index) ?? 0
       const blockType = stringValue(block?.type)
       if (blockType === "tool_use") {
-        blockTypes.set(index, "tool_use")
         const id = stringValue(block?.id) ?? `tool-${index}`
         const name = stringValue(block?.name) ?? ""
+        blocks.set(index, { type: "tool_use", id })
         toolBlocks.set(index, { id, name, input: "", started: true, emitted: false })
         return [{ type: "tool-input-start", id, toolName: name }]
       }
       if (blockType === "thinking") {
-        blockTypes.set(index, "thinking")
         const id = stringValue(block?.id) ?? `thinking-${index}`
+        blocks.set(index, { type: "thinking", id })
         return [{ type: "reasoning-start", id }]
       }
       if (blockType === "text") {
-        blockTypes.set(index, "text")
-        return [{ type: "text-start", id: `text-${index}` }]
+        const id = `text-${index}`
+        blocks.set(index, { type: "text", id })
+        return [{ type: "text-start", id }]
       }
       return []
     }
@@ -700,11 +656,17 @@ export function createAnthropicStreamParser(): (event: unknown) => LanguageModel
       const index = numberValue(event.index) ?? 0
       const text = stringValue(delta?.text)
       if (typeof text === "string" && text.length > 0) {
-        return [{ type: "text-delta", id: `text-${index}`, delta: text }]
+        return [{ type: "text-delta", id: blocks.get(index)?.id ?? `text-${index}`, delta: text }]
       }
       const thinking = stringValue(delta?.thinking)
       if (typeof thinking === "string" && thinking.length > 0) {
-        return [{ type: "reasoning-delta", id: `thinking-${index}`, delta: thinking }]
+        return [
+          {
+            type: "reasoning-delta",
+            id: blocks.get(index)?.id ?? `thinking-${index}`,
+            delta: thinking,
+          },
+        ]
       }
       const partial = stringValue(delta?.partial_json)
       if (typeof partial === "string" && partial.length > 0) {
@@ -738,9 +700,9 @@ export function createAnthropicStreamParser(): (event: unknown) => LanguageModel
     }
     if (type === "content_block_stop") {
       const index = numberValue(event.index) ?? 0
-      const bType = blockTypes.get(index)
-      blockTypes.delete(index)
-      if (bType === "tool_use") {
+      const entry = blocks.get(index)
+      blocks.delete(index)
+      if (entry?.type === "tool_use") {
         const block = toolBlocks.get(index)
         if (block) {
           toolBlocks.delete(index)
@@ -755,8 +717,8 @@ export function createAnthropicStreamParser(): (event: unknown) => LanguageModel
             },
           ]
         }
-      } else if (bType === "thinking") {
-        return [{ type: "reasoning-end", id: `thinking-${index}` }]
+      } else if (entry?.type === "thinking") {
+        return [{ type: "reasoning-end", id: entry.id }]
       }
       const block = toolBlocks.get(index)
       if (block) {
@@ -772,7 +734,7 @@ export function createAnthropicStreamParser(): (event: unknown) => LanguageModel
           },
         ]
       }
-      return [{ type: "text-end", id: `text-${index}` }]
+      return [{ type: "text-end", id: entry?.id ?? `text-${index}` }]
     }
     // Everything else (message_delta, message_stop, ping, error, …) shares the
     // stateless mapper's handling.
@@ -780,5 +742,8 @@ export function createAnthropicStreamParser(): (event: unknown) => LanguageModel
   }
 }
 
-// Canonical stream entry points: openAIEventToStreamPart / anthropicEventToStreamPart
-// and the per-stream stateful parsers createOpenAIStreamParser / createAnthropicStreamParser.
+// Canonical stream entry points. The transport wires in the stateful parsers
+// (createOpenAIStreamParser / createAnthropicStreamParser): they own content —
+// block lifecycles, part ids, fragmented tool arguments. The stateless mappers
+// (openAIEventToStreamPart / anthropicEventToStreamPart) cover the events that
+// are complete in a single message: errors, terminal finish, ping, usage.

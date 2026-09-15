@@ -11,6 +11,7 @@ import {
 import {
   openAIEventToStreamPart,
   anthropicEventToStreamPart,
+  createAnthropicStreamParser,
   parseStreamEventLine,
   openAIUsageToAiSdkUsage,
   anthropicUsageToAiSdkUsage,
@@ -290,8 +291,21 @@ run([
   [
     "Anthropic streaming: message_delta → finish with same shape as OpenAI",
     () => {
-      const d = { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Hi" } }
-      const p = anthropicEventToStreamPart(d)
+      // Content blocks belong to the stateful parser (issue #71); the stateless
+      // mapper maps only events that are complete in one message, of which the
+      // terminal `message_delta` below is the one carrying usage.
+      const parser = createAnthropicStreamParser()
+      const start = parser({
+        type: "content_block_start",
+        index: 0,
+        content_block: { type: "text" },
+      }) as any[]
+      assertEqual(start[0].type, "text-start")
+      const p = parser({
+        type: "content_block_delta",
+        index: 0,
+        delta: { type: "text_delta", text: "Hi" },
+      })
       assertEqual((p[0] as any).delta, "Hi")
 
       const fin = {
@@ -310,6 +324,46 @@ run([
       }).find((p: any) => p.type === "finish") as any
       assertEqual(JSON.stringify(f.usage), JSON.stringify(oaFin.usage))
       assertEqual(f.finishReason.unified, oaFin.finishReason.unified)
+    },
+  ],
+  [
+    "stateless Anthropic codec leaves content blocks to the stateful parser",
+    () => {
+      // `content_block_stop` names only the block index, so a per-event mapper
+      // cannot choose between text-end, reasoning-end and tool-input-end — and
+      // cannot complete a tool call whose `input_json_delta` fragments span
+      // events. #71 removed the half-lifecycle this mapper used to emit (starts
+      // and deltas with no matching end, plus a dead second delta branch); this
+      // pins the seam so re-adding it is a deliberate act.
+      const contentEvents = [
+        { type: "content_block_start", index: 0, content_block: { type: "text" } },
+        { type: "content_block_start", index: 0, content_block: { type: "thinking", id: "th_1" } },
+        { type: "content_block_start", index: 0, content_block: { type: "tool_use", id: "t_1" } },
+        { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Hi" } },
+        {
+          type: "content_block_delta",
+          index: 0,
+          delta: { type: "thinking_delta", thinking: "Hmm" },
+        },
+        {
+          type: "content_block_delta",
+          index: 0,
+          delta: { type: "input_json_delta", partial_json: '{"a":1}' },
+        },
+        { type: "content_block_stop", index: 0 },
+      ]
+      for (const event of contentEvents) {
+        assertEqual(anthropicEventToStreamPart(event).length, 0)
+      }
+
+      // The events it does own still map: terminal finish and the error throw.
+      const finish = anthropicEventToStreamPart({
+        type: "message_delta",
+        delta: { stop_reason: "tool_use" },
+        usage: { input_tokens: 10, output_tokens: 5 },
+      }) as any[]
+      assertEqual(finish[0].type, "finish")
+      assertEqual(finish[0].finishReason.unified, "tool-calls")
     },
   ],
   [

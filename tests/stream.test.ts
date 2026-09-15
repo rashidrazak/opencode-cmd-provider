@@ -508,6 +508,40 @@ run([
       assertEqual((parts[5] as { id: string }).id, "text-1")
     },
   ],
+
+  [
+    "createAnthropicStreamParser closes a labelled thinking block with its own id",
+    () => {
+      // Anthropic puts no `id` on thinking blocks, but a gateway may. When it
+      // does, the id chosen at `content_block_start` has to be the one the delta
+      // and stop events use: re-deriving it from the block index would open part
+      // `th_9` and then feed `thinking-0`, orphaning the part the consumer saw
+      // opened — the #69 failure mode (issue #71).
+      const parser = createAnthropicStreamParser()
+      const events = [
+        {
+          type: "content_block_start",
+          index: 0,
+          content_block: { type: "thinking", id: "th_9", thinking: "" },
+        },
+        {
+          type: "content_block_delta",
+          index: 0,
+          delta: { type: "thinking_delta", thinking: "Pondering" },
+        },
+        { type: "content_block_stop", index: 0 },
+      ]
+      const parts = events.flatMap((e) => parser(e))
+      assertEqual(
+        parts.map((p) => (p as { type: string }).type),
+        ["reasoning-start", "reasoning-delta", "reasoning-end"],
+      )
+      assertEqual(
+        parts.map((p) => (p as { id: string }).id),
+        ["th_9", "th_9", "th_9"],
+      )
+    },
+  ],
 ])
 
 // --- Mock CC server harness smoke test (used by #8/#9/#12) ---
