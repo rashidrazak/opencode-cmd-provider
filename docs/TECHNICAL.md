@@ -315,9 +315,11 @@ the start on `/alpha/generate` — while the session is pinned to legacy either 
 
 The Command Code Provider API does not include prices in its model catalog, so
 this provider builds an estimate table from the bundled `models.md` catalog for
-OpenCode's cost display. A model missing from that table displays zero cost —
-which does **not** mean Command Code bills the request at zero. Check the current
-[Command Code pricing](https://commandcode.ai/docs/resources/pricing-limits)
+OpenCode's cost display. The transport computes no cost of its own — it reports
+each turn's usage and the host prices it from the advertised rates, so there is
+exactly one cost path (issue #176). A model missing from that table displays zero
+cost — which does **not** mean Command Code bills the request at zero. Check the
+current [Command Code pricing](https://commandcode.ai/docs/resources/pricing-limits)
 before relying on the displayed value.
 
 ## Environment variables

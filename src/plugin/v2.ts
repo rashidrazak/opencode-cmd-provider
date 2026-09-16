@@ -163,7 +163,7 @@ export function registerIntegration(integrations: V2IntegrationEditor): void {
  * Hands the host the runtime SDK for `commandcode` models. The host passes the
  * model's merged settings/headers/body as `options` and a transport-aware
  * `fetch`; both flow into the same factory the v1 provider entry exports, so
- * streaming, retries, redaction, and cost accounting are one implementation.
+ * streaming, retries, and redaction are one implementation.
  */
 export function provideSdk(event: V2SDKEvent): void {
   if (event.model.providerID !== PROVIDER_ID) return

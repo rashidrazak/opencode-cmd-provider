@@ -17,13 +17,6 @@ export interface CommandCodeModelCostRates {
 
 export interface CommandCodeModelCost extends CommandCodeModelCostRates {}
 
-export const ZERO_MODEL_COST: CommandCodeModelCost = {
-  input: 0,
-  output: 0,
-  cacheRead: 0,
-  cacheWrite: 0,
-}
-
 /**
  * True when every rate is zero — the model is served free (e.g. the MiniMax
  * M3 / M2.7 free variants). Used to disambiguate display names: the upstream

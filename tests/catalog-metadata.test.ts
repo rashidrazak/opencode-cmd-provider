@@ -141,6 +141,21 @@ run([
   ],
 
   [
+    "every generated cost entry carries numeric rates",
+    () => {
+      // Moved here with issue #176: the deleted cost module's test file owned
+      // this shape check, but it belongs to the generated table OpenCode's cost
+      // display reads (via the rates src/plugin/models.ts advertises).
+      for (const [id, rates] of Object.entries(MODEL_COSTS)) {
+        assertEqual(typeof rates.input, "number", id)
+        assertEqual(typeof rates.output, "number", id)
+        assertEqual(typeof rates.cacheRead, "number", id)
+        assertEqual(typeof rates.cacheWrite, "number", id)
+      }
+    },
+  ],
+
+  [
     "reasoning classification is derived from the generated module (efforts precedence by construction)",
     () => {
       // The classification contract since issue #111 (spec #108):

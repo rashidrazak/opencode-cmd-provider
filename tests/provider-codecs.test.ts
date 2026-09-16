@@ -16,7 +16,6 @@ import {
   openAIUsageToAiSdkUsage,
   anthropicUsageToAiSdkUsage,
 } from "../src/provider/stream.js"
-import { calculateCommandCodeCost, costUsageFromAiSdkUsage } from "../src/provider/cost.js"
 import { assert, assertEqual, run } from "./harness.js"
 
 run([
@@ -315,9 +314,6 @@ run([
       assert(f, "finish")
       assertEqual(f.usage.inputTokens.total, 10)
       assertEqual(f.usage.outputTokens.total, 5)
-      const cu = costUsageFromAiSdkUsage(f.usage)
-      calculateCommandCodeCost({ cost: { input: 1, output: 5, cacheRead: 0.5, cacheWrite: 3 } }, cu)
-      assert(cu.cost.total > 0, "cost")
     },
   ],
   [
@@ -427,23 +423,15 @@ run([
     },
   ],
   [
-    "usage extraction feeds cost path for both providers",
+    "usage extraction matches for both providers",
     () => {
       const oa = openAIUsageToAiSdkUsage({ prompt_tokens: 100, completion_tokens: 50 } as any)
       const ant = anthropicUsageToAiSdkUsage({ input_tokens: 100, output_tokens: 50 } as any)
       assertEqual(oa?.inputTokens.total, 100)
       assertEqual(ant?.inputTokens.total, 100)
-      const cu1 = costUsageFromAiSdkUsage(oa!)
-      const cu2 = costUsageFromAiSdkUsage(ant!)
-      calculateCommandCodeCost(
-        { cost: { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 } },
-        cu1,
-      )
-      calculateCommandCodeCost(
-        { cost: { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 } },
-        cu2,
-      )
-      assertEqual(cu1.cost.total, cu2.cost.total)
+      // The same turn reported on either wire format maps to the same AI SDK
+      // usage — the transport forwards it and OpenCode prices it (issue #176).
+      assertEqual(oa, ant)
     },
   ],
 ])

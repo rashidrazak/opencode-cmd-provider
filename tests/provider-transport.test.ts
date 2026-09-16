@@ -21,8 +21,6 @@ import {
 import { projectSlugFromPath } from "../src/provider/project-slug.js"
 import type { LanguageModelV3Prompt } from "../src/provider/aisdk-types.js"
 import { assert, assertEqual, run, withEnvVars } from "./harness.js"
-import { calculateCommandCodeCost, costUsageFromAiSdkUsage } from "../src/provider/cost.js"
-import { MODEL_COSTS } from "../src/provider/pricing.js"
 
 type Model = ReturnType<ReturnType<typeof createCommandCode>["languageModel"]>
 
@@ -146,13 +144,6 @@ run([
           assert(finish, "finish present")
           assertEqual(finish.usage?.inputTokens?.total, 10)
           assertEqual(finish.usage?.outputTokens?.total, 5)
-          // cost path
-          const cu = costUsageFromAiSdkUsage(finish.usage as never)
-          calculateCommandCodeCost(
-            { cost: { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 } },
-            cu,
-          )
-          assert(cu.cost.total > 0, "cost calculated")
         } finally {
           await mock.close()
         }
@@ -434,12 +425,6 @@ run([
             assertEqual(finish.finishReason?.unified, "stop")
             assertEqual(finish.usage?.inputTokens.total, 20)
             assertEqual(finish.usage?.outputTokens.total, 8)
-            const cu = costUsageFromAiSdkUsage(finish.usage as never)
-            calculateCommandCodeCost(
-              { cost: { input: 1, output: 5, cacheRead: 0.2, cacheWrite: 1 } },
-              cu,
-            )
-            assert(cu.cost.total > 0, "openai cost positive")
           } finally {
             await mock.close()
           }
@@ -469,12 +454,6 @@ run([
             }
             assertEqual(finish.usage?.inputTokens.total, 20)
             assertEqual(finish.usage?.outputTokens.total, 8)
-            const cu = costUsageFromAiSdkUsage(finish.usage as never)
-            calculateCommandCodeCost(
-              { cost: { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 } },
-              cu,
-            )
-            assert(cu.cost.total > 0, "anthropic cost positive")
           } finally {
             await mock.close()
           }
@@ -521,12 +500,6 @@ run([
         // Regression: usage from the trailing split chunk must be honoured, not zeroed.
         assertEqual(finish.usage?.inputTokens.total, 20)
         assertEqual(finish.usage?.outputTokens.total, 8)
-        const cu = costUsageFromAiSdkUsage(finish.usage as never)
-        calculateCommandCodeCost(
-          { cost: { input: 1, output: 5, cacheRead: 0.2, cacheWrite: 1 } },
-          cu,
-        )
-        assert(cu.cost.total > 0, "split-usage-chunk cost positive")
       } finally {
         await mock.close()
       }
@@ -590,12 +563,6 @@ run([
         assertEqual(finish.usage?.inputTokens.cacheRead, 4)
         assertEqual(finish.usage?.inputTokens.cacheWrite, 2)
         assertEqual(finish.usage?.outputTokens.total, 8)
-        const cu = costUsageFromAiSdkUsage(finish.usage as never)
-        calculateCommandCodeCost(
-          { cost: { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 } },
-          cu,
-        )
-        assert(cu.cost.total > 0, "anthropic cost positive")
 
         // The same stream through doGenerate must report the same usage.
         const gen = await model.doGenerate({ prompt, mode: { type: "regular" } } as never)
@@ -650,18 +617,14 @@ run([
       // terminal chunk nests the cached prefix in prompt_tokens_details.
       // Before #158 the parser read only top-level cache fields, reported
       // cacheRead 0, and let usageToAiSdk reclassify the whole 52000-token
-      // prompt as fresh input — billing the cached prefix at the input rate
+      // prompt as fresh input — pricing the cached prefix at the input rate
       // and inflating the reported spend by the input/cacheRead ratio.
       //
-      // The model is picked from the generated cost table rather than pinned
-      // by id (spec #108): the assertion is arithmetic over whatever rates
-      // upstream ships, so a refresh re-derives instead of going red.
-      const modelId = Object.keys(MODEL_COSTS).find(
-        (id) => id.includes("/") && MODEL_COSTS[id].cacheRead > 0,
-      )
-      assert(modelId !== undefined, "a priced model with a cacheRead rate exists")
-      if (modelId === undefined) return
-      const rates = MODEL_COSTS[modelId]
+      // The asserted usage is the whole contract at this seam: OpenCode prices
+      // the reported cache split with the rates the model advertises, so the
+      // transport's job is to report the split correctly (issue #176).
+      // The model id is a fixture — the mock reports the usage regardless of
+      // the row — and only has to route to the OpenAI endpoint.
       await withEnv("pro", async () => {
         const mock = await startMockCc({
           chatCompletionsStream: [
@@ -676,7 +639,7 @@ run([
         })
         try {
           const provider = createCommandCode({ apiKey: "k", baseURL: mock.url })
-          const parts = await collect(provider.languageModel(modelId), [
+          const parts = await collect(provider.languageModel("gpt-5.6-terra"), [
             { role: "user", content: "hi" },
           ])
           assertEqual(mock.hits.chatCompletions, 1)
@@ -690,18 +653,6 @@ run([
             inputTokens: { total: 52000, noCache: 2000, cacheRead: 50000, cacheWrite: 0 },
             outputTokens: { total: 300, text: 300, reasoning: 0 },
           })
-
-          // The reported spend is the defect's headline: bill the emitted usage
-          // at the model's shipped rates and require the true total.
-          const cu = costUsageFromAiSdkUsage(finish.usage as never)
-          calculateCommandCodeCost({ cost: rates }, cu)
-          const trueCost =
-            (2000 / 1_000_000) * rates.input +
-            (300 / 1_000_000) * rates.output +
-            (50000 / 1_000_000) * rates.cacheRead
-          assertEqual(cu.cost.total.toFixed(8), trueCost.toFixed(8))
-          const buggyTotal = cu.cost.total + (48000 / 1_000_000) * (rates.input - rates.cacheRead)
-          assert(cu.cost.total < buggyTotal, "cache reads are billed below fresh input")
         } finally {
           await mock.close()
         }
@@ -717,7 +668,6 @@ run([
       // `noCache` to 0 and reported only the fresh remainder as the whole
       // prompt. @ai-sdk/anthropic maps `total = input + cacheWrite + cacheRead`,
       // `noCache = input`.
-      const rates = { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 }
       const cases = [
         {
           label: "warm cache read",
@@ -757,23 +707,6 @@ run([
           }
           assert(finish, `${label}: finish present`)
           assertEqual(finish.usage, expected, label)
-
-          // The defect's headline: the fresh tokens are billed at the input
-          // rate. Before the fix `noCache` was 0 and the 322 fresh tokens were
-          // dropped from the turn entirely.
-          const cu = costUsageFromAiSdkUsage(finish.usage as never)
-          calculateCommandCodeCost({ cost: rates }, cu)
-          const trueCost =
-            (expected.inputTokens.noCache / 1_000_000) * rates.input +
-            (expected.outputTokens.total / 1_000_000) * rates.output +
-            (expected.inputTokens.cacheRead / 1_000_000) * rates.cacheRead +
-            (expected.inputTokens.cacheWrite / 1_000_000) * rates.cacheWrite
-          assertEqual(cu.cost.total.toFixed(8), trueCost.toFixed(8), `${label}: billed`)
-          const underReported =
-            (expected.outputTokens.total / 1_000_000) * rates.output +
-            (expected.inputTokens.cacheRead / 1_000_000) * rates.cacheRead +
-            (expected.inputTokens.cacheWrite / 1_000_000) * rates.cacheWrite
-          assert(cu.cost.total > underReported, `${label}: fresh input is billed`)
         } finally {
           await mock.close()
         }
@@ -781,7 +714,7 @@ run([
     },
   ],
   [
-    "provider: doGenerate non-streaming returns same content/usage/cost as doStream aggregated",
+    "provider: doGenerate non-streaming returns same content and usage as doStream aggregated",
     async () => {
       await withEnv("max", async () => {
         // OpenAI model via chat/completions
@@ -820,17 +753,6 @@ run([
               usage: typeof genUsage
             }
             assertEqual(JSON.stringify(genUsage), JSON.stringify(streamFinish.usage))
-            const cu1 = costUsageFromAiSdkUsage(genUsage as never)
-            const cu2 = costUsageFromAiSdkUsage(streamFinish.usage as never)
-            calculateCommandCodeCost(
-              { cost: { input: 1, output: 5, cacheRead: 0.2, cacheWrite: 1 } },
-              cu1,
-            )
-            calculateCommandCodeCost(
-              { cost: { input: 1, output: 5, cacheRead: 0.2, cacheWrite: 1 } },
-              cu2,
-            )
-            assertEqual(cu1.cost.total, cu2.cost.total)
           } finally {
             await mock1.close()
             await mock2.close()

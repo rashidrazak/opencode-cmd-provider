@@ -20,8 +20,8 @@
 //   - usage is nested { inputTokens: { total, noCache, cacheRead, cacheWrite },
 //     outputTokens: { total } } — `total` is cache-inclusive per AI SDK v3
 //     convention (how the bundled Anthropic provider maps usage); `noCache`
-//     carries the fresh-only remainder so downstream context usage and local
-//     cost stay correct (issue #36).
+//     carries the fresh-only remainder so downstream context usage and cost
+//     display stay correct (issue #36).
 import type {
   LanguageModelV3StreamPart,
   LanguageModelV3Usage,

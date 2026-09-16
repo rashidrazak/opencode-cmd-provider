@@ -43,8 +43,6 @@ import {
 import { getApiBase, getCmdZdr } from "../env.js"
 import { normalizePlan } from "../catalog/plans.js"
 import { redactCommandCodeErrorText, commandCodeErrorMessage, readGate } from "./redact.js"
-import { calculateCommandCodeCost, costUsageFromAiSdkUsage } from "./cost.js"
-import { ZERO_MODEL_COST, MODEL_COSTS } from "./pricing.js"
 import {
   mappedReasoningEffort,
   resolveProviderReasoning,
@@ -382,10 +380,6 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
     return this.options.baseURL ?? getApiBase()
   }
 
-  private costForModel(): { cost: (typeof MODEL_COSTS)[string] } {
-    return { cost: MODEL_COSTS[this.modelId] ?? ZERO_MODEL_COST }
-  }
-
   /**
    * Safety-net flag (issue #56): once the Provider API answers its plan-gate
    * `403` — the documented `upgrade_required` envelope or the code-less live
@@ -718,7 +712,7 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
 
   /**
    * Deep internal seam: single SSE transport behind a small interface.
-   * All retry/timeout/abort/redaction/stream-parsing/cost/fallback logic
+   * All retry/timeout/abort/redaction/stream-parsing/fallback logic
    * lives here; callers supply only the endpoint URL, body, headers and
    * the event→parts mapper. Depth gives leverage (N callers) and locality
    * (fix once, fixed everywhere). The eventToParts adapter varies across
@@ -1154,8 +1148,9 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
               // the terminal usage chunk (OpenAI: separate usage-only chunk;
               // Anthropic: message_delta) is incorporated — and, for a resumed
               // turn, with every continuation's usage folded in (issue #172).
+              // The transport only reports that usage: OpenCode prices the turn
+              // from the cost rates the model advertises (issue #176).
               const finish = { ...heldFinish, usage: accumulateUsage(heldFinish.usage) }
-              calculateCommandCodeCost(this.costForModel(), costUsageFromAiSdkUsage(finish.usage))
               emit(finish)
             } else {
               // A terminal that carries no finish part — the legacy

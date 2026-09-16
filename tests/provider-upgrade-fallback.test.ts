@@ -28,7 +28,6 @@ import {
 } from "./helpers/mock-cc.js"
 import type { LanguageModelV3Prompt } from "../src/provider/aisdk-types.js"
 import { assert, assertEqual, run } from "./harness.js"
-import { calculateCommandCodeCost, costUsageFromAiSdkUsage } from "../src/provider/cost.js"
 
 type Model = ReturnType<ReturnType<typeof createCommandCode>["languageModel"]>
 
@@ -172,10 +171,12 @@ run([
         .filter((p) => p.type === "text-delta")
         .map((p) => (p as { delta: string }).delta)
       assertEqual(deltas, ["legacy answer"])
-      // Acceptance 4: the cost hook fires exactly once — on the retried legacy
+      // Acceptance 4: exactly one terminal fires — on the retried legacy
       // finish. The failed Provider attempt emitted no parts (the 403 lands
       // before any SSE), so exactly one finish part whose usage is the legacy
-      // one is the observable no-double-counting guarantee.
+      // one is the observable no-double-counting guarantee. Usage is also the
+      // whole billing input now: OpenCode prices it from the advertised rates
+      // (issue #176).
       const finishes = parts.filter((p) => p.type === "finish")
       assertEqual(finishes.length, 1, "exactly one finish — no double-counting")
       const usage = (finishes[0] as { usage: never }).usage
@@ -187,10 +188,6 @@ run([
         !parts.some((p) => p.type === "error"),
         "no error part — the retried legacy call succeeded",
       )
-      // Cost from the retried legacy response (issue #56 acceptance 4).
-      const cu = costUsageFromAiSdkUsage(usage)
-      calculateCommandCodeCost({ cost: { input: 1, output: 5, cacheRead: 0.2, cacheWrite: 1 } }, cu)
-      assert(cu.cost.total > 0, "cost calculated from the legacy usage")
     },
   ],
   [

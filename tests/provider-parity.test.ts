@@ -8,7 +8,7 @@
 //      normalized) — both doStream and doGenerate.
 //   2. Non-Go sessions never emit /alpha/generate (whole-session fetch spy).
 //   3. Shared layers — tools, images, system prompt text, max_tokens,
-//      reasoning, cost, redaction, retry/timeout/abort — behave identically on
+//      reasoning, usage, redaction, retry/timeout/abort — behave identically on
 //      both transports (legacy /alpha/generate vs Provider API /provider/v1/*).
 //      The Anthropic system block additionally carries the ephemeral cache
 //      breakpoint (issue #177), which is provider-path-only by design.
@@ -23,9 +23,6 @@ import {
   toolCall,
 } from "./helpers/mock-cc.js"
 import { assert, assertEqual, rejects, run, withEnvVars } from "./harness.js"
-import { calculateCommandCodeCost, costUsageFromAiSdkUsage } from "../src/provider/cost.js"
-import { MODEL_COSTS } from "../src/provider/pricing.js"
-import { MODEL_EFFORTS } from "../src/provider/reasoning.js"
 import { FACTS_PACKAGE_VERSION } from "../src/catalog/facts.js"
 import { assert } from "./harness.js"
 
@@ -891,7 +888,7 @@ run([
     },
   ],
   [
-    "parity: same usage emits same cost on all three transports",
+    "parity: same usage on all three transports",
     async () => {
       const expectedUsage = {
         inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 },
@@ -899,17 +896,7 @@ run([
       }
       const finishOf = (parts: Array<Record<string, unknown>>) =>
         parts.find((p) => p.type === "finish") as { usage?: unknown }
-      // The cost entry comes from the generated facts by derivation, not a
-      // pinned id (pricing-lint gate: tests/no-upstream-value-pins.test.ts).
-      const parityCostId = Object.keys(MODEL_EFFORTS)[0]
-      assert(parityCostId, "the generated efforts facts must not be empty")
-      const costOf = (usage: unknown) => {
-        const cu = costUsageFromAiSdkUsage(usage as never)
-        calculateCommandCodeCost({ cost: MODEL_COSTS[parityCostId] }, cu)
-        return cu.cost.total
-      }
       // legacy
-      let legacyCost = 0
       {
         const { fetch } = makeSpy((call) => {
           if (call.url.includes("/alpha/generate")) return sseResponse([finishEvent()])
@@ -920,7 +907,6 @@ run([
           prompt: [{ role: "user", content: "hi" }],
         })
         assertEqual(finishOf(parts).usage, expectedUsage)
-        legacyCost = costOf(finishOf(parts).usage)
       }
       await withEnvVars({ COMMANDCODE_PLAN: "goat" }, async () => {
         // OpenAI
@@ -936,7 +922,6 @@ run([
             prompt: [{ role: "user", content: "hi" }],
           })
           assertEqual(finishOf(parts).usage, expectedUsage)
-          assertEqual(costOf(finishOf(parts).usage), legacyCost)
         }
         // Anthropic
         {
@@ -954,7 +939,6 @@ run([
             prompt: [{ role: "user", content: "hi" }],
           })
           assertEqual(finishOf(parts).usage, expectedUsage)
-          assertEqual(costOf(finishOf(parts).usage), legacyCost)
         }
       })
     },
