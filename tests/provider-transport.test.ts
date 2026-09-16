@@ -84,6 +84,38 @@ function withBaseEnv(base: string | undefined, fn: () => Promise<void> | void): 
   return withEnvVars({ COMMANDCODE_API_BASE: base }, fn)
 }
 
+/**
+ * The `/alpha/generate` script of a turn that pauses once and finishes in its
+ * continuation (issue #172): the first request reports 10/4 and `pause_turn`,
+ * the second 3/5 and `end_turn`. The budget of a paused turn is what the two
+ * tests using it assert — one at the `doStream` seam, one at `doGenerate`'s.
+ */
+function pausedLegacyTurn(): MockCcOptions {
+  let requests = 0
+  const options: MockCcOptions = {
+    stream: [
+      textDelta("first "),
+      finishEvent({
+        finishReason: "pause_turn",
+        totalUsage: { inputTokens: 10, outputTokens: 4 },
+      }),
+    ],
+  }
+  options.onGenerate = () => {
+    requests++
+    if (requests === 2) {
+      options.stream = [
+        textDelta("second"),
+        finishEvent({
+          finishReason: "end_turn",
+          totalUsage: { inputTokens: 3, outputTokens: 5 },
+        }),
+      ]
+    }
+  }
+  return options
+}
+
 run([
   [
     "provider routing: goat plan claude-* hits /provider/v1/messages only",
@@ -1928,6 +1960,417 @@ run([
           await mock.close()
         }
       })
+    },
+  ],
+  [
+    "transport: a paused legacy turn re-POSTs the body and sums its continuations' usage (issue #172)",
+    async () => {
+      // Upstream `command-code@1.54.0` loops on `rawFinishReason === "pause_turn"`
+      // (Ph = 5), re-POSTs the same body, and folds every continuation's usage
+      // with `addUsage2` — the only place upstream sums usage. The resumed turn
+      // is one stream: the pause never surfaces as a finish, and the single
+      // finish reports the sum.
+      const mock = await startMockCc(pausedLegacyTurn())
+      try {
+        const provider = createCommandCode({ apiKey: "test_key", baseURL: mock.url })
+        const parts = await collect(
+          provider.languageModel("gpt-5.6-terra"),
+          [{ role: "user", content: "hi" }],
+          { commandcode: { plan: "go" } },
+        )
+        assertEqual(mock.hits.generate, 2, "the pause is continued once")
+        assertEqual(mock.hits.chatCompletions, 0)
+        assertEqual(
+          parts.map((p) => p.type),
+          ["text-delta", "text-delta", "finish"],
+          "one continuous turn, one finish",
+        )
+        assertEqual((parts[0] as { delta: string }).delta, "first ")
+        assertEqual((parts[1] as { delta: string }).delta, "second")
+        const finish = parts[2] as {
+          finishReason: unknown
+          usage: { inputTokens: { total: number }; outputTokens: { total: number } }
+        }
+        assertEqual(finish.finishReason, { unified: "stop", raw: "end_turn" })
+        assertEqual(finish.usage.inputTokens.total, 13)
+        assertEqual(finish.usage.outputTokens.total, 9)
+      } finally {
+        await mock.close()
+      }
+    },
+  ],
+  [
+    "transport: an OpenAI pause_turn chunk continues the turn on the same stream (issue #172)",
+    async () => {
+      // The Provider API's OpenAI shape reports the pause as a `finish_reason`
+      // on the last content chunk, with the real usage on the trailing
+      // usage-only chunk. The continuation's parts follow the paused response's
+      // parts on the same stream, each with its own lifecycle: the pause is a
+      // boundary inside the turn, not the end of it.
+      let requests = 0
+      const options: MockCcOptions = {
+        chatCompletionsStream: [
+          openAIChunk("first ", { id: "chatcmpl-1" }),
+          { id: "chatcmpl-1", choices: [{ delta: {}, finish_reason: "pause_turn" }] },
+          { id: "chatcmpl-1", choices: [], usage: { prompt_tokens: 10, completion_tokens: 4 } },
+        ],
+      }
+      options.onChatCompletions = () => {
+        requests++
+        if (requests === 2) {
+          options.chatCompletionsStream = [
+            openAIChunk("second", { id: "chatcmpl-2" }),
+            {
+              id: "chatcmpl-2",
+              choices: [{ delta: {}, finish_reason: "end_turn" }],
+              usage: { prompt_tokens: 3, completion_tokens: 5 },
+            },
+          ]
+        }
+      }
+      const mock = await startMockCc(options)
+      try {
+        const provider = createCommandCode({ apiKey: "test_key", baseURL: mock.url })
+        const parts = await collect(provider.languageModel("gpt-5.6-terra"), [
+          { role: "user", content: "hi" },
+        ])
+        assertEqual(mock.hits.chatCompletions, 2, "the pause is continued once")
+        assertEqual(
+          parts.map((p) => p.type),
+          [
+            "text-start",
+            "text-delta",
+            "text-end",
+            "text-start",
+            "text-delta",
+            "text-end",
+            "finish",
+          ],
+        )
+        assertEqual((parts[0] as { id: string }).id, "chatcmpl-1")
+        assertEqual((parts[3] as { id: string }).id, "chatcmpl-2")
+        const finish = parts[6] as {
+          finishReason: unknown
+          usage: { inputTokens: { total: number }; outputTokens: { total: number } }
+        }
+        assertEqual(finish.finishReason, { unified: "stop", raw: "end_turn" })
+        assertEqual(finish.usage.inputTokens.total, 13)
+        assertEqual(finish.usage.outputTokens.total, 9)
+      } finally {
+        await mock.close()
+      }
+    },
+  ],
+  [
+    "transport: an Anthropic pause_turn stop reason continues the turn on the same stream (issue #172)",
+    async () => {
+      // The Anthropic shape reports the pause on `message_delta`'s stop_reason
+      // with the response's usage beside it. The resumed turn is one stream and
+      // one finish; the continuation opens its own content block, since the
+      // paused response closed the block it wrote.
+      const block = (text: string, stopReason: string, usage: Record<string, unknown>) => [
+        { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+        anthropicContentBlockDelta(text),
+        { type: "content_block_stop", index: 0 },
+        anthropicMessageDelta(usage, stopReason),
+      ]
+      let requests = 0
+      const options: MockCcOptions = {
+        messagesStream: block("first ", "pause_turn", { input_tokens: 10, output_tokens: 4 }),
+      }
+      options.onMessages = () => {
+        requests++
+        if (requests === 2) {
+          options.messagesStream = block("second", "end_turn", {
+            input_tokens: 3,
+            output_tokens: 5,
+          })
+        }
+      }
+      const mock = await startMockCc(options)
+      try {
+        const provider = createCommandCode({ apiKey: "test_key", baseURL: mock.url })
+        const parts = await collect(provider.languageModel("claude-sonnet-5"), [
+          { role: "user", content: "hi" },
+        ])
+        assertEqual(mock.hits.messages, 2, "the pause is continued once")
+        assertEqual(mock.hits.chatCompletions, 0)
+        assertEqual(
+          parts.map((p) => p.type),
+          [
+            "text-start",
+            "text-delta",
+            "text-end",
+            "text-start",
+            "text-delta",
+            "text-end",
+            "finish",
+          ],
+        )
+        assertEqual((parts[1] as { delta: string }).delta, "first ")
+        assertEqual((parts[4] as { delta: string }).delta, "second")
+        const finish = parts[6] as {
+          finishReason: unknown
+          usage: { inputTokens: { total: number }; outputTokens: { total: number } }
+        }
+        assertEqual(finish.finishReason, { unified: "stop", raw: "end_turn" })
+        assertEqual(finish.usage.inputTokens.total, 13)
+        assertEqual(finish.usage.outputTokens.total, 9)
+      } finally {
+        await mock.close()
+      }
+    },
+  ],
+  [
+    "transport: a turn that keeps pausing stops at five continuations and fails loudly (issue #172)",
+    async () => {
+      // Upstream's bound is `Ph = 5` — the first request plus five
+      // continuations — and it carries the last raw finish reason out. A turn
+      // still paused there is not an ending: the transport fails it instead of
+      // reporting `finish{other, pause_turn}` as a completed turn. The bound is
+      // not transient either, so the retry ladder spends nothing on it.
+      const options: MockCcOptions = {
+        chatCompletionsStream: [
+          openAIChunk("again ", { id: "chatcmpl-loop" }),
+          { id: "chatcmpl-loop", choices: [{ delta: {}, finish_reason: "pause_turn" }] },
+          { id: "chatcmpl-loop", choices: [], usage: { prompt_tokens: 1, completion_tokens: 1 } },
+        ],
+      }
+      const mock = await startMockCc(options)
+      try {
+        const provider = createCommandCode({
+          apiKey: "test_key",
+          baseURL: mock.url,
+          maxRetries: 2,
+          maxRetryDelayMs: 0,
+        })
+        const parts = await collect(provider.languageModel("gpt-5.6-terra"), [
+          { role: "user", content: "hi" },
+        ])
+        assertEqual(mock.hits.chatCompletions, 6, "the first request plus five continuations")
+        assertEqual(
+          parts.filter((p) => p.type === "finish"),
+          [],
+          "a pause never surfaces as a finish",
+        )
+        assertEqual(parts.filter((p) => p.type === "text-delta").length, 6)
+        const failure = parts[parts.length - 1]!.error as Error & { status?: number }
+        assertEqual(failure.name, "PauseTurnLimitError")
+        assert(failure.message.includes("pause_turn"), failure.message)
+      } finally {
+        await mock.close()
+      }
+    },
+  ],
+  [
+    "transport: a retried continuation does not double-count the attempt it replaces (issue #172)",
+    async () => {
+      // Usage is summed across continuations only: upstream's `addUsage2` runs
+      // once per completed response. A continuation whose finish was
+      // synthesized — its usage chunk never arrived — is not a completed
+      // response: it is retried while nothing is visible, and only the retry's
+      // reported usage joins the sum.
+      let requests = 0
+      const options: MockCcOptions = {
+        chatCompletionsStream: [
+          openAIChunk("first ", { id: "chatcmpl-1" }),
+          { id: "chatcmpl-1", choices: [{ delta: {}, finish_reason: "pause_turn" }] },
+          { id: "chatcmpl-1", choices: [], usage: { prompt_tokens: 10, completion_tokens: 4 } },
+        ],
+      }
+      options.onChatCompletions = () => {
+        requests++
+        if (requests === 2) {
+          options.chatCompletionsStream = [
+            { id: "chatcmpl-2", choices: [{ delta: {}, finish_reason: "end_turn" }] },
+          ]
+        }
+        if (requests === 3) {
+          options.chatCompletionsStream = [
+            openAIChunk("second", { id: "chatcmpl-3" }),
+            {
+              id: "chatcmpl-3",
+              choices: [{ delta: {}, finish_reason: "end_turn" }],
+              usage: { prompt_tokens: 3, completion_tokens: 5 },
+            },
+          ]
+        }
+      }
+      const mock = await startMockCc(options)
+      try {
+        const provider = createCommandCode({ apiKey: "test_key", baseURL: mock.url })
+        const parts = await collect(provider.languageModel("gpt-5.6-terra"), [
+          { role: "user", content: "hi" },
+        ])
+        assertEqual(mock.hits.chatCompletions, 3, "the usage-less continuation is replayed once")
+        const finish = parts[parts.length - 1] as {
+          type: string
+          usage: { inputTokens: { total: number }; outputTokens: { total: number } }
+        }
+        assertEqual(finish.type, "finish")
+        assertEqual(finish.usage.inputTokens.total, 13)
+        assertEqual(finish.usage.outputTokens.total, 9)
+      } finally {
+        await mock.close()
+      }
+    },
+  ],
+  [
+    "transport: a pause whose usage never arrived fails the turn instead of continuing it (issues #171, #172)",
+    async () => {
+      // A pause finish the codec had to synthesize — the OpenAI `finish_reason`
+      // chunk whose trailing usage-only chunk never arrived — says nothing
+      // about what the response it ended spent, so the sum a resumed turn must
+      // report cannot be known. The #171 rule runs first: the response is not a
+      // completed one, and the turn fails rather than continuing with a segment
+      // billed as zero.
+      const options: MockCcOptions = {
+        chatCompletionsStream: [
+          openAIChunk("first ", { id: "chatcmpl-1" }),
+          { id: "chatcmpl-1", choices: [{ delta: {}, finish_reason: "pause_turn" }] },
+        ],
+      }
+      const mock = await startMockCc(options)
+      try {
+        const provider = createCommandCode({ apiKey: "test_key", baseURL: mock.url })
+        const parts = await collect(provider.languageModel("gpt-5.6-terra"), [
+          { role: "user", content: "hi" },
+        ])
+        assertEqual(mock.hits.chatCompletions, 1, "no continuation is attempted")
+        assertEqual(
+          parts.filter((p) => p.type === "finish"),
+          [],
+          "no finish is reported",
+        )
+        const failure = parts[parts.length - 1]!.error as Error & { status?: number }
+        assertEqual(failure.name, "MissingUsageError")
+        assertEqual(failure.status, 502)
+      } finally {
+        await mock.close()
+      }
+    },
+  ],
+  [
+    "transport: doGenerate resumes a paused turn exactly as doStream does (issue #172)",
+    async () => {
+      const mock = await startMockCc(pausedLegacyTurn())
+      try {
+        const provider = createCommandCode({ apiKey: "test_key", baseURL: mock.url })
+        const result = await provider.languageModel("gpt-5.6-terra").doGenerate({
+          prompt: [{ role: "user", content: "hi" }],
+          mode: { type: "regular" },
+          providerOptions: { commandcode: { plan: "go" } },
+        } as never)
+        assertEqual(mock.hits.generate, 2, "the pause is continued once")
+        assertEqual(result.content, [{ type: "text", text: "first second" }])
+        assertEqual(result.finishReason, { unified: "stop", raw: "end_turn" })
+        assertEqual(result.usage.inputTokens.total, 13)
+        assertEqual(result.usage.outputTokens.total, 9)
+      } finally {
+        await mock.close()
+      }
+    },
+  ],
+  [
+    "transport: a paused response's open part is closed before the continuation opens its own (issue #172)",
+    async () => {
+      // The paused response's text block never got its `content_block_stop` (a
+      // server that flushes mid-block). The continuation opens its own block at
+      // the same index, so the part the pause left open is closed first — a
+      // second `text-start` for a part that never ended would orphan it.
+      let requests = 0
+      const options: MockCcOptions = {
+        messagesStream: [
+          { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+          anthropicContentBlockDelta("first "),
+          anthropicMessageDelta({ input_tokens: 10, output_tokens: 4 }, "pause_turn"),
+        ],
+      }
+      options.onMessages = () => {
+        requests++
+        if (requests === 2) {
+          options.messagesStream = [
+            { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+            anthropicContentBlockDelta("second"),
+            { type: "content_block_stop", index: 0 },
+            anthropicMessageDelta({ input_tokens: 3, output_tokens: 5 }),
+          ]
+        }
+      }
+      const mock = await startMockCc(options)
+      try {
+        const provider = createCommandCode({ apiKey: "test_key", baseURL: mock.url })
+        const parts = await collect(provider.languageModel("claude-sonnet-5"), [
+          { role: "user", content: "hi" },
+        ])
+        assertEqual(mock.hits.messages, 2)
+        assertEqual(
+          parts.map((p) => p.type),
+          [
+            "text-start",
+            "text-delta",
+            "text-end",
+            "text-start",
+            "text-delta",
+            "text-end",
+            "finish",
+          ],
+        )
+        assertEqual((parts[2] as { id: string }).id, "text-0")
+      } finally {
+        await mock.close()
+      }
+    },
+  ],
+  [
+    "transport: a plan-gate 403 after a continuation is surfaced, never replayed on legacy (issue #172)",
+    async () => {
+      // The flip re-runs the whole call from the start, so it is safe only
+      // while the consumer has seen nothing. A 403 arriving after a paused
+      // turn's continuation would append a second copy of the turn to the same
+      // stream; the failure surfaces instead — and the session is still pinned
+      // to legacy for the turns that follow.
+      let requests = 0
+      const options: MockCcOptions = {
+        chatCompletionsStream: [
+          openAIChunk("first ", { id: "chatcmpl-1" }),
+          { id: "chatcmpl-1", choices: [{ delta: {}, finish_reason: "pause_turn" }] },
+          { id: "chatcmpl-1", choices: [], usage: { prompt_tokens: 10, completion_tokens: 4 } },
+        ],
+        stream: [textDelta("later"), finishEvent()],
+      }
+      options.onChatCompletions = () => {
+        requests++
+        if (requests === 2) {
+          options.chatCompletionsStatus = 403
+          options.chatCompletionsErrorBody = upgradeRequiredBody()
+        }
+      }
+      const mock = await startMockCc(options)
+      try {
+        const provider = createCommandCode({ apiKey: "test_key", baseURL: mock.url })
+        // One model instance: the pin lives on it, so the second turn is where
+        // the unconditional pin is observable.
+        const model = provider.languageModel("gpt-5.6-terra")
+        const parts = await collect(model, [{ role: "user", content: "hi" }])
+        assertEqual(mock.hits.chatCompletions, 2)
+        assertEqual(mock.hits.generate, 0, "the mid-turn flip is skipped")
+        assertEqual(parts.filter((p) => p.type === "text-delta").length, 1, "no duplicated turn")
+        const failure = parts[parts.length - 1]!.error as Error
+        assert(failure.message.includes("plan upgrade"), failure.message)
+
+        // The pin is unconditional: the next turn starts on legacy without
+        // touching the Provider API again.
+        const next = await collect(model, [{ role: "user", content: "hi" }])
+        assertEqual(mock.hits.generate, 1)
+        assertEqual(mock.hits.chatCompletions, 2)
+        assertEqual(
+          next.map((p) => p.type),
+          ["text-delta", "finish"],
+        )
+      } finally {
+        await mock.close()
+      }
     },
   ],
 ])

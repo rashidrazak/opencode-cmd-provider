@@ -53,6 +53,53 @@ export function finishCarriesReportedUsage(part: FinishPart): boolean {
 }
 
 /**
+ * The wire's stop reason for a turn the provider paused rather than finished:
+ * the model stopped mid-turn and the same request continues it. It arrives in
+ * every codec's own spelling — Anthropic's `message_delta` stop_reason, the
+ * legacy `finish` event, an OpenAI `finish_reason` — and maps to the unified
+ * `other`, since the AI SDK has no reason for it. The transport owns what a
+ * pause means; this module owns only the vocabulary (issue #172).
+ */
+const PAUSE_TURN_REASON = "pause_turn"
+
+/**
+ * True when a `finish` reports a paused turn. Upstream `command-code@1.54.0`
+ * loops on exactly this raw reason (`Ph = 5`) and folds the continuations'
+ * usage with `addUsage2` (issue #172). Only the finish reason is read, so the
+ * check takes the one field it needs rather than the whole part.
+ */
+export function finishIsPauseTurn(part: Pick<FinishPart, "finishReason">): boolean {
+  return part.finishReason.raw === PAUSE_TURN_REASON
+}
+
+/**
+ * Sums two usage reports into one. The v3 shape's `total` fields are
+ * cache-inclusive, so component-wise addition is correct for every bucket;
+ * an absent bucket counts as zero. The transport uses it to fold a paused
+ * turn's continuations into the single finish it emits — upstream's
+ * `addUsage2`, the only place the CLI sums usage across responses (issue
+ * #172).
+ */
+export function addAiSdkUsage(
+  a: LanguageModelV3Usage,
+  b: LanguageModelV3Usage,
+): LanguageModelV3Usage {
+  return {
+    inputTokens: {
+      total: (a.inputTokens.total ?? 0) + (b.inputTokens.total ?? 0),
+      noCache: (a.inputTokens.noCache ?? 0) + (b.inputTokens.noCache ?? 0),
+      cacheRead: (a.inputTokens.cacheRead ?? 0) + (b.inputTokens.cacheRead ?? 0),
+      cacheWrite: (a.inputTokens.cacheWrite ?? 0) + (b.inputTokens.cacheWrite ?? 0),
+    },
+    outputTokens: {
+      total: (a.outputTokens.total ?? 0) + (b.outputTokens.total ?? 0),
+      text: (a.outputTokens.text ?? 0) + (b.outputTokens.text ?? 0),
+      reasoning: (a.outputTokens.reasoning ?? 0) + (b.outputTokens.reasoning ?? 0),
+    },
+  }
+}
+
+/**
  * The server's own `error` event, surfaced as a failure the transport can
  * classify (issue #171). The AI SDK `error` part has room for the message
  * only, so the event's retryability signals — its `isRetryable` flag, the
@@ -186,8 +233,19 @@ export function ccEventToStreamPart(event: unknown): LanguageModelV3StreamPart[]
     }
     case "finish": {
       // The legacy codec's terminal carries its usage inline
-      // (`totalUsage`): a finish without one has none to report.
-      return [finishPart(mapFinishReason(event.finishReason), ccUsageToAiSdkUsage(event))]
+      // (`totalUsage`): a finish without one has none to report. Upstream's
+      // own consumer reads the terminal's two reason fields apart — the
+      // unified reason off `finishReason`, the raw one off `rawFinishReason ??
+      // finishReason` — and the transport loops on the raw one, where
+      // `pause_turn` is reported (issue #172).
+      const reason = mapFinishReason(event.finishReason)
+      const rawReason = stringValue(event.rawFinishReason)
+      return [
+        finishPart(
+          rawReason === undefined ? reason : { unified: reason.unified, raw: rawReason },
+          ccUsageToAiSdkUsage(event),
+        ),
+      ]
     }
     case "error": {
       throwStreamError(

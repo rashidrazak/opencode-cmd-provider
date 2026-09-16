@@ -14,6 +14,8 @@ import {
   anthropicUsageToAiSdkUsage,
   createOpenAIStreamParser,
   createAnthropicStreamParser,
+  finishIsPauseTurn,
+  addAiSdkUsage,
 } from "../src/provider/stream.js"
 import { assert, assertEqual, rejects, run } from "./harness.js"
 
@@ -834,6 +836,106 @@ run([
         content_block: { type: "tool_use", id: "call_1", name: "read" },
       })
       assertEqual(unmodelled.closeStream(), [])
+    },
+  ],
+
+  [
+    "the codecs preserve the pause_turn finish reason the transport loops on (issue #172)",
+    () => {
+      // `pause_turn` is a stop reason, not an ending: the unified mapping stays
+      // `other` (it is an unknown reason to the AI SDK) and the raw reason is
+      // what the transport reads. Upstream's legacy consumer reads the
+      // terminal's two reason fields apart — the raw one off
+      // `rawFinishReason ?? finishReason` — so a finish event that reports the
+      // pause only in its raw field is a pause too, with the unified reason
+      // still taken from `finishReason`.
+      assertEqual(mapFinishReason("pause_turn"), { unified: "other", raw: "pause_turn" })
+      assertEqual(
+        ccEventToStreamPart({
+          type: "finish",
+          finishReason: "end_turn",
+          rawFinishReason: "pause_turn",
+          totalUsage: { inputTokens: 10, outputTokens: 4 },
+        }),
+        [
+          {
+            type: "finish",
+            finishReason: { unified: "stop", raw: "pause_turn" },
+            usage: {
+              inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 },
+              outputTokens: { total: 4, text: 4, reasoning: 0 },
+            },
+          },
+        ],
+      )
+      // With no raw field the finish maps exactly as it always did.
+      assertEqual(
+        ccEventToStreamPart({
+          type: "finish",
+          finishReason: "pause_turn",
+          totalUsage: { inputTokens: 10, outputTokens: 4 },
+        })[0],
+        {
+          type: "finish",
+          finishReason: { unified: "other", raw: "pause_turn" },
+          usage: {
+            inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 },
+            outputTokens: { total: 4, text: 4, reasoning: 0 },
+          },
+        },
+      )
+      // The transport asks the codec's vocabulary rather than matching the raw
+      // string at the call site: a paused finish is one thing, an ordinary one
+      // — `other` included — is not.
+      assertEqual(
+        finishIsPauseTurn({ finishReason: { unified: "other", raw: "pause_turn" } }),
+        true,
+      )
+      assertEqual(finishIsPauseTurn({ finishReason: { unified: "other", raw: "unknown" } }), false)
+      assertEqual(finishIsPauseTurn({ finishReason: { unified: "stop", raw: "end_turn" } }), false)
+    },
+  ],
+
+  [
+    "addAiSdkUsage sums every bucket a resumed turn's continuations report (issue #172)",
+    () => {
+      // Upstream folds a paused turn's continuations with `addUsage2`, the only
+      // place the CLI sums usage: the transport emits one finish for the whole
+      // turn, so its usage is the sum of the responses that made it up.
+      assertEqual(
+        addAiSdkUsage(
+          {
+            inputTokens: { total: 10, noCache: 6, cacheRead: 3, cacheWrite: 1 },
+            outputTokens: { total: 4, text: 4, reasoning: 0 },
+          },
+          {
+            inputTokens: { total: 20, noCache: 18, cacheRead: 2, cacheWrite: 0 },
+            outputTokens: { total: 5, text: 0, reasoning: 5 },
+          },
+        ),
+        {
+          inputTokens: { total: 30, noCache: 24, cacheRead: 5, cacheWrite: 1 },
+          outputTokens: { total: 9, text: 4, reasoning: 5 },
+        },
+      )
+      // An absent bucket is zero, never NaN: a codec that reports no cache
+      // detail still adds cleanly to one that does.
+      assertEqual(
+        addAiSdkUsage(
+          {
+            inputTokens: { total: undefined, noCache: undefined, cacheRead: 0, cacheWrite: 0 },
+            outputTokens: { total: 2, text: undefined, reasoning: undefined },
+          },
+          {
+            inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 },
+            outputTokens: { total: 3, text: 3, reasoning: 0 },
+          },
+        ),
+        {
+          inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 },
+          outputTokens: { total: 5, text: 3, reasoning: 0 },
+        },
+      )
     },
   ],
 ])

@@ -75,6 +75,7 @@ export type FailureKind =
   | "upgrade-required" // the documented 403 that flips the transport
   | "truncation" // the body ended without a complete turn
   | "stream-error" // the server's own error event mid-stream
+  | "pause-turn-limit" // the provider kept pausing the turn past the continuation bound
 
 export interface Failure {
   kind: FailureKind
@@ -123,6 +124,14 @@ export const VERSION_GATE_FAILURE: Failure = failure("fatal-status", false, { st
 
 /** The body ended without a complete turn — replayable while nothing is visible. */
 export const TRUNCATION_FAILURE: Failure = failure("truncation", true, { status: 502 })
+
+/**
+ * The provider paused the turn more times than the continuation bound allows
+ * (issue #172). The bound exists to stop the loop, so re-sending the same
+ * request is exactly what must not happen: the failure is permanent for the
+ * turn and the ladder never replays it.
+ */
+export const PAUSE_TURN_LIMIT_FAILURE: Failure = failure("pause-turn-limit", false)
 
 /**
  * Upstream's terminal error markers (`hasTerminalMarker`): an error event

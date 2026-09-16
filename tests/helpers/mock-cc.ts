@@ -541,10 +541,13 @@ export function openAIFinishChunk(
 export function anthropicContentBlockDelta(text: string, index = 0): Record<string, unknown> {
   return { type: "content_block_delta", index, delta: { type: "text_delta", text } }
 }
+/** The terminal `message_delta`: its `stop_reason` is the pause marker when a
+ * turn is continued rather than finished (issue #172). */
 export function anthropicMessageDelta(
   usage: Record<string, unknown> = { input_tokens: 10, output_tokens: 5 },
+  stopReason = "end_turn",
 ): Record<string, unknown> {
-  return { type: "message_delta", delta: { stop_reason: "end_turn" }, usage }
+  return { type: "message_delta", delta: { stop_reason: stopReason }, usage }
 }
 
 /**

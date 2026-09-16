@@ -254,6 +254,21 @@ proxy, or ended early by the server — raises `TruncatedStreamError` (upstream'
 wording, `status` 502, `name` on the Error). Both failures surface as the `error`
 part; `doGenerate` fails the same way, off the same transport.
 
+A `pause_turn` is not an ending either. The provider stopped mid-turn and
+expects the same request to continue it — Anthropic reports it as a
+`message_delta` stop_reason, the legacy codec in its `finish` event (upstream
+reads `rawFinishReason ?? finishReason` there), the OpenAI shape as a
+`finish_reason` — and upstream `command-code@1.54.0` loops on it in both of its
+paths (`Ph = 5`). This transport re-POSTs the same body, appends the
+continuation's parts to the same stream, and folds each continuation's usage
+into the turn's single `finish` (upstream's `addUsage2`, the only place the CLI
+sums usage — the usage of a retry that _replaced_ an attempt is not part of the
+sum). The bound is five continuations: a turn still paused there fails with
+`PauseTurnLimitError` instead of emitting `finish{other, pause_turn}`, which v1
+reads as a completed turn and v2 rejects as a retryable incomplete stream.
+Whatever the paused response left open is closed before its continuation opens
+its own parts.
+
 Retries are causal: every failure is classified first, and only the kinds whose
 own shape says "transient" are replayed. The vocabulary and the rules are ported
 from upstream `command-code@1.54.0` (`isModelCallRetryable`,
@@ -269,6 +284,7 @@ from upstream `command-code@1.54.0` (`isModelCallRetryable`,
 | the plan-gate 403: `upgrade_required`, `upgrade to GOAT/provider`, or "without / doesn't include API access"                                                                                      | transport flip   | flipped once, never replayed  |
 | body ended with no terminal, or with only a synthesized finish                                                                                                                                    | truncation       | yes, while nothing is visible |
 | server `error` event: `isRetryable: true`, else a reported 408/429/5xx, else retryable unless it says `false` or names `premium_credits_exhausted` / `model_not_in_plan` / `insufficient credits` | stream error     | per that rule                 |
+| a turn still paused after five `pause_turn` continuations                                                                                                                                         | pause-turn limit | no                            |
 
 `maxRetries` defaults to **2**: the hosts already run their own slower ladders
 outside the plugin (v1 1.18.30: 5 retries; v2 2.0.3: 4, behind a hard
@@ -285,10 +301,15 @@ The backoff is `min(10 s, max(1 s, 500 ms·2^attempt))`, no jitter, bounded by
 than being thrown into a generic retry. Request headers are rebuilt for every
 attempt, so a credential rotated mid-ladder is picked up by the next request.
 
-A replay only ever happens while the consumer has seen nothing: any emitted part
-other than `finish` — a bare `text-start` or `tool-input-start` included — rules
-it out, because part lifecycles cannot be replayed either. A terminal that
-carries the turn's usage report settles the turn the same way.
+A replay only ever happens while the consumer has seen nothing _from the request
+being replayed_: any part it emitted other than `finish` — a bare `text-start` or
+`tool-input-start` included — rules it out, because part lifecycles cannot be
+replayed either. A terminal that carries the turn's usage report settles the turn
+the same way. The request, not the stream, is the unit: a paused turn's
+continuation may be replayed after earlier continuations put parts on the stream,
+since those are never re-requested. The same rule bounds the transport flip — a
+plan-gate `403` arriving mid-turn surfaces instead of re-running the call from
+the start on `/alpha/generate` — while the session is pinned to legacy either way.
 
 ## Pricing display
 
