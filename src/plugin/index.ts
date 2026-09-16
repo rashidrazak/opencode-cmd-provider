@@ -67,13 +67,13 @@ const server: Plugin = async () => {
 
 /**
  * v2 host: the same three capabilities through the transform API. The two Deals
- * intelligence seams — the catalog enrichment pass and the `cmd_plan_summary`
+ * intelligence seams — the provider enrichment pass and the `cmd_plan_summary`
  * tool — are supplied here, so deleting `src/deals/` plus these two lines still
  * leaves Core green (ADR-0004).
  */
 const setup = async (ctx: V2SetupContext): Promise<void> =>
   setupCommandCode(ctx, {
-    enrichCatalog: enrichCommandCodeModelsV2,
+    enrichProvider: enrichCommandCodeModelsV2,
     tools: [planSummaryV2Tool()],
   })
 

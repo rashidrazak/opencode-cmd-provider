@@ -3,7 +3,7 @@
 // Two hosts, two entry shapes, one Snapshot:
 //  - v1: the `config` hook fills `provider.commandcode.models` (autoRegister,
 //    below) — a `ConfigModel` per row;
-//  - v2: the `catalog.transform` fills `Model.Info` records (catalogModelForV2)
+//  - v2: the `provider.transform` fills `Model.Info` records (catalogModelForV2)
 //    — see ADR-0010.
 // Both derive the same Display name, limits, reasoning variants, and modality
 // facts from the Snapshot row, so a model reads identically in either host.

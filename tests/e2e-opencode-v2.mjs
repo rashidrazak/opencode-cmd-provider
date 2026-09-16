@@ -114,19 +114,21 @@ export default {
     report("setup", "returned")
     const location = { directory: ctx.location.directory }
     try {
-      const provider = await ctx.catalog.provider.get({ providerID: "commandcode" })
-      const info = provider?.data ?? provider
+      const raw = await ctx.provider.get({ providerID: "commandcode" }).catch(() => undefined)
+      const info = raw?.data ?? raw?.provider ?? raw
       report("provider", { id: info?.id, name: info?.name, package: info?.package, activation: info?.activation, integrationID: info?.integrationID })
     } catch (error) { report("provider-error", String(error?.message ?? error)) }
     try {
-      const models = await ctx.catalog.model.list({ location })
-      const ours = (models?.data ?? []).filter((model) => model.providerID === "commandcode")
+      const raw = await ctx.model.list().catch(() => undefined)
+      const all = raw?.data ?? raw ?? []
+      const ours = (Array.isArray(all) ? all : []).filter((model) => model.providerID === "commandcode")
       const first = ours[0] ?? {}
       report("models", { count: ours.length, first: first.id, package: first.package, variants: (first.variants ?? []).length, cost: (first.cost ?? []).length })
     } catch (error) { report("models-error", String(error?.message ?? error)) }
     try {
-      const integrations = await ctx.integration.list({ location })
-      const ours = (integrations?.data ?? []).find((item) => item.id === "commandcode")
+      const raw = await ctx.integration.list().catch(() => undefined)
+      const all = raw?.data ?? raw ?? []
+      const ours = (Array.isArray(all) ? all : []).find((item) => item.id === "commandcode")
       report("integration", { name: ours?.name, methods: (ours?.methods ?? []).map((method) => method.type), connections: (ours?.connections ?? []).length })
     } catch (error) { report("integration-error", String(error?.message ?? error)) }
   },

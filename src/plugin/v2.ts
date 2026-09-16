@@ -6,12 +6,12 @@
 // fresh value whenever registrations change. The three v1 hooks therefore have
 // three v2 destinations:
 //
-//   v1 `config` hook      → `ctx.catalog.transform`      (Auto-registration)
+//   v1 `config` hook      → `ctx.provider.transform` + `ctx.model.transform`
 //   v1 `auth` hook        → `ctx.integration.transform`  (`/connect` + env key)
 //   v1 `tool` map         → `ctx.tool.transform`
 //   v1 runtime provider   → `ctx.aisdk.hook("sdk")`      (the LanguageModelV3)
 //
-// The runtime half matters: in v2 the auto-registered provider's `package` is
+// The runtime half matters: the auto-registered provider's `package` is
 // `aisdk:<Provider specifier>`, which the model resolver deliberately refuses to
 // install — it requires a plugin to hand it the SDK. `ctx.aisdk.hook("sdk")` is
 // that seam, and the object it hands over is the very same `createCommandCode`
@@ -22,9 +22,10 @@ import { createCommandCode } from "../provider/index.js"
 import { catalogModelForV2, catalogVariantsForV2, DEFAULT_DISPLAY_PREFIX } from "./models.js"
 import { resolveProviderNpm } from "./version.js"
 import type {
-  V2CatalogEditor,
   V2IntegrationEditor,
+  V2ModelEditor,
   V2ModelInfo,
+  V2ProviderEditor,
   V2ProviderInfo,
   V2SDKEvent,
   V2SetupContext,
@@ -40,15 +41,14 @@ export const AISDK_PREFIX = "aisdk:"
 /**
  * First-run default model (ADR-0001): v1 lands here through OpenCode's
  * hardcoded provider-priority list, so v2 has to ask for it explicitly. Set
- * only when no default exists yet — a user's configured model always wins,
- * because the config transform is registered before this one and replays first.
+ * only when no default exists yet — a user's configured model always wins.
  */
 export const FIRST_RUN_DEFAULT_MODEL_ID = "gpt-5.6-terra"
 
 /** Deals-intelligence seams; Core never imports the slice (ADR-0004). */
 export interface V2SetupExtensions {
-  /** Extra catalog pass, replayed after Auto-registration. */
-  enrichCatalog?: (catalog: V2CatalogEditor) => void
+  /** Extra provider pass, replayed after Auto-registration. */
+  enrichProvider?: (editor: V2ProviderEditor) => void
   /** Extra tools registered alongside the core set. */
   tools?: readonly V2ToolDefinition[]
 }
@@ -65,11 +65,13 @@ export async function setupCommandCode(
   // Resolved once per load, never at import time (ADR-0009): a degraded
   // registration beats a plugin that will not load.
   const specifier = `${AISDK_PREFIX}${resolveProviderNpm()}`
-  await ctx.catalog.transform((catalog) => {
-    registerProvider(catalog, specifier)
-    registerModels(catalog)
-    extensions.enrichCatalog?.(catalog)
-    selectFirstRunDefault(catalog)
+  await ctx.provider.transform((editor) => {
+    registerProvider(editor, specifier)
+    registerModels(editor)
+    extensions.enrichProvider?.(editor)
+  })
+  await ctx.model.transform((editor) => {
+    selectFirstRunDefault(editor)
   })
   await ctx.integration.transform(registerIntegration)
   if (extensions.tools !== undefined && extensions.tools.length > 0) {
@@ -82,14 +84,14 @@ export async function setupCommandCode(
 }
 
 /**
- * Provider-level gap-fill. The editor seeds a missing provider from
- * `Provider.Info.empty(id)` (`{ id, name: id, activation: "auto", package: "" }`)
- * and the config transform has already applied the user's declared
- * `providers.commandcode` entry, so "still at the seed value" is exactly the
- * "user left it unset" signal — the v2 counterpart of v1's `??=` fills.
+ * Provider-level gap-fill. A missing provider seeds from
+ * `Provider.Info.empty(id)` (`{ id, name: id, activation: "auto", package: "" }`),
+ * so "still at the seed value" is exactly the "user left it unset" signal —
+ * the v2 counterpart of v1's `??=` fills.
  */
-export function registerProvider(catalog: V2CatalogEditor, specifier: string): void {
-  catalog.provider.update(PROVIDER_ID, (provider: V2ProviderInfo) => {
+export function registerProvider(editor: V2ProviderEditor, specifier: string): void {
+  ensureProvider(editor)
+  editor.update(PROVIDER_ID, (provider: V2ProviderInfo) => {
     if (provider.name === provider.id) provider.name = PROVIDER_NAME
     if (provider.package === "") provider.package = specifier
     // Ties the provider to the credential that unlocks it, so availability
@@ -103,20 +105,21 @@ export function registerProvider(catalog: V2CatalogEditor, specifier: string): v
 }
 
 /**
- * Snapshot → v2 catalog. A model the draft already carries came from the user's
- * config or an earlier plugin, and Declared models are never modified — the one
- * exception is the reasoning gap-fill v1 also performed on declared entries
- * (`augmentConfigCommandCodeModels`): variants are added only when the entry has
- * none, so a declared effort list survives.
+ * Snapshot → provider source models. A model the draft already carries came from
+ * the user's config or an earlier plugin, and declared models are never
+ * modified — the one exception is the reasoning gap-fill v1 also performed on
+ * declared entries (`augmentConfigCommandCodeModels`): variants are added only
+ * when the entry has none, so a declared effort list survives.
  */
 export function registerModels(
-  catalog: V2CatalogEditor,
+  editor: V2ProviderEditor,
   snapshot: readonly CatalogModel[] = MODEL_SNAPSHOT,
 ): void {
-  const prefix = displayPrefixFromDraft(catalog)
+  ensureProvider(editor)
+  const prefix = displayPrefixFromDraft(editor)
   for (const model of snapshot) {
-    const declared = catalog.model.get(PROVIDER_ID, model.id) !== undefined
-    catalog.model.update(PROVIDER_ID, model.id, (entry: V2ModelInfo) => {
+    const declared = editor.get(PROVIDER_ID)?.models.get(model.id) !== undefined
+    editor.models.update(PROVIDER_ID, model.id, (entry: V2ModelInfo) => {
       if (declared) {
         if (entry.variants.length === 0) entry.variants = catalogVariantsForV2(model.id)
         return
@@ -126,14 +129,27 @@ export function registerModels(
   }
 }
 
+/** Ensures the provider record exists even on hosts whose `update` is not an upsert. */
+function ensureProvider(editor: V2ProviderEditor): void {
+  if (editor.get(PROVIDER_ID) !== undefined) return
+  try {
+    editor.add({
+      info: { id: PROVIDER_ID, name: PROVIDER_ID, activation: "auto", package: "" },
+      models: [],
+    })
+  } catch {
+    // Hosts with upserting `update` never reach here meaningfully; ignore.
+  }
+}
+
 /**
- * Reads the Display name prefix from the draft: a declared
+ * Reads the display-name prefix from the draft: a declared
  * `providers.commandcode.settings.display_prefix` string wins, anything else
  * falls back to `[CMD] `. Read-only, and never written back into the provider
  * entry — the prefix is presentation, not configuration.
  */
-function displayPrefixFromDraft(catalog: V2CatalogEditor): string {
-  const settings = catalog.provider.get(PROVIDER_ID)?.provider.settings
+function displayPrefixFromDraft(editor: V2ProviderEditor): string {
+  const settings = editor.get(PROVIDER_ID)?.provider.settings
   const value = settings?.["display_prefix"]
   return typeof value === "string" ? value : DEFAULT_DISPLAY_PREFIX
 }
@@ -175,10 +191,10 @@ export function provideSdk(event: V2SDKEvent): void {
  * and the documented model is still in the Snapshot.
  */
 function selectFirstRunDefault(
-  catalog: V2CatalogEditor,
+  editor: V2ModelEditor,
   snapshot: readonly CatalogModel[] = MODEL_SNAPSHOT,
 ): void {
-  if (catalog.model.default.get() !== undefined) return
+  if (editor.default.get() !== undefined) return
   if (!snapshot.some((model) => model.id === FIRST_RUN_DEFAULT_MODEL_ID)) return
-  catalog.model.default.set(PROVIDER_ID, FIRST_RUN_DEFAULT_MODEL_ID)
+  editor.default.set(PROVIDER_ID, FIRST_RUN_DEFAULT_MODEL_ID)
 }
