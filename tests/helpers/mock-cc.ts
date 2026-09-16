@@ -541,10 +541,13 @@ export function openAIFinishChunk(
 export function anthropicContentBlockDelta(text: string, index = 0): Record<string, unknown> {
   return { type: "content_block_delta", index, delta: { type: "text_delta", text } }
 }
+/** The terminal `message_delta`: its `stop_reason` is the pause marker when a
+ * turn is continued rather than finished (issue #172). */
 export function anthropicMessageDelta(
   usage: Record<string, unknown> = { input_tokens: 10, output_tokens: 5 },
+  stopReason = "end_turn",
 ): Record<string, unknown> {
-  return { type: "message_delta", delta: { stop_reason: "end_turn" }, usage }
+  return { type: "message_delta", delta: { stop_reason: stopReason }, usage }
 }
 
 /**
@@ -559,6 +562,54 @@ export function upgradeRequiredBody(): string {
       code: "upgrade_required",
       message:
         "You're on the Go plan, the only plan without API access. Upgrade to GOAT or higher.",
+    },
+  })
+}
+
+/**
+ * The live plan message both Provider API endpoints carry (issue #175): the
+ * OpenAI envelope adds `"code":"upgrade_required"`, the Anthropic one says
+ * `type: permission_error` and omits the code.
+ */
+const LIVE_PLAN_MESSAGE =
+  "Your Go plan doesn't include API access. Upgrade to Provider or higher at https://commandcode.ai/billing to use these endpoints."
+
+/**
+ * The live `403` observed on `/provider/v1/messages` (issue #175): the
+ * Anthropic envelope carries `type: permission_error` and the plan phrasing,
+ * but **no** `error.code` — `/messages` never emits the code for any 403.
+ * Both shapes must flip to the legacy transport.
+ */
+export function liveMessagesUpgradeBody(): string {
+  return JSON.stringify({
+    type: "error",
+    error: { type: "permission_error", message: LIVE_PLAN_MESSAGE },
+  })
+}
+
+/**
+ * The live `403` observed on `/provider/v1/chat/completions` (issue #175): the
+ * same plan message, plus the documented `"code":"upgrade_required"` — the one
+ * envelope that reaches the matcher's code branch.
+ */
+export function liveChatUpgradeBody(): string {
+  return JSON.stringify({
+    error: { code: "upgrade_required", message: LIVE_PLAN_MESSAGE },
+  })
+}
+
+/**
+ * The version-gate `403` (issue #175): it collides with the plan gate on
+ * `code: "upgrade_required"` and is distinguishable only by its `minVersion`
+ * field and "out of date" message. It asks for a client update, never a plan
+ * change, so it must not flip the session to the legacy transport.
+ */
+export function versionGateBody(): string {
+  return JSON.stringify({
+    error: {
+      code: "upgrade_required",
+      message: "Your Command Code CLI is out of date. Update to 0.18.10 or higher.",
+      minVersion: "0.18.10",
     },
   })
 }

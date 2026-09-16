@@ -161,7 +161,12 @@ surfaces in two places:
   ([ADR-0011](adr/0011-billing-derived-plan-identity.md)). Plan detection does
   not choose a transport: requests start on the Provider API unless `plan=go` is
   pinned, and a Go account switches to the legacy endpoint automatically when the
-  Provider API answers `403 upgrade_required`.
+  Provider API answers the plan-gate `403` — `/chat/completions` sends
+  `error.code: upgrade_required`, while `/messages` sends the Anthropic envelope
+  (`type: permission_error`) with the plan phrasing and no code (issue #175). A
+  stale-client version gate (`minVersion` / "out of date") is never read as a
+  plan flip — it surfaces its own plugin-named update message instead (see
+  [Legacy wire version and temperature](#legacy-wire-version-and-temperature)).
 - **Visible degradation:** when the bundled Deals catalog is empty (upstream
   fetch failed or the RSC shape changed), the sidebar shows a
   `Deals unavailable` banner with placeholder rows and the tool says no deal data
@@ -189,13 +194,132 @@ from user messages and tool results are forwarded in Command Code's data-URL wir
 format; text-only models reject image content before making a network request
 rather than silently dropping it.
 
+## Claude prompt caching
+
+Claude requests through the Provider API (`POST /provider/v1/messages`) send the
+system prompt as a content-block array carrying one ephemeral cache breakpoint
+(`cache_control: { type: "ephemeral" }`), mirroring the official CLI's
+`toWireSystem()`. Anthropic's cache is prefix-based, and the system block is the
+stable head every turn shares: with the breakpoint a repeated ~7k-token prefix
+reads back as `cache_read_input_tokens` (~99%) instead of being re-billed as
+fresh input — live-measured 7015 fresh tokens per turn without it, against 13
+fresh + 7142 cached with it. Only the system prefix is marked; caching message
+history (a rolling breakpoint) is a separate product decision and is not
+requested. The legacy `/alpha/generate` body keeps its plain-string system
+prompt: that gateway injects its own 1-hour breakpoint and replaces the client's
+5-minute one, so the port would be inert.
+
+## Legacy wire version and temperature
+
+`POST /alpha/generate` is version-gated: an absent, unparseable or too-old
+`x-command-code-version` answers `403 upgrade_required` with a `minVersion`
+(`0.18.10` when last probed; `/provider/v1/*` is not gated at all). The plugin
+reports the command-code build its Snapshot was refreshed from
+(`FACTS_PACKAGE_VERSION`) rather than a frozen literal: `npm run refresh:snapshot`
+moves it with the published package, and the release pipeline fails on a stale
+catalog ([ADR-0003](adr/0003-release-gates.md)), so the reported version travels
+with the published CLI. `tests/provider-version-gate.test.ts` keeps it clear of
+the floor the live gate last recorded — a static backstop, since the floor is
+server state that no CI run can probe. When a gate does fire, the transport
+surfaces its own message naming `opencode-cmd-provider` and the server's minimum
+instead of forwarding the body's advice to update "the Command Code CLI" — a
+binary plugin users are not running. The failure is a fatal `403`: never
+replayed by the retry ladder, never a transport flip. `x-co-flag`, which the
+frozen literal travelled with, is gone — it appears nowhere in
+`command-code@1.54.0` and is inert.
+
+The caller's `temperature` is forwarded verbatim when the host sets one (v1's
+`chat.params` hook, v2's call settings), with the legacy body falling back to
+the `0.3` it has always sent when none is set. The Provider API bodies forward
+the value only: upstream's own request builders omit the field when it has no
+value, and Anthropic rejects a temperature alongside extended thinking, so an
+invented default there would break reasoning models.
+
+## Stream termination and retries
+
+A turn ends only on a terminal event. A `finish` part is held until the response
+body is drained, so a trailing usage-only chunk (OpenAI `choices: []`) or
+`message_delta` (Anthropic) can replace it. A held finish is emitted only when it
+carries usage the provider actually reported: a body that dies after a
+usage-bearing finish (the legacy codec's `totalUsage`, Anthropic's
+`message_delta`) has declared the turn complete, while a finish synthesized from
+an OpenAI `finish_reason` chunk — its trailing usage chunk never arrived — fails
+the turn with `MissingUsageError` (`status` 502) instead of reporting a complete,
+zero-cost answer. The legacy `{"type":"abort"}` event is the other terminal: it
+carries no finish part, so the transport closes the parts the parser still holds
+open and ends the turn without inventing one — `ai@6` tolerates a missing finish,
+as upstream's own consumer does (`!finish && !abort` is its truncation check).
+Anything else is a failure: a body that closes with no terminal — truncated by a
+proxy, or ended early by the server — raises `TruncatedStreamError` (upstream's
+wording, `status` 502, `name` on the Error). Both failures surface as the `error`
+part; `doGenerate` fails the same way, off the same transport.
+
+A `pause_turn` is not an ending either. The provider stopped mid-turn and
+expects the same request to continue it — Anthropic reports it as a
+`message_delta` stop_reason, the legacy codec in its `finish` event (upstream
+reads `rawFinishReason ?? finishReason` there), the OpenAI shape as a
+`finish_reason` — and upstream `command-code@1.54.0` loops on it in both of its
+paths (`Ph = 5`). This transport re-POSTs the same body, appends the
+continuation's parts to the same stream, and folds each continuation's usage
+into the turn's single `finish` (upstream's `addUsage2`, the only place the CLI
+sums usage — the usage of a retry that _replaced_ an attempt is not part of the
+sum). The bound is five continuations: a turn still paused there fails with
+`PauseTurnLimitError` instead of emitting `finish{other, pause_turn}`, which v1
+reads as a completed turn and v2 rejects as a retryable incomplete stream.
+Whatever the paused response left open is closed before its continuation opens
+its own parts.
+
+Retries are causal: every failure is classified first, and only the kinds whose
+own shape says "transient" are replayed. The vocabulary and the rules are ported
+from upstream `command-code@1.54.0` (`isModelCallRetryable`,
+`isStreamErrorRetryable`, `parseWindowLimitError`):
+
+| failure                                                                                                                                                                                           | kind             | replayed                      |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- | ----------------------------- |
+| fetch rejection, read failure, per-attempt timeout                                                                                                                                                | network          | yes                           |
+| HTTP 408 / 429 / 5xx                                                                                                                                                                              | retryable status | yes                           |
+| HTTP 400 / 401 / 403 / 404 / 422, and every other status                                                                                                                                          | fatal status     | no                            |
+| 429 (or a `RATE_LIMITED` code) naming a usage window                                                                                                                                              | window limit     | no                            |
+| `Retry-After` beyond `maxRetryDelayMs`                                                                                                                                                            | retry-after cap  | no                            |
+| the plan-gate 403: `upgrade_required`, `upgrade to GOAT/provider`, or "without / doesn't include API access"                                                                                      | transport flip   | flipped once, never replayed  |
+| body ended with no terminal, or with only a synthesized finish                                                                                                                                    | truncation       | yes, while nothing is visible |
+| server `error` event: `isRetryable: true`, else a reported 408/429/5xx, else retryable unless it says `false` or names `premium_credits_exhausted` / `model_not_in_plan` / `insufficient credits` | stream error     | per that rule                 |
+| a turn still paused after five `pause_turn` continuations                                                                                                                                         | pause-turn limit | no                            |
+
+`maxRetries` defaults to **2**: the hosts already run their own slower ladders
+outside the plugin (v1 1.18.30: 5 retries; v2 2.0.3: 4, behind a hard
+`!outputStarted` gate), so this ladder is deliberately short and fast — upstream
+`command-code@1.54.0` sizes its 10-attempt ladder for the standalone CLI. The
+option is reachable as `provider.commandcode.options.maxRetries` (v1) /
+`providers.commandcode.settings.maxRetries` (v2), alongside `maxRetryDelayMs`
+(default 60 s) which caps both the ladder's own backoff and any `Retry-After` the
+transport is willing to honour. `maxRetries: 0` disables the ladder.
+
+The backoff is `min(10 s, max(1 s, 500 ms·2^attempt))`, no jitter, bounded by
+`maxRetryDelayMs`. A response's own `Retry-After` replaces it for that attempt
+(0 means retry immediately), and a delay beyond the cap fails the request rather
+than being thrown into a generic retry. Request headers are rebuilt for every
+attempt, so a credential rotated mid-ladder is picked up by the next request.
+
+A replay only ever happens while the consumer has seen nothing _from the request
+being replayed_: any part it emitted other than `finish` — a bare `text-start` or
+`tool-input-start` included — rules it out, because part lifecycles cannot be
+replayed either. A terminal that carries the turn's usage report settles the turn
+the same way. The request, not the stream, is the unit: a paused turn's
+continuation may be replayed after earlier continuations put parts on the stream,
+since those are never re-requested. The same rule bounds the transport flip — a
+plan-gate `403` arriving mid-turn surfaces instead of re-running the call from
+the start on `/alpha/generate` — while the session is pinned to legacy either way.
+
 ## Pricing display
 
 The Command Code Provider API does not include prices in its model catalog, so
 this provider builds an estimate table from the bundled `models.md` catalog for
-OpenCode's cost display. A model missing from that table displays zero cost —
-which does **not** mean Command Code bills the request at zero. Check the current
-[Command Code pricing](https://commandcode.ai/docs/resources/pricing-limits)
+OpenCode's cost display. The transport computes no cost of its own — it reports
+each turn's usage and the host prices it from the advertised rates, so there is
+exactly one cost path (issue #176). A model missing from that table displays zero
+cost — which does **not** mean Command Code bills the request at zero. Check the
+current [Command Code pricing](https://commandcode.ai/docs/resources/pricing-limits)
 before relying on the displayed value.
 
 ## Environment variables

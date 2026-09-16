@@ -1,20 +1,33 @@
 // tests/provider-upgrade-fallback.test.ts — issue #56 safety net:
-// a documented `403 upgrade_required` from the Provider API flips the session
-// to the legacy /alpha/generate transport and retries the same call once there.
+// a Provider API plan-gate `403` flips the session to the legacy
+// /alpha/generate transport and retries the same call once there.
+//
+// Both endpoint envelopes are covered (issue #175): the documented
+// `error.code: upgrade_required` and the live `/provider/v1/messages` shape
+// (`type: permission_error` with the plan phrasing and no code).
 //
 // Verified at the LanguageModel seam (doStream/doGenerate) with fetch spies:
 //   1. Provider 403 upgrade_required → same call retried via POST /alpha/generate
 //      with the legacy CLI wire format, and it succeeds.
 //   2. The flip is sticky: later turns on the same model instance hit only
 //      legacy — no second Provider API call, no second 403.
-//   3. Non-403 errors (401/422/429/500) and 403 without the upgrade body never
-//      flip — they flow through the existing error/redaction pipeline.
+//   3. Non-403 errors (401/422/429/500) and 403 without the plan-gate body never
+//      flip — they flow through the existing error/redaction pipeline. A
+//      stale-client version gate (minVersion / "out of date") is one of them.
 //   4. Usage/cost surfaced is the retried legacy response's — no double-counting.
 import { createCommandCode } from "../src/provider/index.js"
-import { finishEvent, textDelta, upgradeRequiredBody, headersToRecord } from "./helpers/mock-cc.js"
+import { COMMAND_CODE_CLI_VERSION } from "../src/provider/command-code-model.js"
+import {
+  finishEvent,
+  textDelta,
+  upgradeRequiredBody,
+  liveMessagesUpgradeBody,
+  liveChatUpgradeBody,
+  versionGateBody,
+  headersToRecord,
+} from "./helpers/mock-cc.js"
 import type { LanguageModelV3Prompt } from "../src/provider/aisdk-types.js"
 import { assert, assertEqual, run } from "./harness.js"
-import { calculateCommandCodeCost, costUsageFromAiSdkUsage } from "../src/provider/cost.js"
 
 type Model = ReturnType<ReturnType<typeof createCommandCode>["languageModel"]>
 
@@ -48,14 +61,26 @@ function errorResponse(status: number, body: unknown): Response {
 
 /** Documented Provider API 403 upgrade_required body (https://commandcode.ai/docs/provider). */
 const UPGRADE_BODY = upgradeRequiredBody()
+/** The live `/provider/v1/messages` 403: plan phrasing, no `error.code` (issue #175). */
+const LIVE_MESSAGES_BODY = liveMessagesUpgradeBody()
+/** The live `/provider/v1/chat/completions` 403: the same message plus `code` (issue #175). */
+const LIVE_CHAT_BODY = liveChatUpgradeBody()
+/** The version-gate 403: the plan gate's `code` plus `minVersion` (issue #175). */
+const VERSION_GATE_BODY = versionGateBody()
 
 const LEGACY_EVENTS: Array<Record<string, unknown> | "end"> = [
   textDelta("legacy answer"),
   finishEvent({ totalUsage: { inputTokens: 10, outputTokens: 4 } }),
 ]
 
-/** Fetch spy: Provider API endpoints answer 403 upgrade_required; legacy succeeds. */
-function upgradeSpy(): { fetch: typeof fetch; calls: SpyCall[] } {
+/** Fetch spy: the Provider API endpoints answer 403 with the given bodies
+ * (both default to the documented one); legacy succeeds. */
+function upgradeSpy(bodies: { chat?: unknown; messages?: unknown } = {}): {
+  fetch: typeof fetch
+  calls: SpyCall[]
+} {
+  const chatBody = bodies.chat ?? UPGRADE_BODY
+  const messagesBody = bodies.messages ?? chatBody
   const calls: SpyCall[] = []
   const fetchImpl: typeof fetch = async (input, init) => {
     const url = typeof input === "string" ? input : (input as URL).toString()
@@ -67,7 +92,8 @@ function upgradeSpy(): { fetch: typeof fetch; calls: SpyCall[] } {
     }
     calls.push(call)
     if (url.includes("/alpha/whoami")) return new Response("not found", { status: 404 })
-    if (url.includes("/provider/v1/")) return errorResponse(403, UPGRADE_BODY)
+    if (url.includes("/provider/v1/messages")) return errorResponse(403, messagesBody)
+    if (url.includes("/provider/v1/")) return errorResponse(403, chatBody)
     if (url.includes("/alpha/generate")) return sseResponse(LEGACY_EVENTS)
     return new Response("not found", { status: 404 })
   }
@@ -138,17 +164,19 @@ run([
       assertEqual(legacyBody.params.stream, true)
       assert(legacyBody.threadId, "legacy threadId present")
       const legacyHeaders = legacyCalls(calls)[0].headers
-      assertEqual(legacyHeaders["x-command-code-version"], "1.15.1")
+      assertEqual(legacyHeaders["x-command-code-version"], COMMAND_CODE_CLI_VERSION)
       assertEqual(legacyHeaders["authorization"], "Bearer k")
       // The legacy response is the one surfaced — content and usage, no error.
       const deltas = parts
         .filter((p) => p.type === "text-delta")
         .map((p) => (p as { delta: string }).delta)
       assertEqual(deltas, ["legacy answer"])
-      // Acceptance 4: the cost hook fires exactly once — on the retried legacy
+      // Acceptance 4: exactly one terminal fires — on the retried legacy
       // finish. The failed Provider attempt emitted no parts (the 403 lands
       // before any SSE), so exactly one finish part whose usage is the legacy
-      // one is the observable no-double-counting guarantee.
+      // one is the observable no-double-counting guarantee. Usage is also the
+      // whole billing input now: OpenCode prices it from the advertised rates
+      // (issue #176).
       const finishes = parts.filter((p) => p.type === "finish")
       assertEqual(finishes.length, 1, "exactly one finish — no double-counting")
       const usage = (finishes[0] as { usage: never }).usage
@@ -160,10 +188,6 @@ run([
         !parts.some((p) => p.type === "error"),
         "no error part — the retried legacy call succeeded",
       )
-      // Cost from the retried legacy response (issue #56 acceptance 4).
-      const cu = costUsageFromAiSdkUsage(usage)
-      calculateCommandCodeCost({ cost: { input: 1, output: 5, cacheRead: 0.2, cacheWrite: 1 } }, cu)
-      assert(cu.cost.total > 0, "cost calculated from the legacy usage")
     },
   ],
   [
@@ -183,6 +207,35 @@ run([
         .filter((p) => p.type === "text-delta")
         .map((p) => (p as { delta: string }).delta)
       assertEqual(deltas, ["legacy answer"])
+    },
+  ],
+  [
+    "safety net: the live Provider API 403 shapes flip — /messages (no code) and /chat/completions (code) (issue #175)",
+    async () => {
+      const { fetch, calls } = upgradeSpy({ chat: LIVE_CHAT_BODY, messages: LIVE_MESSAGES_BODY })
+      const provider = createCommandCode({ apiKey: "k", baseURL: "https://x", fetch, plan: "goat" })
+      // Anthropic route: the live /messages envelope carries `permission_error`
+      // and the plan phrasing, but no `error.code` at all.
+      const claudeParts = await collect(provider.languageModel("claude-sonnet-5"))
+      // OpenAI route: the live chat/completions envelope carries the same
+      // message plus `"code":"upgrade_required"`.
+      const openAIParts = await collect(provider.languageModel("gpt-5.6-terra"))
+      assertEqual(
+        providerCalls(calls).map((c) => c.url),
+        ["https://x/provider/v1/messages", "https://x/provider/v1/chat/completions"],
+        "each route's own endpoint was tried once",
+      )
+      assertEqual(legacyCalls(calls).length, 2, "each route retried once on legacy")
+      for (const [route, parts] of [
+        ["messages", claudeParts],
+        ["chat/completions", openAIParts],
+      ] as const) {
+        const deltas = parts
+          .filter((p) => p.type === "text-delta")
+          .map((p) => (p as { delta: string }).delta)
+        assertEqual(deltas, ["legacy answer"], `${route}: the legacy answer is served`)
+        assert(!parts.some((p) => p.type === "error"), `${route}: no error part`)
+      }
     },
   ],
   [
@@ -270,6 +323,10 @@ run([
           baseURL: "https://x",
           fetch,
           plan: "goat",
+          // The subject here is the flip, not the ladder: 429/500 are transient
+          // and the default ladder replays them (issue #171), so the budget is
+          // pinned off to count provider calls exactly.
+          maxRetries: 0,
         })
         const parts = await collect(provider.languageModel("gpt-5.6-terra"))
         const err = parts.find((p) => p.type === "error") as { error?: Error }
@@ -294,6 +351,48 @@ run([
       assertEqual(err.error!.message, "Command Code API error 403: forbidden")
       assertEqual(providerCalls(calls).length, 1)
       assertEqual(legacyCalls(calls).length, 0, "plain 403 is not a flip signal")
+    },
+  ],
+  [
+    "safety net: a stale-client version-gate 403 never flips — it surfaces its own message (issue #175, #173)",
+    async () => {
+      // The guard keeps a version-gate body out of the flip even though it
+      // carries the plan gate's `upgrade_required` code: the `minVersion`
+      // field / "out of date" wording decides first (issue #175). Since #173
+      // the message names the plugin rather than the CLI the server's body
+      // blames — the transport's own `VersionGateError`, pinned in
+      // tests/provider-version-gate.test.ts.
+      for (const modelId of ["claude-sonnet-5", "gpt-5.6-terra"]) {
+        const { fetch, calls } = errorSpy(403, VERSION_GATE_BODY)
+        const provider = createCommandCode({
+          apiKey: "k",
+          baseURL: "https://x",
+          fetch,
+          plan: "goat",
+        })
+        const model = provider.languageModel(modelId)
+        const parts = await collect(model)
+        const err = parts.find((p) => p.type === "error") as { error?: Error }
+        assert(err, `${modelId}: error part surfaced`)
+        assert(
+          err.error!.message.includes("opencode-cmd-provider"),
+          `${modelId}: names the plugin, got: ${err.error!.message}`,
+        )
+        assert(
+          err.error!.message.includes("out of date"),
+          `${modelId}: version-gate wording surfaced, got: ${err.error!.message}`,
+        )
+        assert(
+          !err.error!.message.includes("CLI"),
+          `${modelId}: does not blame a CLI, got: ${err.error!.message}`,
+        )
+        assertEqual(providerCalls(calls).length, 1, `${modelId}: one Provider API attempt`)
+        assertEqual(legacyCalls(calls).length, 0, `${modelId}: no legacy retry`)
+        // Still not flipped: a second turn hits the Provider API again.
+        await collect(model)
+        assertEqual(providerCalls(calls).length, 2, `${modelId}: still not flipped`)
+        assertEqual(legacyCalls(calls).length, 0, `${modelId}: legacy never reached`)
+      }
     },
   ],
   [

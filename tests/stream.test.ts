@@ -11,8 +11,11 @@ import {
   ccEventToStreamPart,
   ccUsageToAiSdkUsage,
   openAIUsageToAiSdkUsage,
+  anthropicUsageToAiSdkUsage,
   createOpenAIStreamParser,
   createAnthropicStreamParser,
+  finishIsPauseTurn,
+  addAiSdkUsage,
 } from "../src/provider/stream.js"
 import { assert, assertEqual, rejects, run } from "./harness.js"
 
@@ -361,6 +364,60 @@ run([
   ],
 
   [
+    "anthropicUsageToAiSdkUsage treats input_tokens as cache-exclusive (issue #178)",
+    () => {
+      // Live /provider/v1/messages (2026-09-16): the cached prefix sits outside
+      // `input_tokens`, so the OpenAI-style arithmetic reported `total 13,
+      // noCache 0` for a 7155-token prompt — the fresh 13 collapsed into the
+      // cache bucket and the turn under-reported. @ai-sdk/anthropic maps
+      // `total = input + cacheWrite + cacheRead`, `noCache = input`.
+      assertEqual(
+        anthropicUsageToAiSdkUsage({
+          input_tokens: 13,
+          cache_creation_input_tokens: 7142,
+          output_tokens: 5,
+        })?.inputTokens,
+        { total: 7155, noCache: 13, cacheRead: 0, cacheWrite: 7142 },
+      )
+      assertEqual(
+        anthropicUsageToAiSdkUsage({
+          input_tokens: 13,
+          cache_read_input_tokens: 7142,
+          output_tokens: 5,
+        })?.inputTokens,
+        { total: 7155, noCache: 13, cacheRead: 7142, cacheWrite: 0 },
+      )
+    },
+  ],
+
+  [
+    "the same cached prompt maps to the same usage from either provider shape (issues #158, #178)",
+    () => {
+      // A 7618-token prompt that is 7296-cached. The two providers report it
+      // with different arithmetic — OpenAI's prompt_tokens is inclusive,
+      // Anthropic's input_tokens is not — and both must land on the same AI SDK
+      // usage, which is what the cost path bills.
+      const expected = { total: 7618, noCache: 322, cacheRead: 7296, cacheWrite: 0 }
+      assertEqual(
+        openAIUsageToAiSdkUsage({
+          prompt_tokens: 7618,
+          completion_tokens: 8,
+          prompt_tokens_details: { cached_tokens: 7296 },
+        })?.inputTokens,
+        expected,
+      )
+      assertEqual(
+        anthropicUsageToAiSdkUsage({
+          input_tokens: 322,
+          cache_read_input_tokens: 7296,
+          output_tokens: 8,
+        })?.inputTokens,
+        expected,
+      )
+    },
+  ],
+
+  [
     "createOpenAIStreamParser reports nested cache reads on the finish part",
     () => {
       const parser = createOpenAIStreamParser()
@@ -616,6 +673,56 @@ run([
   ],
 
   [
+    "createAnthropicStreamParser drops the bare message_stop once message_delta finished the stream (issue #174)",
+    () => {
+      // The live Provider API stream closes in the mirror image of OpenAI's:
+      // usage (and the real stop_reason) arrive on `message_delta`, then a bare
+      // `message_stop` follows. Mapping that terminal too yields a second,
+      // zeroed finish that the transport's last-wins hold prefers — the whole
+      // turn's usage and reason lost.
+      const parser = createAnthropicStreamParser()
+      const events = [
+        { type: "message_start", message: { usage: { input_tokens: 20, output_tokens: 1 } } },
+        { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+        { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Hello" } },
+        { type: "content_block_stop", index: 0 },
+        {
+          type: "message_delta",
+          delta: { stop_reason: "end_turn" },
+          usage: { input_tokens: 20, output_tokens: 8 },
+        },
+        { type: "message_stop" },
+      ]
+      const parts = events.flatMap((e) => parser(e))
+      assertEqual(
+        parts.map((p) => (p as { type: string }).type),
+        ["text-start", "text-delta", "text-end", "finish"],
+      )
+      assertEqual(parts[3], {
+        type: "finish",
+        finishReason: { unified: "stop", raw: "end_turn" },
+        usage: {
+          inputTokens: { total: 20, noCache: 20, cacheRead: 0, cacheWrite: 0 },
+          outputTokens: { total: 8, text: 8, reasoning: 0 },
+        },
+      })
+
+      // The terminal stays the fallback finish for a stream that never sent
+      // `message_delta` — the only finish such a stream gets.
+      assertEqual(createAnthropicStreamParser()({ type: "message_stop" }), [
+        {
+          type: "finish",
+          finishReason: { unified: "stop", raw: "stop" },
+          usage: {
+            inputTokens: { total: 0, noCache: 0, cacheRead: 0, cacheWrite: 0 },
+            outputTokens: { total: 0, text: 0, reasoning: 0 },
+          },
+        },
+      ])
+    },
+  ],
+
+  [
     "createOpenAIStreamParser buffers tool arguments until the call is named (issue #72)",
     () => {
       const parser = createOpenAIStreamParser()
@@ -729,6 +836,106 @@ run([
         content_block: { type: "tool_use", id: "call_1", name: "read" },
       })
       assertEqual(unmodelled.closeStream(), [])
+    },
+  ],
+
+  [
+    "the codecs preserve the pause_turn finish reason the transport loops on (issue #172)",
+    () => {
+      // `pause_turn` is a stop reason, not an ending: the unified mapping stays
+      // `other` (it is an unknown reason to the AI SDK) and the raw reason is
+      // what the transport reads. Upstream's legacy consumer reads the
+      // terminal's two reason fields apart — the raw one off
+      // `rawFinishReason ?? finishReason` — so a finish event that reports the
+      // pause only in its raw field is a pause too, with the unified reason
+      // still taken from `finishReason`.
+      assertEqual(mapFinishReason("pause_turn"), { unified: "other", raw: "pause_turn" })
+      assertEqual(
+        ccEventToStreamPart({
+          type: "finish",
+          finishReason: "end_turn",
+          rawFinishReason: "pause_turn",
+          totalUsage: { inputTokens: 10, outputTokens: 4 },
+        }),
+        [
+          {
+            type: "finish",
+            finishReason: { unified: "stop", raw: "pause_turn" },
+            usage: {
+              inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 },
+              outputTokens: { total: 4, text: 4, reasoning: 0 },
+            },
+          },
+        ],
+      )
+      // With no raw field the finish maps exactly as it always did.
+      assertEqual(
+        ccEventToStreamPart({
+          type: "finish",
+          finishReason: "pause_turn",
+          totalUsage: { inputTokens: 10, outputTokens: 4 },
+        })[0],
+        {
+          type: "finish",
+          finishReason: { unified: "other", raw: "pause_turn" },
+          usage: {
+            inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 },
+            outputTokens: { total: 4, text: 4, reasoning: 0 },
+          },
+        },
+      )
+      // The transport asks the codec's vocabulary rather than matching the raw
+      // string at the call site: a paused finish is one thing, an ordinary one
+      // — `other` included — is not.
+      assertEqual(
+        finishIsPauseTurn({ finishReason: { unified: "other", raw: "pause_turn" } }),
+        true,
+      )
+      assertEqual(finishIsPauseTurn({ finishReason: { unified: "other", raw: "unknown" } }), false)
+      assertEqual(finishIsPauseTurn({ finishReason: { unified: "stop", raw: "end_turn" } }), false)
+    },
+  ],
+
+  [
+    "addAiSdkUsage sums every bucket a resumed turn's continuations report (issue #172)",
+    () => {
+      // Upstream folds a paused turn's continuations with `addUsage2`, the only
+      // place the CLI sums usage: the transport emits one finish for the whole
+      // turn, so its usage is the sum of the responses that made it up.
+      assertEqual(
+        addAiSdkUsage(
+          {
+            inputTokens: { total: 10, noCache: 6, cacheRead: 3, cacheWrite: 1 },
+            outputTokens: { total: 4, text: 4, reasoning: 0 },
+          },
+          {
+            inputTokens: { total: 20, noCache: 18, cacheRead: 2, cacheWrite: 0 },
+            outputTokens: { total: 5, text: 0, reasoning: 5 },
+          },
+        ),
+        {
+          inputTokens: { total: 30, noCache: 24, cacheRead: 5, cacheWrite: 1 },
+          outputTokens: { total: 9, text: 4, reasoning: 5 },
+        },
+      )
+      // An absent bucket is zero, never NaN: a codec that reports no cache
+      // detail still adds cleanly to one that does.
+      assertEqual(
+        addAiSdkUsage(
+          {
+            inputTokens: { total: undefined, noCache: undefined, cacheRead: 0, cacheWrite: 0 },
+            outputTokens: { total: 2, text: undefined, reasoning: undefined },
+          },
+          {
+            inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 },
+            outputTokens: { total: 3, text: 3, reasoning: 0 },
+          },
+        ),
+        {
+          inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 },
+          outputTokens: { total: 5, text: 3, reasoning: 0 },
+        },
+      )
     },
   ],
 ])

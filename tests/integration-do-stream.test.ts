@@ -5,6 +5,7 @@
 // tool-call part whose `input` is stringified JSON, finishReason is
 // { unified, raw }, and usage is nested { inputTokens, outputTokens }.
 import { createCommandCode } from "../src/provider/index.js"
+import { COMMAND_CODE_CLI_VERSION } from "../src/provider/command-code-model.js"
 import { startMockCc, textDelta, reasoningDelta, toolCall, finishEvent } from "./helpers/mock-cc.js"
 import type { LanguageModelV3Prompt } from "../src/provider/aisdk-types.js"
 import { assert, assertEqual, run } from "./harness.js"
@@ -151,7 +152,7 @@ run([
         assertEqual(params.max_tokens, 1000) // min(maxOutputTokens, model max, 64k)
         assertEqual((params.messages as Array<{ role: string }>)[0].role, "user")
         assertEqual(headers["authorization"], "Bearer user_test")
-        assertEqual(headers["x-command-code-version"], "1.15.1")
+        assertEqual(headers["x-command-code-version"], COMMAND_CODE_CLI_VERSION)
         assertEqual(headers["x-cli-environment"], "production")
       } finally {
         await mock.close()

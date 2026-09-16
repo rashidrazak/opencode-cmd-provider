@@ -16,7 +16,6 @@ import {
   openAIUsageToAiSdkUsage,
   anthropicUsageToAiSdkUsage,
 } from "../src/provider/stream.js"
-import { calculateCommandCodeCost, costUsageFromAiSdkUsage } from "../src/provider/cost.js"
 import { assert, assertEqual, run } from "./harness.js"
 
 run([
@@ -40,7 +39,7 @@ run([
     },
   ],
   [
-    "Anthropic: prompt → Messages body has stream:true and system top-level",
+    "Anthropic: prompt → Messages body has stream:true and one cached system block",
     () => {
       const prompt = [
         { role: "system", content: "you are helpful" },
@@ -49,9 +48,21 @@ run([
       const body = messagesToAnthropic(prompt, { model: "claude-sonnet-5" }) as any
       assertEqual(body.model, "claude-sonnet-5")
       assertEqual(body.stream, true)
-      assertEqual(body.system, "you are helpful")
+      // The system prefix is a content block carrying one ephemeral cache
+      // breakpoint: without it every turn re-bills the whole prefix as fresh
+      // input (issue #177).
+      assertEqual(body.system, [
+        { type: "text", text: "you are helpful", cache_control: { type: "ephemeral" } },
+      ])
       assert(Array.isArray(body.messages), "messages array")
       assert(!body.messages.some((m: any) => m.role === "system"), "no system in messages")
+
+      // No system prompt at all → no `system` field, not an empty block array.
+      const withoutSystem = messagesToAnthropic(
+        [{ role: "user", content: [{ type: "text", text: "hi" }] }] as any,
+        { model: "claude-sonnet-5" },
+      ) as any
+      assert(!("system" in withoutSystem), "no system field without a system prompt")
     },
   ],
   [
@@ -73,6 +84,25 @@ run([
           .max_tokens,
         500,
       )
+    },
+  ],
+  [
+    "temperature is forwarded only when the caller sets one (issue #173)",
+    () => {
+      const prompt = [{ role: "user", content: [{ type: "text", text: "hi" }] }] as any
+      const oa = (opts: Record<string, unknown>) =>
+        messagesToOpenAI(prompt, { model: "gpt-5.6-terra", ...opts }) as any
+      const ant = (opts: Record<string, unknown>) =>
+        messagesToAnthropic(prompt, { model: "claude-sonnet-5", ...opts }) as any
+      assertEqual(oa({ temperature: 0.7 }).temperature, 0.7)
+      assertEqual(ant({ temperature: 0.7 }).temperature, 0.7)
+      // 0 is a value, not an absent one.
+      assertEqual(oa({ temperature: 0 }).temperature, 0)
+      assertEqual(ant({ temperature: 0 }).temperature, 0)
+      // Unset means absent: no invented default on the Provider API bodies,
+      // where Anthropic rejects a temperature alongside extended thinking.
+      assert(!("temperature" in oa({})), "no temperature field when unset (OpenAI)")
+      assert(!("temperature" in ant({})), "no temperature field when unset (Anthropic)")
     },
   ],
   [
@@ -112,7 +142,8 @@ run([
         "openAI system flattened",
       )
       const ant = messagesToAnthropic(prompt, { model: "claude-sonnet-5" }) as any
-      assert(ant.system.includes("sys A") && ant.system.includes("sys B"), "anthropic system")
+      const antSystem = ant.system.map((block: any) => block.text).join("\n")
+      assert(antSystem.includes("sys A") && antSystem.includes("sys B"), "anthropic system")
     },
   ],
   [
@@ -283,9 +314,6 @@ run([
       assert(f, "finish")
       assertEqual(f.usage.inputTokens.total, 10)
       assertEqual(f.usage.outputTokens.total, 5)
-      const cu = costUsageFromAiSdkUsage(f.usage)
-      calculateCommandCodeCost({ cost: { input: 1, output: 5, cacheRead: 0.5, cacheWrite: 3 } }, cu)
-      assert(cu.cost.total > 0, "cost")
     },
   ],
   [
@@ -395,23 +423,15 @@ run([
     },
   ],
   [
-    "usage extraction feeds cost path for both providers",
+    "usage extraction matches for both providers",
     () => {
       const oa = openAIUsageToAiSdkUsage({ prompt_tokens: 100, completion_tokens: 50 } as any)
       const ant = anthropicUsageToAiSdkUsage({ input_tokens: 100, output_tokens: 50 } as any)
       assertEqual(oa?.inputTokens.total, 100)
       assertEqual(ant?.inputTokens.total, 100)
-      const cu1 = costUsageFromAiSdkUsage(oa!)
-      const cu2 = costUsageFromAiSdkUsage(ant!)
-      calculateCommandCodeCost(
-        { cost: { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 } },
-        cu1,
-      )
-      calculateCommandCodeCost(
-        { cost: { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 } },
-        cu2,
-      )
-      assertEqual(cu1.cost.total, cu2.cost.total)
+      // The same turn reported on either wire format maps to the same AI SDK
+      // usage — the transport forwards it and OpenCode prices it (issue #176).
+      assertEqual(oa, ant)
     },
   ],
 ])

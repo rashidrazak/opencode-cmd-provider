@@ -80,7 +80,9 @@ Team Pro, Provider), resolved from an explicit pin (the `plan` tool argument,
 subscription, and **unknown** when neither resolves — never a default. The
 vocabulary and alias table live in Core (`src/catalog/plans.ts`); transport
 selection reads only the explicit pin, so a Go account reaches the legacy
-endpoint through the documented `403 upgrade_required` fallback (ADR-0011).
+endpoint through the plan-gate `403` fallback — the documented
+`upgrade_required` envelope or the live `/messages` plan phrasing without a
+code — and a stale-client version gate never counts as one (ADR-0011).
 _Avoid_: plan detection default, detected-guess plan
 
 **Classification**:

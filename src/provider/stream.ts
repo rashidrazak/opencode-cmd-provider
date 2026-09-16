@@ -20,8 +20,8 @@
 //   - usage is nested { inputTokens: { total, noCache, cacheRead, cacheWrite },
 //     outputTokens: { total } } — `total` is cache-inclusive per AI SDK v3
 //     convention (how the bundled Anthropic provider maps usage); `noCache`
-//     carries the fresh-only remainder so downstream context usage and local
-//     cost stay correct (issue #36).
+//     carries the fresh-only remainder so downstream context usage and cost
+//     display stay correct (issue #36).
 import type {
   LanguageModelV3StreamPart,
   LanguageModelV3Usage,
@@ -29,6 +29,114 @@ import type {
 } from "@ai-sdk/provider"
 import { isRecord, stringValue, numberValue, recordOrEmpty } from "./converters.js"
 import { commandCodeErrorMessage, redactCommandCodeErrorText } from "./redact.js"
+import type { StreamErrorFacts } from "./retry.js"
+
+type FinishPart = Extract<LanguageModelV3StreamPart, { type: "finish" }>
+
+/**
+ * Marks a `finish` part whose usage this codec had to synthesize because the
+ * wire reported none. Such a part is not a complete turn report — the usage
+ * chunk the codec was waiting for never arrived — and the transport refuses to
+ * emit it as one (issue #171). Symbol-keyed on purpose: the marker is internal
+ * to this package and never shows up on a part a consumer serializes.
+ */
+const SYNTHESIZED_USAGE = Symbol("commandcode.synthesizedUsage")
+
+/**
+ * True when a held `finish` part carries usage the provider actually reported.
+ * A finish whose usage this module invented (`zeroedUsage()`) is a lie about
+ * the turn's cost, so the transport fails (and may retry) instead of emitting
+ * it (issue #171).
+ */
+export function finishCarriesReportedUsage(part: FinishPart): boolean {
+  return (part as FinishPart & { [SYNTHESIZED_USAGE]?: true })[SYNTHESIZED_USAGE] !== true
+}
+
+/**
+ * The wire's stop reason for a turn the provider paused rather than finished:
+ * the model stopped mid-turn and the same request continues it. It arrives in
+ * every codec's own spelling — Anthropic's `message_delta` stop_reason, the
+ * legacy `finish` event, an OpenAI `finish_reason` — and maps to the unified
+ * `other`, since the AI SDK has no reason for it. The transport owns what a
+ * pause means; this module owns only the vocabulary (issue #172).
+ */
+const PAUSE_TURN_REASON = "pause_turn"
+
+/**
+ * True when a `finish` reports a paused turn. Upstream `command-code@1.54.0`
+ * loops on exactly this raw reason (`Ph = 5`) and folds the continuations'
+ * usage with `addUsage2` (issue #172). Only the finish reason is read, so the
+ * check takes the one field it needs rather than the whole part.
+ */
+export function finishIsPauseTurn(part: Pick<FinishPart, "finishReason">): boolean {
+  return part.finishReason.raw === PAUSE_TURN_REASON
+}
+
+/**
+ * Sums two usage reports into one. The v3 shape's `total` fields are
+ * cache-inclusive, so component-wise addition is correct for every bucket;
+ * an absent bucket counts as zero. The transport uses it to fold a paused
+ * turn's continuations into the single finish it emits — upstream's
+ * `addUsage2`, the only place the CLI sums usage across responses (issue
+ * #172).
+ */
+export function addAiSdkUsage(
+  a: LanguageModelV3Usage,
+  b: LanguageModelV3Usage,
+): LanguageModelV3Usage {
+  return {
+    inputTokens: {
+      total: (a.inputTokens.total ?? 0) + (b.inputTokens.total ?? 0),
+      noCache: (a.inputTokens.noCache ?? 0) + (b.inputTokens.noCache ?? 0),
+      cacheRead: (a.inputTokens.cacheRead ?? 0) + (b.inputTokens.cacheRead ?? 0),
+      cacheWrite: (a.inputTokens.cacheWrite ?? 0) + (b.inputTokens.cacheWrite ?? 0),
+    },
+    outputTokens: {
+      total: (a.outputTokens.total ?? 0) + (b.outputTokens.total ?? 0),
+      text: (a.outputTokens.text ?? 0) + (b.outputTokens.text ?? 0),
+      reasoning: (a.outputTokens.reasoning ?? 0) + (b.outputTokens.reasoning ?? 0),
+    },
+  }
+}
+
+/**
+ * The server's own `error` event, surfaced as a failure the transport can
+ * classify (issue #171). The AI SDK `error` part has room for the message
+ * only, so the event's retryability signals — its `isRetryable` flag, the
+ * status it reported, its code and rate-limit window — ride on the instance.
+ * The message is redacted where the error is built.
+ */
+export class ProviderStreamError extends Error {
+  readonly facts: StreamErrorFacts
+  constructor(message: string, facts: StreamErrorFacts) {
+    super(message)
+    this.name = "ProviderStreamError"
+    this.facts = facts
+  }
+}
+
+/**
+ * The facts an error event gives about its own failure. Both wire envelopes
+ * carry them under `error` (the OpenAI `{error:{message,type,statusCode,
+ * isRetryable}}` shape and the Anthropic `{type:"error",error:{…}}` one); a
+ * string `error` carries a message and nothing else. A message the event never
+ * gave stays empty: classification must not invent wording to match on.
+ */
+function streamErrorFacts(event: Record<string, unknown>): StreamErrorFacts {
+  const inner = isRecord(event.error) ? event.error : event
+  return {
+    message: commandCodeErrorMessage(event.error) ?? commandCodeErrorMessage(event.message) ?? "",
+    reportedStatus: numberValue(inner.statusCode) ?? numberValue(inner.status),
+    retryableFlag: typeof inner.isRetryable === "boolean" ? inner.isRetryable : undefined,
+    code: stringValue(inner.code),
+    window: isRecord(inner.rateLimit) ? inner.rateLimit.window : undefined,
+  }
+}
+
+/** Throws the redacted, classified failure an error event describes. */
+function throwStreamError(event: Record<string, unknown>, message: string): never {
+  throw new ProviderStreamError(redactCommandCodeErrorText(message), streamErrorFacts(event))
+}
 
 export function parseStreamEventLine(line: string): unknown | undefined {
   let trimmed = line.trim()
@@ -124,28 +232,57 @@ export function ccEventToStreamPart(event: unknown): LanguageModelV3StreamPart[]
       ]
     }
     case "finish": {
-      const usage = ccUsageToAiSdkUsage(event)
+      // The legacy codec's terminal carries its usage inline
+      // (`totalUsage`): a finish without one has none to report. Upstream's
+      // own consumer reads the terminal's two reason fields apart — the
+      // unified reason off `finishReason`, the raw one off `rawFinishReason ??
+      // finishReason` — and the transport loops on the raw one, where
+      // `pause_turn` is reported (issue #172).
+      const reason = mapFinishReason(event.finishReason)
+      const rawReason = stringValue(event.rawFinishReason)
       return [
-        {
-          type: "finish",
-          finishReason: mapFinishReason(event.finishReason),
-          usage: usage ?? {
-            inputTokens: { total: 0, noCache: 0, cacheRead: 0, cacheWrite: 0 },
-            outputTokens: { total: 0, text: 0, reasoning: 0 },
-          },
-        },
+        finishPart(
+          rawReason === undefined ? reason : { unified: reason.unified, raw: rawReason },
+          ccUsageToAiSdkUsage(event),
+        ),
       ]
     }
     case "error": {
-      const message =
+      throwStreamError(
+        event,
         commandCodeErrorMessage(event.error) ??
-        commandCodeErrorMessage(event.message) ??
-        "Command Code stream error"
-      throw new Error(redactCommandCodeErrorText(message))
+          commandCodeErrorMessage(event.message) ??
+          "Command Code stream error",
+      )
     }
     default:
+      // Events with no part of their own. That includes the finish-less
+      // terminals `ccEventIsTerminal` owns (`CC_FINISHLESS_TERMINALS`): their
+      // meaning is the end of the turn, not a part (issue #170).
       return []
   }
+}
+
+/**
+ * The legacy `/alpha/generate` event types that end a stream *without* a finish
+ * part — `{"type":"abort"}`, the server's "generation aborted" terminal. The
+ * single authority for that vocabulary: `ccEventIsTerminal` reads it, and
+ * `ccEventToStreamPart` leaves them to the `default` branch.
+ */
+const CC_FINISHLESS_TERMINALS = new Set(["abort"])
+
+/**
+ * True for an event in `CC_FINISHLESS_TERMINALS`. Upstream's AI SDK consumer
+ * treats such an event as a clean end — its truncation check is
+ * `!finish && !abort` (`consumeFullStream`) — and ai@6 tolerates a missing
+ * finish (its part transform closes the stream), so the transport closes the
+ * parts the parser still holds open and ends the turn, instead of fabricating
+ * a `finish` or reporting the close as a truncation (issue #170).
+ */
+export function ccEventIsTerminal(event: unknown): boolean {
+  if (!isRecord(event)) return false
+  const type = stringValue(event.type)
+  return type !== undefined && CC_FINISHLESS_TERMINALS.has(type)
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
@@ -205,15 +342,28 @@ function extractUsageTokens(
   return { input, output, cacheRead, cacheWrite }
 }
 
-function usageToAiSdk(usage: unknown): LanguageModelV3Usage | undefined {
+/**
+ * How a provider's prompt total relates to the cached prefix it reports.
+ * OpenAI's `prompt_tokens` already counts the cached tokens; Anthropic's
+ * `input_tokens` counts only the fresh remainder (#158, #178).
+ */
+type InputTokenAccounting = "cache-inclusive" | "cache-exclusive"
+
+function usageToAiSdk(
+  usage: unknown,
+  inputAccounting: InputTokenAccounting,
+): LanguageModelV3Usage | undefined {
   const tokens = extractUsageTokens(usage)
   if (!tokens) return undefined
-  const totalInput = tokens.input
-  const noCache = Math.max(0, totalInput - tokens.cacheRead - tokens.cacheWrite)
+  // `total` is cache-inclusive by AI SDK v3 convention and `noCache` is the
+  // fresh remainder, whichever way the provider reports its prompt total.
+  const cacheInclusive = inputAccounting === "cache-inclusive"
   return {
     inputTokens: {
-      total: totalInput,
-      noCache,
+      total: cacheInclusive ? tokens.input : tokens.input + tokens.cacheRead + tokens.cacheWrite,
+      noCache: cacheInclusive
+        ? Math.max(0, tokens.input - tokens.cacheRead - tokens.cacheWrite)
+        : tokens.input,
       cacheRead: tokens.cacheRead,
       cacheWrite: tokens.cacheWrite,
     },
@@ -233,19 +383,29 @@ function deltaFromChoice(choice: Record<string, unknown>): Record<string, unknow
   return isRecord(delta) ? delta : undefined
 }
 
-export function openAIUsageToAiSdkUsage(
-  event: Record<string, unknown>,
-): LanguageModelV3Usage | undefined {
-  // event may be the full chunk or just the usage object
-  const usage = event.usage ?? event
-  return usageToAiSdk(usage)
+/** The usage object inside an event, or the value itself when it already is
+ * one: these mappers accept either ("event may be the full chunk or just the
+ * usage object"). */
+function usageArgOf(eventOrUsage: unknown): unknown {
+  return isRecord(eventOrUsage) ? (eventOrUsage.usage ?? eventOrUsage) : eventOrUsage
 }
 
-export function anthropicUsageToAiSdkUsage(
-  event: Record<string, unknown>,
-): LanguageModelV3Usage | undefined {
-  const usage = event.usage ?? event
-  return usageToAiSdk(usage)
+/**
+ * Maps OpenAI-shape usage: `prompt_tokens` counts the cached prefix
+ * (`prompt_tokens_details.cached_tokens`), so the fresh remainder is derived by
+ * subtracting it (issue #158).
+ */
+export function openAIUsageToAiSdkUsage(event: unknown): LanguageModelV3Usage | undefined {
+  return usageToAiSdk(usageArgOf(event), "cache-inclusive")
+}
+
+/**
+ * Maps Anthropic-shape usage: `input_tokens` excludes the cached prefix, so
+ * the cache-inclusive total the AI SDK expects is the sum of all three buckets
+ * and `noCache` is `input_tokens` itself (issue #178).
+ */
+export function anthropicUsageToAiSdkUsage(event: unknown): LanguageModelV3Usage | undefined {
+  return usageToAiSdk(usageArgOf(event), "cache-exclusive")
 }
 
 // --- Shared stream-part constructors ---
@@ -260,15 +420,28 @@ function zeroedUsage(): LanguageModelV3Usage {
   }
 }
 
+/** Records that a finish part's usage was invented, not reported (#171). */
+function markSynthesizedUsage(part: FinishPart): FinishPart {
+  ;(part as FinishPart & { [SYNTHESIZED_USAGE]?: true })[SYNTHESIZED_USAGE] = true
+  return part
+}
+
+/**
+ * The one finish-part constructor. A `usage` the codec could not read means
+ * the wire reported none, so the part is zero-filled *and* marked as
+ * synthesized: the transport fails such a turn instead of reporting it as a
+ * complete one with zero cost (issue #171).
+ */
 function finishPart(
   finishReason: LanguageModelV3FinishReason | undefined,
   usage: LanguageModelV3Usage | undefined,
-): LanguageModelV3StreamPart {
-  return {
+): FinishPart {
+  const part: FinishPart = {
     type: "finish",
     finishReason: finishReason ?? { unified: "stop", raw: "stop" },
     usage: usage ?? zeroedUsage(),
   }
+  return usage === undefined ? markSynthesizedUsage(part) : part
 }
 
 function textDeltaPart(id: unknown, delta: string): LanguageModelV3StreamPart {
@@ -284,24 +457,26 @@ export function openAIEventToStreamPart(event: unknown): LanguageModelV3StreamPa
   if (!isRecord(event)) return []
   // Error handling — OpenAI errors have { error: { message, type, code } } or top-level error
   if (event.error !== undefined) {
-    const message =
+    throwStreamError(
+      event,
       commandCodeErrorMessage(event.error) ??
-      commandCodeErrorMessage(event) ??
-      "Provider stream error"
-    throw new Error(redactCommandCodeErrorText(message))
+        commandCodeErrorMessage(event) ??
+        "Provider stream error",
+    )
   }
   if (stringValue(event.type) === "error") {
-    const message =
+    throwStreamError(
+      event,
       commandCodeErrorMessage(event.error) ??
-      commandCodeErrorMessage(event.message) ??
-      "Provider stream error"
-    throw new Error(redactCommandCodeErrorText(message))
+        commandCodeErrorMessage(event.message) ??
+        "Provider stream error",
+    )
   }
 
   // Extract usage if present (terminal chunk)
   const rawUsage = (event as Record<string, unknown>).usage
   const hasUsage = rawUsage !== undefined && rawUsage !== null
-  const usage = hasUsage ? usageToAiSdk(rawUsage) : undefined
+  const usage = hasUsage ? openAIUsageToAiSdkUsage(rawUsage) : undefined
 
   // Determine finish reason
   const choice = firstChoice(event as Record<string, unknown>)
@@ -372,11 +547,12 @@ export function anthropicEventToStreamPart(event: unknown): LanguageModelV3Strea
   const type = stringValue(event.type)
 
   if (type === "error" || event.error !== undefined) {
-    const message =
+    throwStreamError(
+      event,
       commandCodeErrorMessage(event.error) ??
-      commandCodeErrorMessage(event.message) ??
-      "Provider stream error"
-    throw new Error(redactCommandCodeErrorText(message))
+        commandCodeErrorMessage(event.message) ??
+        "Provider stream error",
+    )
   }
 
   // Content blocks belong to createAnthropicStreamParser, the only Anthropic
@@ -401,10 +577,13 @@ export function anthropicEventToStreamPart(event: unknown): LanguageModelV3Strea
   if (type === "message_delta") {
     const delta = asRecord(event.delta)
     const stopReason = stringValue(delta?.stop_reason) ?? stringValue(delta?.stopReason) ?? "stop"
-    return [finishPart(mapFinishReason(stopReason), usageToAiSdk(event.usage))]
+    return [finishPart(mapFinishReason(stopReason), anthropicUsageToAiSdkUsage(event))]
   }
 
-  // Alternative terminal: { type: "message_stop" } without usage — emit generic finish
+  // Alternative terminal: { type: "message_stop" } without usage — emit generic finish.
+  // The stateful parser suppresses this once `message_delta` has finished the
+  // stream, so the synthesized zeroed usage cannot replace the reported one
+  // (issue #174); a stateless caller has no per-stream state to consult.
   if (type === "message_stop") {
     return [finishPart(undefined, undefined)]
   }
@@ -414,7 +593,7 @@ export function anthropicEventToStreamPart(event: unknown): LanguageModelV3Strea
 
   // Fallback: check for usage at top level without type (some providers send final usage as top-level)
   if (event.usage !== undefined) {
-    const usage = usageToAiSdk(event.usage)
+    const usage = anthropicUsageToAiSdkUsage(event)
     if (usage) {
       return [
         finishPart(
@@ -630,7 +809,15 @@ export function createOpenAIStreamParser(): StreamEventParser {
       // The usage-only trailing chunk carries no finish_reason; reuse the one
       // captured from the finish_reason chunk so the real reason survives.
       const reason = finishReason ?? lastFinishReason
-      parts.push(finishPart(reason, hasUsage ? usageToAiSdk(rawUsage) : undefined))
+      // A usage chunk we cannot read is still a reported usage chunk: the
+      // turn is complete and reports zeros, unlike a finish_reason chunk whose
+      // trailing usage chunk never arrived (issue #171).
+      parts.push(
+        finishPart(
+          reason,
+          hasUsage ? (openAIUsageToAiSdkUsage(rawUsage) ?? zeroedUsage()) : undefined,
+        ),
+      )
     }
     return parts
   }
@@ -652,6 +839,14 @@ export function createAnthropicStreamParser(): StreamEventParser {
   // open reasoning part (issue #71). A block type this parser does not model is
   // recorded as "other" so its stop closes nothing (issue #72).
   const blocks = new Map<number, { type: "text" | "tool_use" | "thinking" | "other"; id: string }>()
+  // True once a `message_delta` finished this stream. Anthropic reports usage
+  // (and the real stop_reason) on `message_delta` and then closes with a bare
+  // `message_stop`; mapping that terminal too would hand the transport a
+  // second, zeroed finish for its last-wins hold to prefer, zeroing every
+  // Claude turn's usage and masking the stop_reason (issue #174). The terminal
+  // is still mapped when no `message_delta` arrived — the fallback finish a
+  // stream that never reports usage needs.
+  let messageDeltaFinished = false
 
   /**
    * Resolves the part a delta of `kind` belongs to at `index`, synthesizing the
@@ -799,8 +994,16 @@ export function createAnthropicStreamParser(): StreamEventParser {
       return []
     }
     // Everything else (message_delta, message_stop, ping, error, …) shares the
-    // stateless mapper's handling.
-    return anthropicEventToStreamPart(event)
+    // stateless mapper's handling. The terminal is the one exception: once
+    // `message_delta` produced the finish, the bare `message_stop` adds neither
+    // usage nor a reason, so it maps to nothing rather than to a zeroed finish
+    // the transport would prefer (issue #174).
+    if (type === "message_stop") {
+      return messageDeltaFinished ? [] : anthropicEventToStreamPart(event)
+    }
+    const parts = anthropicEventToStreamPart(event)
+    if (type === "message_delta") messageDeltaFinished = true
+    return parts
   }
 
   // A tool call is settled by its own tool-call part, never by a bare end, so

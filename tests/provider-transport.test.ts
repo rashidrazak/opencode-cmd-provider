@@ -14,13 +14,13 @@ import {
   finishEvent,
   eventsEnd,
   upgradeRequiredBody,
+  liveMessagesUpgradeBody,
   headersToRecord,
+  type MockCcOptions,
 } from "./helpers/mock-cc.js"
 import { projectSlugFromPath } from "../src/provider/project-slug.js"
 import type { LanguageModelV3Prompt } from "../src/provider/aisdk-types.js"
-import { assert, assertEqual, run } from "./harness.js"
-import { calculateCommandCodeCost, costUsageFromAiSdkUsage } from "../src/provider/cost.js"
-import { MODEL_COSTS } from "../src/provider/pricing.js"
+import { assert, assertEqual, run, withEnvVars } from "./harness.js"
 
 type Model = ReturnType<ReturnType<typeof createCommandCode>["languageModel"]>
 
@@ -45,32 +45,73 @@ async function collect(
   return parts
 }
 
-/** Sets/clears COMMANDCODE_* env vars for the duration of fn, restoring after. */
-function withEnvVars(
-  vars: Record<string, string | undefined>,
-  fn: () => Promise<void> | void,
-): Promise<void> {
-  const prev = new Map<string, string | undefined>()
-  for (const [key, value] of Object.entries(vars)) {
-    prev.set(key, process.env[key])
-    if (value === undefined) delete process.env[key]
-    else process.env[key] = value
-  }
-  const p = Promise.resolve().then(() => fn() as unknown as Promise<void>)
-  return p.finally(() => {
-    for (const [key, value] of prev) {
-      if (value === undefined) delete process.env[key]
-      else process.env[key] = value
-    }
-  })
+/** The transport's truncation failure, mirrored from upstream
+ * `command-code@1.54.0` (issue #170). */
+const TRUNCATION_MESSAGE =
+  "Stream ended unexpectedly before completion (no finish event) — response was truncated"
+
+/**
+ * A 200 SSE response whose body dies right after the queued events were read —
+ * a socket reset mid-stream, which rejects the reader rather than closing it.
+ * The queued events are delivered first: the stream only errors once the
+ * consumer has drained the queue.
+ */
+function dyingSseResponse(events: Array<Record<string, unknown>>): Response {
+  const encoder = new TextEncoder()
+  return new Response(
+    new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const event of events) {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`))
+        }
+      },
+      pull(controller) {
+        controller.error(new Error("socket reset"))
+      },
+    }),
+    { status: 200, headers: { "content-type": "text/event-stream" } },
+  )
 }
 
+/** Sets/clears COMMANDCODE_* env vars for the duration of fn, restoring after. */
 function withEnv(plan: string | undefined, fn: () => Promise<void> | void): Promise<void> {
   return withEnvVars({ COMMANDCODE_PLAN: plan }, fn)
 }
 
 function withBaseEnv(base: string | undefined, fn: () => Promise<void> | void): Promise<void> {
   return withEnvVars({ COMMANDCODE_API_BASE: base }, fn)
+}
+
+/**
+ * The `/alpha/generate` script of a turn that pauses once and finishes in its
+ * continuation (issue #172): the first request reports 10/4 and `pause_turn`,
+ * the second 3/5 and `end_turn`. The budget of a paused turn is what the two
+ * tests using it assert — one at the `doStream` seam, one at `doGenerate`'s.
+ */
+function pausedLegacyTurn(): MockCcOptions {
+  let requests = 0
+  const options: MockCcOptions = {
+    stream: [
+      textDelta("first "),
+      finishEvent({
+        finishReason: "pause_turn",
+        totalUsage: { inputTokens: 10, outputTokens: 4 },
+      }),
+    ],
+  }
+  options.onGenerate = () => {
+    requests++
+    if (requests === 2) {
+      options.stream = [
+        textDelta("second"),
+        finishEvent({
+          finishReason: "end_turn",
+          totalUsage: { inputTokens: 3, outputTokens: 5 },
+        }),
+      ]
+    }
+  }
+  return options
 }
 
 run([
@@ -103,13 +144,6 @@ run([
           assert(finish, "finish present")
           assertEqual(finish.usage?.inputTokens?.total, 10)
           assertEqual(finish.usage?.outputTokens?.total, 5)
-          // cost path
-          const cu = costUsageFromAiSdkUsage(finish.usage as never)
-          calculateCommandCodeCost(
-            { cost: { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 } },
-            cu,
-          )
-          assert(cu.cost.total > 0, "cost calculated")
         } finally {
           await mock.close()
         }
@@ -391,12 +425,6 @@ run([
             assertEqual(finish.finishReason?.unified, "stop")
             assertEqual(finish.usage?.inputTokens.total, 20)
             assertEqual(finish.usage?.outputTokens.total, 8)
-            const cu = costUsageFromAiSdkUsage(finish.usage as never)
-            calculateCommandCodeCost(
-              { cost: { input: 1, output: 5, cacheRead: 0.2, cacheWrite: 1 } },
-              cu,
-            )
-            assert(cu.cost.total > 0, "openai cost positive")
           } finally {
             await mock.close()
           }
@@ -426,12 +454,6 @@ run([
             }
             assertEqual(finish.usage?.inputTokens.total, 20)
             assertEqual(finish.usage?.outputTokens.total, 8)
-            const cu = costUsageFromAiSdkUsage(finish.usage as never)
-            calculateCommandCodeCost(
-              { cost: { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 } },
-              cu,
-            )
-            assert(cu.cost.total > 0, "anthropic cost positive")
           } finally {
             await mock.close()
           }
@@ -478,12 +500,111 @@ run([
         // Regression: usage from the trailing split chunk must be honoured, not zeroed.
         assertEqual(finish.usage?.inputTokens.total, 20)
         assertEqual(finish.usage?.outputTokens.total, 8)
-        const cu = costUsageFromAiSdkUsage(finish.usage as never)
-        calculateCommandCodeCost(
-          { cost: { input: 1, output: 5, cacheRead: 0.2, cacheWrite: 1 } },
-          cu,
+      } finally {
+        await mock.close()
+      }
+    },
+  ],
+  [
+    "provider: Anthropic message_delta usage survives the trailing message_stop (issue #174)",
+    async () => {
+      // Live /provider/v1/messages order (2026-09-16): message_start →
+      // content_block_* → message_delta (usage) → message_stop (bare). The
+      // parser now drops that terminal once `message_delta` finished the
+      // stream; before the fix it mapped a second, zeroed finish that the
+      // transport's last-wins hold preferred (OpenAI's mirror order is why the
+      // hold exists), so every Claude turn reported zero usage and zero cost
+      // and the real stop_reason was masked by `stop`.
+      const chunks = [
+        {
+          type: "message_start",
+          message: {
+            id: "msg_1",
+            role: "assistant",
+            usage: { input_tokens: 20, output_tokens: 1 },
+          },
+        },
+        { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+        { type: "ping" },
+        anthropicContentBlockDelta("Hello"),
+        { type: "content_block_stop", index: 0 },
+        anthropicMessageDelta({
+          input_tokens: 20,
+          cache_read_input_tokens: 4,
+          cache_creation_input_tokens: 2,
+          output_tokens: 8,
+        }),
+        { type: "message_stop" },
+      ]
+      const mock = await startMockCc({ messagesStream: chunks })
+      try {
+        const model = createCommandCode({ apiKey: "k", baseURL: mock.url }).languageModel(
+          "claude-sonnet-5",
         )
-        assert(cu.cost.total > 0, "split-usage-chunk cost positive")
+        const prompt: LanguageModelV3Prompt = [{ role: "user", content: "hi" }]
+        const parts = await collect(model, prompt)
+        assertEqual(
+          parts.filter((p) => p.type === "finish").length,
+          1,
+          "exactly one finish reaches the consumer",
+        )
+        const finish = parts.find((p) => p.type === "finish") as {
+          finishReason?: { unified?: string; raw?: string }
+          usage?: {
+            inputTokens: { total: number; cacheRead: number; cacheWrite: number }
+            outputTokens: { total: number }
+          }
+        }
+        assertEqual(finish.finishReason, { unified: "stop", raw: "end_turn" })
+        // The defect's headline: non-zero usage rather than the zeroed terminal.
+        // The cache-inclusive total is #178's mapping, so this pins non-zero
+        // input plus the cache pass-through the same capture showed.
+        assert((finish.usage?.inputTokens.total ?? 0) > 0, "input usage non-zero")
+        assertEqual(finish.usage?.inputTokens.cacheRead, 4)
+        assertEqual(finish.usage?.inputTokens.cacheWrite, 2)
+        assertEqual(finish.usage?.outputTokens.total, 8)
+
+        // The same stream through doGenerate must report the same usage.
+        const gen = await model.doGenerate({ prompt, mode: { type: "regular" } } as never)
+        assert((gen.usage.inputTokens.total ?? 0) > 0, "doGenerate input usage non-zero")
+        assertEqual(gen.usage.outputTokens.total, 8)
+        assertEqual(gen.usage, finish.usage)
+      } finally {
+        await mock.close()
+      }
+    },
+  ],
+  [
+    "provider: Anthropic usage-less terminal finish does not mask the message_delta stop reason (issue #174)",
+    async () => {
+      // The bare terminal's synthesized finish carries the `stop` default. When
+      // it overwrote the usage-bearing finish it also replaced a real
+      // `max_tokens` stop_reason with `stop`, hiding the truncation.
+      const mock = await startMockCc({
+        messagesStream: [
+          { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+          anthropicContentBlockDelta("Truncated"),
+          { type: "content_block_stop", index: 0 },
+          {
+            type: "message_delta",
+            delta: { stop_reason: "max_tokens" },
+            usage: { input_tokens: 20, output_tokens: 8 },
+          },
+          { type: "message_stop" },
+        ],
+      })
+      try {
+        const parts = await collect(
+          createCommandCode({ apiKey: "k", baseURL: mock.url }).languageModel("claude-sonnet-5"),
+          [{ role: "user", content: "hi" }],
+        )
+        const finish = parts.find((p) => p.type === "finish") as {
+          finishReason?: { unified?: string; raw?: string }
+          usage?: { outputTokens: { total: number } }
+        }
+        assert(finish, "finish present")
+        assertEqual(finish.finishReason, { unified: "length", raw: "max_tokens" })
+        assertEqual(finish.usage?.outputTokens.total, 8)
       } finally {
         await mock.close()
       }
@@ -496,18 +617,14 @@ run([
       // terminal chunk nests the cached prefix in prompt_tokens_details.
       // Before #158 the parser read only top-level cache fields, reported
       // cacheRead 0, and let usageToAiSdk reclassify the whole 52000-token
-      // prompt as fresh input — billing the cached prefix at the input rate
+      // prompt as fresh input — pricing the cached prefix at the input rate
       // and inflating the reported spend by the input/cacheRead ratio.
       //
-      // The model is picked from the generated cost table rather than pinned
-      // by id (spec #108): the assertion is arithmetic over whatever rates
-      // upstream ships, so a refresh re-derives instead of going red.
-      const modelId = Object.keys(MODEL_COSTS).find(
-        (id) => id.includes("/") && MODEL_COSTS[id].cacheRead > 0,
-      )
-      assert(modelId !== undefined, "a priced model with a cacheRead rate exists")
-      if (modelId === undefined) return
-      const rates = MODEL_COSTS[modelId]
+      // The asserted usage is the whole contract at this seam: OpenCode prices
+      // the reported cache split with the rates the model advertises, so the
+      // transport's job is to report the split correctly (issue #176).
+      // The model id is a fixture — the mock reports the usage regardless of
+      // the row — and only has to route to the OpenAI endpoint.
       await withEnv("pro", async () => {
         const mock = await startMockCc({
           chatCompletionsStream: [
@@ -522,7 +639,7 @@ run([
         })
         try {
           const provider = createCommandCode({ apiKey: "k", baseURL: mock.url })
-          const parts = await collect(provider.languageModel(modelId), [
+          const parts = await collect(provider.languageModel("gpt-5.6-terra"), [
             { role: "user", content: "hi" },
           ])
           assertEqual(mock.hits.chatCompletions, 1)
@@ -536,18 +653,6 @@ run([
             inputTokens: { total: 52000, noCache: 2000, cacheRead: 50000, cacheWrite: 0 },
             outputTokens: { total: 300, text: 300, reasoning: 0 },
           })
-
-          // The reported spend is the defect's headline: bill the emitted usage
-          // at the model's shipped rates and require the true total.
-          const cu = costUsageFromAiSdkUsage(finish.usage as never)
-          calculateCommandCodeCost({ cost: rates }, cu)
-          const trueCost =
-            (2000 / 1_000_000) * rates.input +
-            (300 / 1_000_000) * rates.output +
-            (50000 / 1_000_000) * rates.cacheRead
-          assertEqual(cu.cost.total.toFixed(8), trueCost.toFixed(8))
-          const buggyTotal = cu.cost.total + (48000 / 1_000_000) * (rates.input - rates.cacheRead)
-          assert(cu.cost.total < buggyTotal, "cache reads are billed below fresh input")
         } finally {
           await mock.close()
         }
@@ -555,7 +660,61 @@ run([
     },
   ],
   [
-    "provider: doGenerate non-streaming returns same content/usage/cost as doStream aggregated",
+    "provider: Anthropic transport maps cache-exclusive input_tokens to a cache-inclusive total (issue #178)",
+    async () => {
+      // Live /provider/v1/messages (2026-09-16): Anthropic reports
+      // `input_tokens` *excluding* the cached prefix, so the shared OpenAI-style
+      // arithmetic (which assumes an inclusive prompt total) collapsed
+      // `noCache` to 0 and reported only the fresh remainder as the whole
+      // prompt. @ai-sdk/anthropic maps `total = input + cacheWrite + cacheRead`,
+      // `noCache = input`.
+      const cases = [
+        {
+          label: "warm cache read",
+          usage: { input_tokens: 322, cache_read_input_tokens: 7296, output_tokens: 8 },
+          expected: {
+            inputTokens: { total: 7618, noCache: 322, cacheRead: 7296, cacheWrite: 0 },
+            outputTokens: { total: 8, text: 8, reasoning: 0 },
+          },
+        },
+        {
+          label: "cold cache write",
+          usage: { input_tokens: 4, cache_creation_input_tokens: 1885, output_tokens: 2 },
+          expected: {
+            inputTokens: { total: 1889, noCache: 4, cacheRead: 0, cacheWrite: 1885 },
+            outputTokens: { total: 2, text: 2, reasoning: 0 },
+          },
+        },
+      ]
+      for (const { label, usage, expected } of cases) {
+        const mock = await startMockCc({
+          messagesStream: [
+            { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+            anthropicContentBlockDelta("Cached"),
+            { type: "content_block_stop", index: 0 },
+            anthropicMessageDelta(usage),
+            { type: "message_stop" },
+          ],
+        })
+        try {
+          const parts = await collect(
+            createCommandCode({ apiKey: "k", baseURL: mock.url }).languageModel("claude-sonnet-5"),
+            [{ role: "user", content: "hi" }],
+          )
+          assertEqual(mock.hits.messages, 1)
+          const finish = parts.find((p) => p.type === "finish") as {
+            usage?: typeof expected
+          }
+          assert(finish, `${label}: finish present`)
+          assertEqual(finish.usage, expected, label)
+        } finally {
+          await mock.close()
+        }
+      }
+    },
+  ],
+  [
+    "provider: doGenerate non-streaming returns same content and usage as doStream aggregated",
     async () => {
       await withEnv("max", async () => {
         // OpenAI model via chat/completions
@@ -594,17 +753,6 @@ run([
               usage: typeof genUsage
             }
             assertEqual(JSON.stringify(genUsage), JSON.stringify(streamFinish.usage))
-            const cu1 = costUsageFromAiSdkUsage(genUsage as never)
-            const cu2 = costUsageFromAiSdkUsage(streamFinish.usage as never)
-            calculateCommandCodeCost(
-              { cost: { input: 1, output: 5, cacheRead: 0.2, cacheWrite: 1 } },
-              cu1,
-            )
-            calculateCommandCodeCost(
-              { cost: { input: 1, output: 5, cacheRead: 0.2, cacheWrite: 1 } },
-              cu2,
-            )
-            assertEqual(cu1.cost.total, cu2.cost.total)
           } finally {
             await mock1.close()
             await mock2.close()
@@ -800,6 +948,49 @@ run([
           assert("max_tokens" in (bodyMsg as object), "anthropic has max_tokens")
         } finally {
           await mock2.close()
+        }
+      })
+    },
+  ],
+  [
+    "provider: Claude requests carry one ephemeral cache breakpoint on the system prefix (issue #177)",
+    async () => {
+      // Measured live (2026-09-16): a flat system string re-billed the whole
+      // ~7k prefix on every turn (7015 fresh input, 0 cache reads), while the
+      // same prefix sent as a system block array with `cache_control` wrote
+      // 7142 tokens cold and read them back warm for 13 fresh tokens. The
+      // breakpoint is what makes the prefix reusable. The legacy
+      // `/alpha/generate` body keeps its plain-string `params.system`, pinned
+      // in tests/provider-parity.test.ts — the gateway injects its own 1h
+      // breakpoint there, so the port would be inert.
+      await withEnv("pro", async () => {
+        let bodyMsg: Record<string, unknown> | undefined
+        const mock = await startMockCc({
+          messagesStream: [anthropicContentBlockDelta("hi"), anthropicMessageDelta()],
+          onMessages: (b) => {
+            bodyMsg = b
+          },
+        })
+        try {
+          await collect(
+            createCommandCode({ apiKey: "k", baseURL: mock.url }).languageModel("claude-sonnet-5"),
+            [
+              { role: "system", content: "You are a test." },
+              { role: "user", content: "hi" },
+            ],
+          )
+          assertEqual(mock.hits.messages, 1)
+          assertEqual(bodyMsg?.system, [
+            { type: "text", text: "You are a test.", cache_control: { type: "ephemeral" } },
+          ])
+          // Exactly one breakpoint, on the system prefix: no message is
+          // cache-marked, so history caching stays out of scope (#177).
+          assert(
+            !JSON.stringify(bodyMsg?.messages).includes("cache_control"),
+            "no breakpoint in messages",
+          )
+        } finally {
+          await mock.close()
         }
       })
     },
@@ -1028,6 +1219,44 @@ run([
               "legacy headers carry the project slug",
             )
             assertEqual(legacyHeaders?.["x-taste-learning"], "true")
+          },
+        )
+      } finally {
+        await mock.close()
+      }
+    },
+  ],
+  [
+    "transport: a Go account flips on the live /provider/v1/messages 403 (permission_error, no code) (issue #175)",
+    async () => {
+      // The Anthropic endpoint answers the plan refusal in the Anthropic
+      // envelope — plan phrasing with no `error.code` — so the flip may not
+      // depend on the documented `upgrade_required` code.
+      const mock = await startMockCc({
+        messagesStatus: 403,
+        messagesErrorBody: liveMessagesUpgradeBody(),
+        stream: [textDelta("hi"), finishEvent()],
+      })
+      try {
+        await withEnvVars(
+          { COMMANDCODE_PLAN: undefined, COMMANDCODE_API_KEY: "k", COMMANDCODE_API_BASE: mock.url },
+          async () => {
+            const provider = createCommandCode({ apiKey: "k", baseURL: mock.url })
+            const parts = await collect(provider.languageModel("claude-sonnet-5"), [
+              { role: "user", content: "hi" },
+            ])
+            assertEqual(mock.hits.messages, 1, "Provider API /messages is tried first")
+            assertEqual(mock.hits.generate, 1, "the live 403 → one legacy retry")
+            assertEqual(
+              mock.hits.chatCompletions,
+              0,
+              "the Anthropic route never hits chat/completions",
+            )
+            assert(
+              parts.some((p) => p.type === "text-delta"),
+              "legacy delta emitted",
+            )
+            assert(!parts.some((p) => p.type === "error"), "no error part — the retry succeeded")
           },
         )
       } finally {
@@ -1335,15 +1564,263 @@ run([
     },
   ],
   [
-    "transport: a stream that ends without a finish event closes open parts first (issue #72)",
+    'transport: the legacy {"type":"abort"} terminal ends the stream cleanly (issue #170)',
+    async () => {
+      // The server aborted the generation: that is a terminal, not a
+      // truncation. It carries no finish part of its own (upstream's consumer
+      // checks `!finish && !abort`), so the transport must not fabricate one,
+      // must not report a truncation, and must not replay the turn.
+      const mock = await startMockCc({
+        stream: [textDelta("half an ans"), { type: "abort" }, eventsEnd],
+      })
+      try {
+        const provider = createCommandCode({
+          apiKey: "test_key",
+          baseURL: mock.url,
+          maxRetries: 2,
+          maxRetryDelayMs: 0,
+        })
+        const parts = await collect(
+          provider.languageModel("claude-sonnet-5"),
+          [{ role: "user", content: "hi" }],
+          { commandcode: { plan: "go" } },
+        )
+        assertEqual(
+          parts.map((p) => p.type),
+          ["text-delta"],
+        )
+        assertEqual(mock.hits.generate, 1, "a clean abort is not retried")
+
+        // The terminal ends the *read*, not just the turn: a server that keeps
+        // the connection open after aborting must not hold the consumer to the
+        // timeout. `timeout` is set low so a non-terminating read fails fast.
+        const stalled = await startMockCc({
+          stream: [textDelta("half an ans"), { type: "abort" }, "stall"],
+        })
+        try {
+          const stalledParts = await collect(
+            createCommandCode({
+              apiKey: "test_key",
+              baseURL: stalled.url,
+              timeout: 500,
+            }).languageModel("claude-sonnet-5"),
+            [{ role: "user", content: "hi" }],
+            { commandcode: { plan: "go" } },
+          )
+          assertEqual(
+            stalledParts.map((p) => p.type),
+            ["text-delta"],
+          )
+        } finally {
+          await stalled.close()
+        }
+      } finally {
+        await mock.close()
+      }
+    },
+  ],
+  [
+    "transport: an opened text part already rules a retry replay out (issue #170)",
+    async () => {
+      // A bare text-start counts as visible, deliberately: part lifecycles
+      // cannot be replayed either, so a re-request would append a second
+      // text-start (and a second text-end) for the same id. The Anthropic
+      // `content_block_start` is exactly that — a part opened before any delta.
+      await withEnv("goat", async () => {
+        let requests = 0
+        const fetchImpl: typeof fetch = async () => {
+          requests++
+          return dyingSseResponse([
+            { type: "content_block_start", index: 0, content_block: { type: "text" } },
+          ])
+        }
+        const provider = createCommandCode({
+          apiKey: "test_key",
+          baseURL: "https://api.commandcode.ai",
+          fetch: fetchImpl,
+          maxRetries: 1,
+          maxRetryDelayMs: 0,
+        })
+        const parts = await collect(provider.languageModel("claude-sonnet-5"), [
+          { role: "user", content: "hi" },
+        ])
+        assertEqual(requests, 1, "no re-request once a part was opened")
+        assertEqual(
+          parts.map((p) => p.type),
+          ["text-start", "text-end", "error"],
+        )
+      })
+    },
+  ],
+  [
+    "transport: a mid-stream read failure after visible content is never replayed (issue #170)",
+    async () => {
+      // maxRetries > 0 must not re-run a request whose text the consumer has
+      // already seen: the replay appends a second text-delta to the same part,
+      // so the user reads FIRSTFIRST.
+      await withEnv("goat", async () => {
+        let requests = 0
+        const fetchImpl: typeof fetch = async () => {
+          requests++
+          return dyingSseResponse([openAIChunk("FIRST")])
+        }
+        const provider = createCommandCode({
+          apiKey: "test_key",
+          baseURL: "https://api.commandcode.ai",
+          fetch: fetchImpl,
+          maxRetries: 2,
+          maxRetryDelayMs: 0,
+        })
+        const parts = await collect(provider.languageModel("gpt-5.6-terra"), [
+          { role: "user", content: "hi" },
+        ])
+        assertEqual(requests, 1, "no re-request once content is visible")
+        assertEqual(
+          parts.map((p) => p.type),
+          ["text-start", "text-delta", "text-end", "error"],
+        )
+        assertEqual(parts.filter((p) => p.type === "text-delta").length, 1)
+        assertEqual((parts[1] as { delta: string }).delta, "FIRST")
+        assert(
+          ((parts[3] as { error: Error }).error as Error).message.includes("socket reset"),
+          "the read failure is surfaced",
+        )
+      })
+    },
+  ],
+  [
+    "transport: a truncated stream with nothing visible is re-requested within the retry budget (issue #170)",
+    async () => {
+      // A clean truncation that delivered no parts yet is safe to replay: the
+      // consumer saw nothing, so the retry only replaces a body that never
+      // reached it. The first attempt serves an empty body, the second a
+      // complete answer — the hit count proves the re-request happened.
+      await withEnv("goat", async () => {
+        let requests = 0
+        const options: MockCcOptions = { chatCompletionsStream: [eventsEnd] }
+        options.onChatCompletions = () => {
+          requests++
+          if (requests === 2) {
+            options.chatCompletionsStream = [openAIChunk("hello"), openAIFinishChunk()]
+          }
+        }
+        const mock = await startMockCc(options)
+        try {
+          const provider = createCommandCode({
+            apiKey: "test_key",
+            baseURL: mock.url,
+            maxRetries: 1,
+            maxRetryDelayMs: 0,
+          })
+          const parts = await collect(provider.languageModel("gpt-5.6-terra"), [
+            { role: "user", content: "hi" },
+          ])
+          assertEqual(mock.hits.chatCompletions, 2)
+          assertEqual(
+            parts.map((p) => p.type),
+            ["text-start", "text-delta", "text-end", "finish"],
+          )
+          assertEqual((parts[1] as { delta: string }).delta, "hello")
+        } finally {
+          await mock.close()
+        }
+      })
+    },
+  ],
+  [
+    "transport: doGenerate fails on a truncated body exactly as doStream does (issue #170)",
+    async () => {
+      await withEnv("goat", async () => {
+        const mock = await startMockCc({
+          chatCompletionsStream: [openAIChunk("half an ans"), eventsEnd],
+        })
+        try {
+          const provider = createCommandCode({ apiKey: "test_key", baseURL: mock.url })
+          let error: (Error & { status?: number }) | undefined
+          try {
+            await provider.languageModel("gpt-5.6-terra").doGenerate({
+              prompt: [{ role: "user", content: "hi" }],
+              mode: { type: "regular" },
+            } as never)
+          } catch (generateError: unknown) {
+            error = generateError as Error & { status?: number }
+          }
+          assert(error, "doGenerate rejects a truncated body")
+          assertEqual(error.name, "TruncatedStreamError")
+          assertEqual(error.status, 502)
+          assertEqual(error.message, TRUNCATION_MESSAGE)
+        } finally {
+          await mock.close()
+        }
+      })
+    },
+  ],
+  [
+    "transport: a stream that ends without a finish event is truncated, and closes open parts first (issues #72, #170)",
     async () => {
       // A dropped connection is the other half of "failed mid-generation": the
-      // transport synthesizes a finish to terminate the stream, and the parts
-      // the server never closed must be closed before it.
+      // body ended cleanly with no terminal event, so the turn is truncated —
+      // never a synthesized finish that masks it as a successful stop (issue
+      // #170) — and the parts the server never closed are closed before the
+      // error part that ends the stream (issue #72).
       await withEnv("goat", async () => {
         const mock = await startMockCc({
           chatCompletionsStream: [
             { id: "gen_cut", choices: [{ delta: { content: "half an ans" } }] },
+            eventsEnd,
+          ],
+          stream: [textDelta("half an ans"), eventsEnd],
+        })
+        try {
+          const provider = createCommandCode({ apiKey: "test_key", baseURL: mock.url })
+          const parts = await collect(provider.languageModel("gpt-5.6-terra"), [
+            { role: "user", content: "hi" },
+          ])
+          assertEqual(
+            parts.map((p) => p.type),
+            ["text-start", "text-delta", "text-end", "error"],
+          )
+          assertEqual((parts[0] as { id: string }).id, "gen_cut")
+          assertEqual((parts[2] as { id: string }).id, "gen_cut")
+          const truncation = parts[3]!.error as Error & { status?: number }
+          assertEqual(truncation.message, TRUNCATION_MESSAGE)
+          assertEqual(truncation.name, "TruncatedStreamError")
+          assertEqual(truncation.status, 502)
+
+          // The legacy /alpha/generate transport truncates identically: its
+          // codec emits no text-start, and it has no open parts to close.
+          const legacyParts = await collect(
+            provider.languageModel("gpt-5.6-terra"),
+            [{ role: "user", content: "hi" }],
+            { commandcode: { plan: "go" } },
+          )
+          assertEqual(
+            legacyParts.map((p) => p.type),
+            ["text-delta", "error"],
+          )
+          assertEqual((legacyParts[1]!.error as Error).message, TRUNCATION_MESSAGE)
+        } finally {
+          await mock.close()
+        }
+      })
+    },
+  ],
+  [
+    "transport: a finish without its usage chunk fails the turn instead of reporting zeros (issues #170, #171)",
+    async () => {
+      // #170 accepted a close between the OpenAI finish_reason chunk and its
+      // separate trailing usage-only chunk as a complete turn and surfaced the
+      // held finish with zeroed usage. #171 reverses that: the held finish was
+      // synthesized — the wire never reported the turn's usage — so emitting it
+      // claims a complete, zero-cost turn for a stream that never said what it
+      // spent. The failure is raised instead, as a truncation (retryable while
+      // nothing is visible; here the text was already consumed, so it surfaces
+      // as the error part).
+      await withEnv("goat", async () => {
+        const mock = await startMockCc({
+          chatCompletionsStream: [
+            openAIChunk("hello"),
+            { id: "chatcmpl-test", choices: [{ delta: {}, finish_reason: "stop" }] },
             eventsEnd,
           ],
         })
@@ -1354,10 +1831,12 @@ run([
           ])
           assertEqual(
             parts.map((p) => p.type),
-            ["text-start", "text-delta", "text-end", "finish"],
+            ["text-start", "text-delta", "text-end", "error"],
           )
-          assertEqual((parts[0] as { id: string }).id, "gen_cut")
-          assertEqual((parts[2] as { id: string }).id, "gen_cut")
+          const failure = parts[3]!.error as Error & { status?: number }
+          assertEqual(failure.name, "MissingUsageError")
+          assertEqual(failure.status, 502)
+          assert(failure.message.includes("usage report"), failure.message)
         } finally {
           await mock.close()
         }
@@ -1403,6 +1882,417 @@ run([
           await mock.close()
         }
       })
+    },
+  ],
+  [
+    "transport: a paused legacy turn re-POSTs the body and sums its continuations' usage (issue #172)",
+    async () => {
+      // Upstream `command-code@1.54.0` loops on `rawFinishReason === "pause_turn"`
+      // (Ph = 5), re-POSTs the same body, and folds every continuation's usage
+      // with `addUsage2` — the only place upstream sums usage. The resumed turn
+      // is one stream: the pause never surfaces as a finish, and the single
+      // finish reports the sum.
+      const mock = await startMockCc(pausedLegacyTurn())
+      try {
+        const provider = createCommandCode({ apiKey: "test_key", baseURL: mock.url })
+        const parts = await collect(
+          provider.languageModel("gpt-5.6-terra"),
+          [{ role: "user", content: "hi" }],
+          { commandcode: { plan: "go" } },
+        )
+        assertEqual(mock.hits.generate, 2, "the pause is continued once")
+        assertEqual(mock.hits.chatCompletions, 0)
+        assertEqual(
+          parts.map((p) => p.type),
+          ["text-delta", "text-delta", "finish"],
+          "one continuous turn, one finish",
+        )
+        assertEqual((parts[0] as { delta: string }).delta, "first ")
+        assertEqual((parts[1] as { delta: string }).delta, "second")
+        const finish = parts[2] as {
+          finishReason: unknown
+          usage: { inputTokens: { total: number }; outputTokens: { total: number } }
+        }
+        assertEqual(finish.finishReason, { unified: "stop", raw: "end_turn" })
+        assertEqual(finish.usage.inputTokens.total, 13)
+        assertEqual(finish.usage.outputTokens.total, 9)
+      } finally {
+        await mock.close()
+      }
+    },
+  ],
+  [
+    "transport: an OpenAI pause_turn chunk continues the turn on the same stream (issue #172)",
+    async () => {
+      // The Provider API's OpenAI shape reports the pause as a `finish_reason`
+      // on the last content chunk, with the real usage on the trailing
+      // usage-only chunk. The continuation's parts follow the paused response's
+      // parts on the same stream, each with its own lifecycle: the pause is a
+      // boundary inside the turn, not the end of it.
+      let requests = 0
+      const options: MockCcOptions = {
+        chatCompletionsStream: [
+          openAIChunk("first ", { id: "chatcmpl-1" }),
+          { id: "chatcmpl-1", choices: [{ delta: {}, finish_reason: "pause_turn" }] },
+          { id: "chatcmpl-1", choices: [], usage: { prompt_tokens: 10, completion_tokens: 4 } },
+        ],
+      }
+      options.onChatCompletions = () => {
+        requests++
+        if (requests === 2) {
+          options.chatCompletionsStream = [
+            openAIChunk("second", { id: "chatcmpl-2" }),
+            {
+              id: "chatcmpl-2",
+              choices: [{ delta: {}, finish_reason: "end_turn" }],
+              usage: { prompt_tokens: 3, completion_tokens: 5 },
+            },
+          ]
+        }
+      }
+      const mock = await startMockCc(options)
+      try {
+        const provider = createCommandCode({ apiKey: "test_key", baseURL: mock.url })
+        const parts = await collect(provider.languageModel("gpt-5.6-terra"), [
+          { role: "user", content: "hi" },
+        ])
+        assertEqual(mock.hits.chatCompletions, 2, "the pause is continued once")
+        assertEqual(
+          parts.map((p) => p.type),
+          [
+            "text-start",
+            "text-delta",
+            "text-end",
+            "text-start",
+            "text-delta",
+            "text-end",
+            "finish",
+          ],
+        )
+        assertEqual((parts[0] as { id: string }).id, "chatcmpl-1")
+        assertEqual((parts[3] as { id: string }).id, "chatcmpl-2")
+        const finish = parts[6] as {
+          finishReason: unknown
+          usage: { inputTokens: { total: number }; outputTokens: { total: number } }
+        }
+        assertEqual(finish.finishReason, { unified: "stop", raw: "end_turn" })
+        assertEqual(finish.usage.inputTokens.total, 13)
+        assertEqual(finish.usage.outputTokens.total, 9)
+      } finally {
+        await mock.close()
+      }
+    },
+  ],
+  [
+    "transport: an Anthropic pause_turn stop reason continues the turn on the same stream (issue #172)",
+    async () => {
+      // The Anthropic shape reports the pause on `message_delta`'s stop_reason
+      // with the response's usage beside it. The resumed turn is one stream and
+      // one finish; the continuation opens its own content block, since the
+      // paused response closed the block it wrote.
+      const block = (text: string, stopReason: string, usage: Record<string, unknown>) => [
+        { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+        anthropicContentBlockDelta(text),
+        { type: "content_block_stop", index: 0 },
+        anthropicMessageDelta(usage, stopReason),
+      ]
+      let requests = 0
+      const options: MockCcOptions = {
+        messagesStream: block("first ", "pause_turn", { input_tokens: 10, output_tokens: 4 }),
+      }
+      options.onMessages = () => {
+        requests++
+        if (requests === 2) {
+          options.messagesStream = block("second", "end_turn", {
+            input_tokens: 3,
+            output_tokens: 5,
+          })
+        }
+      }
+      const mock = await startMockCc(options)
+      try {
+        const provider = createCommandCode({ apiKey: "test_key", baseURL: mock.url })
+        const parts = await collect(provider.languageModel("claude-sonnet-5"), [
+          { role: "user", content: "hi" },
+        ])
+        assertEqual(mock.hits.messages, 2, "the pause is continued once")
+        assertEqual(mock.hits.chatCompletions, 0)
+        assertEqual(
+          parts.map((p) => p.type),
+          [
+            "text-start",
+            "text-delta",
+            "text-end",
+            "text-start",
+            "text-delta",
+            "text-end",
+            "finish",
+          ],
+        )
+        assertEqual((parts[1] as { delta: string }).delta, "first ")
+        assertEqual((parts[4] as { delta: string }).delta, "second")
+        const finish = parts[6] as {
+          finishReason: unknown
+          usage: { inputTokens: { total: number }; outputTokens: { total: number } }
+        }
+        assertEqual(finish.finishReason, { unified: "stop", raw: "end_turn" })
+        assertEqual(finish.usage.inputTokens.total, 13)
+        assertEqual(finish.usage.outputTokens.total, 9)
+      } finally {
+        await mock.close()
+      }
+    },
+  ],
+  [
+    "transport: a turn that keeps pausing stops at five continuations and fails loudly (issue #172)",
+    async () => {
+      // Upstream's bound is `Ph = 5` — the first request plus five
+      // continuations — and it carries the last raw finish reason out. A turn
+      // still paused there is not an ending: the transport fails it instead of
+      // reporting `finish{other, pause_turn}` as a completed turn. The bound is
+      // not transient either, so the retry ladder spends nothing on it.
+      const options: MockCcOptions = {
+        chatCompletionsStream: [
+          openAIChunk("again ", { id: "chatcmpl-loop" }),
+          { id: "chatcmpl-loop", choices: [{ delta: {}, finish_reason: "pause_turn" }] },
+          { id: "chatcmpl-loop", choices: [], usage: { prompt_tokens: 1, completion_tokens: 1 } },
+        ],
+      }
+      const mock = await startMockCc(options)
+      try {
+        const provider = createCommandCode({
+          apiKey: "test_key",
+          baseURL: mock.url,
+          maxRetries: 2,
+          maxRetryDelayMs: 0,
+        })
+        const parts = await collect(provider.languageModel("gpt-5.6-terra"), [
+          { role: "user", content: "hi" },
+        ])
+        assertEqual(mock.hits.chatCompletions, 6, "the first request plus five continuations")
+        assertEqual(
+          parts.filter((p) => p.type === "finish"),
+          [],
+          "a pause never surfaces as a finish",
+        )
+        assertEqual(parts.filter((p) => p.type === "text-delta").length, 6)
+        const failure = parts[parts.length - 1]!.error as Error & { status?: number }
+        assertEqual(failure.name, "PauseTurnLimitError")
+        assert(failure.message.includes("pause_turn"), failure.message)
+      } finally {
+        await mock.close()
+      }
+    },
+  ],
+  [
+    "transport: a retried continuation does not double-count the attempt it replaces (issue #172)",
+    async () => {
+      // Usage is summed across continuations only: upstream's `addUsage2` runs
+      // once per completed response. A continuation whose finish was
+      // synthesized — its usage chunk never arrived — is not a completed
+      // response: it is retried while nothing is visible, and only the retry's
+      // reported usage joins the sum.
+      let requests = 0
+      const options: MockCcOptions = {
+        chatCompletionsStream: [
+          openAIChunk("first ", { id: "chatcmpl-1" }),
+          { id: "chatcmpl-1", choices: [{ delta: {}, finish_reason: "pause_turn" }] },
+          { id: "chatcmpl-1", choices: [], usage: { prompt_tokens: 10, completion_tokens: 4 } },
+        ],
+      }
+      options.onChatCompletions = () => {
+        requests++
+        if (requests === 2) {
+          options.chatCompletionsStream = [
+            { id: "chatcmpl-2", choices: [{ delta: {}, finish_reason: "end_turn" }] },
+          ]
+        }
+        if (requests === 3) {
+          options.chatCompletionsStream = [
+            openAIChunk("second", { id: "chatcmpl-3" }),
+            {
+              id: "chatcmpl-3",
+              choices: [{ delta: {}, finish_reason: "end_turn" }],
+              usage: { prompt_tokens: 3, completion_tokens: 5 },
+            },
+          ]
+        }
+      }
+      const mock = await startMockCc(options)
+      try {
+        const provider = createCommandCode({ apiKey: "test_key", baseURL: mock.url })
+        const parts = await collect(provider.languageModel("gpt-5.6-terra"), [
+          { role: "user", content: "hi" },
+        ])
+        assertEqual(mock.hits.chatCompletions, 3, "the usage-less continuation is replayed once")
+        const finish = parts[parts.length - 1] as {
+          type: string
+          usage: { inputTokens: { total: number }; outputTokens: { total: number } }
+        }
+        assertEqual(finish.type, "finish")
+        assertEqual(finish.usage.inputTokens.total, 13)
+        assertEqual(finish.usage.outputTokens.total, 9)
+      } finally {
+        await mock.close()
+      }
+    },
+  ],
+  [
+    "transport: a pause whose usage never arrived fails the turn instead of continuing it (issues #171, #172)",
+    async () => {
+      // A pause finish the codec had to synthesize — the OpenAI `finish_reason`
+      // chunk whose trailing usage-only chunk never arrived — says nothing
+      // about what the response it ended spent, so the sum a resumed turn must
+      // report cannot be known. The #171 rule runs first: the response is not a
+      // completed one, and the turn fails rather than continuing with a segment
+      // billed as zero.
+      const options: MockCcOptions = {
+        chatCompletionsStream: [
+          openAIChunk("first ", { id: "chatcmpl-1" }),
+          { id: "chatcmpl-1", choices: [{ delta: {}, finish_reason: "pause_turn" }] },
+        ],
+      }
+      const mock = await startMockCc(options)
+      try {
+        const provider = createCommandCode({ apiKey: "test_key", baseURL: mock.url })
+        const parts = await collect(provider.languageModel("gpt-5.6-terra"), [
+          { role: "user", content: "hi" },
+        ])
+        assertEqual(mock.hits.chatCompletions, 1, "no continuation is attempted")
+        assertEqual(
+          parts.filter((p) => p.type === "finish"),
+          [],
+          "no finish is reported",
+        )
+        const failure = parts[parts.length - 1]!.error as Error & { status?: number }
+        assertEqual(failure.name, "MissingUsageError")
+        assertEqual(failure.status, 502)
+      } finally {
+        await mock.close()
+      }
+    },
+  ],
+  [
+    "transport: doGenerate resumes a paused turn exactly as doStream does (issue #172)",
+    async () => {
+      const mock = await startMockCc(pausedLegacyTurn())
+      try {
+        const provider = createCommandCode({ apiKey: "test_key", baseURL: mock.url })
+        const result = await provider.languageModel("gpt-5.6-terra").doGenerate({
+          prompt: [{ role: "user", content: "hi" }],
+          mode: { type: "regular" },
+          providerOptions: { commandcode: { plan: "go" } },
+        } as never)
+        assertEqual(mock.hits.generate, 2, "the pause is continued once")
+        assertEqual(result.content, [{ type: "text", text: "first second" }])
+        assertEqual(result.finishReason, { unified: "stop", raw: "end_turn" })
+        assertEqual(result.usage.inputTokens.total, 13)
+        assertEqual(result.usage.outputTokens.total, 9)
+      } finally {
+        await mock.close()
+      }
+    },
+  ],
+  [
+    "transport: a paused response's open part is closed before the continuation opens its own (issue #172)",
+    async () => {
+      // The paused response's text block never got its `content_block_stop` (a
+      // server that flushes mid-block). The continuation opens its own block at
+      // the same index, so the part the pause left open is closed first — a
+      // second `text-start` for a part that never ended would orphan it.
+      let requests = 0
+      const options: MockCcOptions = {
+        messagesStream: [
+          { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+          anthropicContentBlockDelta("first "),
+          anthropicMessageDelta({ input_tokens: 10, output_tokens: 4 }, "pause_turn"),
+        ],
+      }
+      options.onMessages = () => {
+        requests++
+        if (requests === 2) {
+          options.messagesStream = [
+            { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+            anthropicContentBlockDelta("second"),
+            { type: "content_block_stop", index: 0 },
+            anthropicMessageDelta({ input_tokens: 3, output_tokens: 5 }),
+          ]
+        }
+      }
+      const mock = await startMockCc(options)
+      try {
+        const provider = createCommandCode({ apiKey: "test_key", baseURL: mock.url })
+        const parts = await collect(provider.languageModel("claude-sonnet-5"), [
+          { role: "user", content: "hi" },
+        ])
+        assertEqual(mock.hits.messages, 2)
+        assertEqual(
+          parts.map((p) => p.type),
+          [
+            "text-start",
+            "text-delta",
+            "text-end",
+            "text-start",
+            "text-delta",
+            "text-end",
+            "finish",
+          ],
+        )
+        assertEqual((parts[2] as { id: string }).id, "text-0")
+      } finally {
+        await mock.close()
+      }
+    },
+  ],
+  [
+    "transport: a plan-gate 403 after a continuation is surfaced, never replayed on legacy (issue #172)",
+    async () => {
+      // The flip re-runs the whole call from the start, so it is safe only
+      // while the consumer has seen nothing. A 403 arriving after a paused
+      // turn's continuation would append a second copy of the turn to the same
+      // stream; the failure surfaces instead — and the session is still pinned
+      // to legacy for the turns that follow.
+      let requests = 0
+      const options: MockCcOptions = {
+        chatCompletionsStream: [
+          openAIChunk("first ", { id: "chatcmpl-1" }),
+          { id: "chatcmpl-1", choices: [{ delta: {}, finish_reason: "pause_turn" }] },
+          { id: "chatcmpl-1", choices: [], usage: { prompt_tokens: 10, completion_tokens: 4 } },
+        ],
+        stream: [textDelta("later"), finishEvent()],
+      }
+      options.onChatCompletions = () => {
+        requests++
+        if (requests === 2) {
+          options.chatCompletionsStatus = 403
+          options.chatCompletionsErrorBody = upgradeRequiredBody()
+        }
+      }
+      const mock = await startMockCc(options)
+      try {
+        const provider = createCommandCode({ apiKey: "test_key", baseURL: mock.url })
+        // One model instance: the pin lives on it, so the second turn is where
+        // the unconditional pin is observable.
+        const model = provider.languageModel("gpt-5.6-terra")
+        const parts = await collect(model, [{ role: "user", content: "hi" }])
+        assertEqual(mock.hits.chatCompletions, 2)
+        assertEqual(mock.hits.generate, 0, "the mid-turn flip is skipped")
+        assertEqual(parts.filter((p) => p.type === "text-delta").length, 1, "no duplicated turn")
+        const failure = parts[parts.length - 1]!.error as Error
+        assert(failure.message.includes("plan upgrade"), failure.message)
+
+        // The pin is unconditional: the next turn starts on legacy without
+        // touching the Provider API again.
+        const next = await collect(model, [{ role: "user", content: "hi" }])
+        assertEqual(mock.hits.generate, 1)
+        assertEqual(mock.hits.chatCompletions, 2)
+        assertEqual(
+          next.map((p) => p.type),
+          ["text-delta", "finish"],
+        )
+      } finally {
+        await mock.close()
+      }
     },
   ],
 ])

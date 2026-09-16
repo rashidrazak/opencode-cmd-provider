@@ -146,6 +146,11 @@ a plan, add it to the question (for example `plan=pro`).
   Check the current
   [Command Code pricing](https://commandcode.ai/docs/resources/pricing-limits)
   before relying on the numbers.
+- **Transient failures are retried.** A dropped connection or a temporary server
+  error is replayed a couple of times before OpenCode sees a failure, so a blip
+  does not end your turn. Permanent answers — a usage-window limit, a rejected
+  request — come straight back as errors, and a turn that already streamed text
+  is never replayed.
 
 ## Keep it up to date
 
@@ -192,13 +197,14 @@ nothing else to clean up.
 
 ## Troubleshooting
 
-| What you see                                | What to try                                                                                                                                       |
-| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| No `[CMD]` models in `/models`              | Check that your API key is set (or that `/connect` succeeded), restart OpenCode, and update the plugin if your install is old.                    |
-| The sidebar has no **Command Code** section | Make sure the session uses a `[CMD]` model, and press `ctrl+x b` — the sidebar may be hidden.                                                     |
-| Browser sign-in fails (v1)                  | Run `/connect` again and pick **Command Code API key** to paste one, or set `COMMANDCODE_API_KEY` and restart OpenCode.                           |
-| A model shows `$0` cost                     | No published price for that model, so the estimate is `0`. See [Command Code pricing](https://commandcode.ai/docs/resources/pricing-limits).      |
-| Something else                              | See the [technical reference](docs/TECHNICAL.md#troubleshooting) or [open an issue](https://github.com/rashidrazak/opencode-cmd-provider/issues). |
+| What you see                                       | What to try                                                                                                                                       |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| No `[CMD]` models in `/models`                     | Check that your API key is set (or that `/connect` succeeded), restart OpenCode, and update the plugin if your install is old.                    |
+| The sidebar has no **Command Code** section        | Make sure the session uses a `[CMD]` model, and press `ctrl+x b` — the sidebar may be hidden.                                                     |
+| Browser sign-in fails (v1)                         | Run `/connect` again and pick **Command Code API key** to paste one, or set `COMMANDCODE_API_KEY` and restart OpenCode.                           |
+| A model shows `$0` cost                            | No published price for that model, so the estimate is `0`. See [Command Code pricing](https://commandcode.ai/docs/resources/pricing-limits).      |
+| `Command Code rejected this plugin as out of date` | Command Code refuses the version your install reports. Update the plugin — see [Keep it up to date](#keep-it-up-to-date).                         |
+| Something else                                     | See the [technical reference](docs/TECHNICAL.md#troubleshooting) or [open an issue](https://github.com/rashidrazak/opencode-cmd-provider/issues). |
 
 ## Learn more
 
@@ -212,6 +218,7 @@ nothing else to clean up.
   - [Deals intelligence](docs/TECHNICAL.md#deals-intelligence) — where allowances, benchmarks, and deals come from, and what happens when they are unavailable
   - [Reasoning support](docs/TECHNICAL.md#reasoning-support) — how thinking-effort levels reach the model
   - [Image input](docs/TECHNICAL.md#image-input) — which models accept images
+  - [Claude prompt caching](docs/TECHNICAL.md#claude-prompt-caching) — how repeated Claude turns reuse a cached prefix instead of re-billing it
   - [Pricing display](docs/TECHNICAL.md#pricing-display) — why some models show `$0` in OpenCode
   - [Environment variables](docs/TECHNICAL.md#environment-variables) — credentials, plan pinning, and test/mock overrides
   - [Development and testing](docs/TECHNICAL.md#development-and-testing) — build, test, and end-to-end commands
