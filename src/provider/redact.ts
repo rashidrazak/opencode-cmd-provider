@@ -51,9 +51,99 @@ const PLAN_UPGRADE_PATTERN =
  */
 const VERSION_GATE_PATTERN = /\bminversion\b|out[-\s]of[-\s]date/i
 
-/** True when the envelope names the minimum accepted CLI version. */
-function namesMinimumVersion(record: Record<string, unknown>): boolean {
-  return typeof record.minVersion === "string" || typeof record.minVersion === "number"
+/**
+ * What a `403` body says about the gate that produced it: the strings a gate
+ * pattern can be matched against, whether the body names a minimum accepted
+ * client version (or says the client is out of date), and that version when it
+ * is named. One reader for both gates, because the version gate collides with
+ * the plan gate on `code: "upgrade_required"` and only these facts separate
+ * them (issues #173, #175).
+ */
+interface GateFacts {
+  candidates: string[]
+  versionGate: boolean
+  minimumVersion?: string
+}
+
+function gateFacts(body: unknown): GateFacts {
+  const candidates: string[] = []
+  let versionGate = false
+  let minimumVersion: string | undefined
+  const pushStrings = (record: Record<string, unknown>): void => {
+    for (const key of ["code", "type", "message"]) {
+      const part = record[key]
+      if (typeof part === "string") candidates.push(part)
+    }
+  }
+  const readMinimumVersion = (record: Record<string, unknown>): void => {
+    const value = record.minVersion
+    if (typeof value !== "string" && typeof value !== "number") return
+    versionGate = true
+    minimumVersion ??= String(value)
+  }
+  if (typeof body === "string") {
+    candidates.push(body)
+    try {
+      body = JSON.parse(body)
+    } catch {
+      // keep the raw text as the only candidate below
+    }
+  }
+  if (isRecord(body)) {
+    const error = body.error
+    if (isRecord(error)) {
+      pushStrings(error)
+      readMinimumVersion(error)
+    }
+    pushStrings(body)
+    readMinimumVersion(body)
+  }
+  // The version-gate guard: a body whose wording asks for a client update is a
+  // version gate even when it borrows the plan gate's code.
+  if (candidates.some((c) => VERSION_GATE_PATTERN.test(c))) versionGate = true
+  return { candidates, versionGate, ...(minimumVersion !== undefined ? { minimumVersion } : {}) }
+}
+
+/**
+ * One reading of a `403` body: which gate produced it and what it named. The
+ * two gates collide on `code: "upgrade_required"`, so the version-gate markers
+ * are evaluated first and the reading is exclusive — a body is one gate or the
+ * other, never both (issues #173, #175).
+ */
+export interface GateReading {
+  /** True for the version gate: a `minVersion` field, or "out of date" wording. */
+  versionGate: boolean
+  /** The minimum client version a version-gate body named, when it named one. */
+  minimumVersion?: string
+  /** True for the plan gate, in either endpoint's envelope (issue #175). */
+  planGate: boolean
+}
+
+/**
+ * Classifies a `403` body once, for every caller: the seam reads this and
+ * branches on it, and the named predicates below are its two halves. Any
+ * status other than 403 (401, 422 cmd_zdr_no_providers, 429, 5xx, ...) is
+ * neither gate.
+ */
+export function readGate(status: number, body: unknown): GateReading {
+  if (status !== 403) return { versionGate: false, planGate: false }
+  const facts = gateFacts(body)
+  return {
+    versionGate: facts.versionGate,
+    ...(facts.minimumVersion !== undefined ? { minimumVersion: facts.minimumVersion } : {}),
+    planGate: !facts.versionGate && facts.candidates.some((c) => PLAN_UPGRADE_PATTERN.test(c)),
+  }
+}
+
+/**
+ * Detects the version gate (issue #173): the `403` the legacy
+ * `/alpha/generate` gateway answers when the client's reported
+ * `x-command-code-version` is below its minimum. The body names that minimum
+ * (`minVersion`) or says the client is out of date; `/provider/v1/*` is not
+ * version-gated, so only the legacy transport can produce one today.
+ */
+export function isVersionGateError(status: number, body: unknown): boolean {
+  return readGate(status, body).versionGate
 }
 
 /**
@@ -79,35 +169,11 @@ function namesMinimumVersion(record: Record<string, unknown>): boolean {
  */
 export function isUpgradeRequiredError(status: number, body: unknown): boolean {
   if (status !== 403) return false
-  const candidates: string[] = []
-  const pushStrings = (record: Record<string, unknown>): void => {
-    for (const key of ["code", "type", "message"]) {
-      const part = record[key]
-      if (typeof part === "string") candidates.push(part)
-    }
-  }
-  if (typeof body === "string") {
-    candidates.push(body)
-    try {
-      body = JSON.parse(body)
-    } catch {
-      // keep the raw text as the only candidate below
-    }
-  }
-  let versionGate = false
-  if (isRecord(body)) {
-    const error = body.error
-    if (isRecord(error)) {
-      pushStrings(error)
-      versionGate ||= namesMinimumVersion(error)
-    }
-    pushStrings(body)
-    versionGate ||= namesMinimumVersion(body)
-  }
+  const facts = gateFacts(body)
   // The version-gate guard runs first: a body that names a minimum version is
   // a client gate even when its wording borrows the plan phrasing.
-  if (versionGate || candidates.some((c) => VERSION_GATE_PATTERN.test(c))) return false
-  return candidates.some((c) => PLAN_UPGRADE_PATTERN.test(c))
+  if (facts.versionGate) return false
+  return facts.candidates.some((c) => PLAN_UPGRADE_PATTERN.test(c))
 }
 
 export function commandCodeErrorMessage(value: unknown): string | undefined {

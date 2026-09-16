@@ -17,6 +17,7 @@ import {
   retryBackoffMs,
   timeoutError,
   UPGRADE_REQUIRED_FAILURE,
+  VERSION_GATE_FAILURE,
 } from "../src/provider/retry.js"
 import { assert, assertEqual, rejects, run } from "./harness.js"
 
@@ -264,6 +265,20 @@ run([
       // the legacy transport instead (issue #56), so `retryable` is false.
       assertEqual(UPGRADE_REQUIRED_FAILURE, {
         kind: "upgrade-required",
+        retryable: false,
+        status: 403,
+      })
+    },
+  ],
+
+  [
+    "the version-gate failure is a fatal status, never replayed and never a flip",
+    () => {
+      // Issue #173: the server refused this client's reported version. Nothing
+      // about the plan changed, so it is a plain fatal 403 — not the
+      // upgrade-required kind that flips transports.
+      assertEqual(VERSION_GATE_FAILURE, {
+        kind: "fatal-status",
         retryable: false,
         status: 403,
       })

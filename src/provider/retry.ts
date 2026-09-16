@@ -112,6 +112,15 @@ export const NETWORK_FAILURE: Failure = failure("network", true)
  * transport instead — issue #56). */
 export const UPGRADE_REQUIRED_FAILURE: Failure = failure("upgrade-required", false, { status: 403 })
 
+/**
+ * A `403` the server raised against the version this client reports (the
+ * legacy version gate, issue #173). It is permanent for the running build —
+ * only an updated plugin clears it — so the ladder never replays it, and it is
+ * deliberately not `upgrade-required`: nothing about the plan changes here,
+ * and the session must not be flipped to another transport.
+ */
+export const VERSION_GATE_FAILURE: Failure = failure("fatal-status", false, { status: 403 })
+
 /** The body ended without a complete turn — replayable while nothing is visible. */
 export const TRUNCATION_FAILURE: Failure = failure("truncation", true, { status: 502 })
 

@@ -165,7 +165,8 @@ surfaces in two places:
   `error.code: upgrade_required`, while `/messages` sends the Anthropic envelope
   (`type: permission_error`) with the plan phrasing and no code (issue #175). A
   stale-client version gate (`minVersion` / "out of date") is never read as a
-  plan flip.
+  plan flip — it surfaces its own plugin-named update message instead (see
+  [Legacy wire version and temperature](#legacy-wire-version-and-temperature)).
 - **Visible degradation:** when the bundled Deals catalog is empty (upstream
   fetch failed or the RSC shape changed), the sidebar shows a
   `Deals unavailable` banner with placeholder rows and the tool says no deal data
@@ -207,6 +208,32 @@ history (a rolling breakpoint) is a separate product decision and is not
 requested. The legacy `/alpha/generate` body keeps its plain-string system
 prompt: that gateway injects its own 1-hour breakpoint and replaces the client's
 5-minute one, so the port would be inert.
+
+## Legacy wire version and temperature
+
+`POST /alpha/generate` is version-gated: an absent, unparseable or too-old
+`x-command-code-version` answers `403 upgrade_required` with a `minVersion`
+(`0.18.10` when last probed; `/provider/v1/*` is not gated at all). The plugin
+reports the command-code build its Snapshot was refreshed from
+(`FACTS_PACKAGE_VERSION`) rather than a frozen literal: `npm run refresh:snapshot`
+moves it with the published package, and the release pipeline fails on a stale
+catalog ([ADR-0003](adr/0003-release-gates.md)), so the reported version travels
+with the published CLI. `tests/provider-version-gate.test.ts` keeps it clear of
+the floor the live gate last recorded — a static backstop, since the floor is
+server state that no CI run can probe. When a gate does fire, the transport
+surfaces its own message naming `opencode-cmd-provider` and the server's minimum
+instead of forwarding the body's advice to update "the Command Code CLI" — a
+binary plugin users are not running. The failure is a fatal `403`: never
+replayed by the retry ladder, never a transport flip. `x-co-flag`, which the
+frozen literal travelled with, is gone — it appears nowhere in
+`command-code@1.54.0` and is inert.
+
+The caller's `temperature` is forwarded verbatim when the host sets one (v1's
+`chat.params` hook, v2's call settings), with the legacy body falling back to
+the `0.3` it has always sent when none is set. The Provider API bodies forward
+the value only: upstream's own request builders omit the field when it has no
+value, and Anthropic rejects a temperature alongside extended thinking, so an
+invented default there would break reasoning models.
 
 ## Stream termination and retries
 

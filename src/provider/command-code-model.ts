@@ -40,11 +40,7 @@ import {
 } from "./stream.js"
 import { getApiBase, getCmdZdr } from "../env.js"
 import { normalizePlan } from "../catalog/plans.js"
-import {
-  redactCommandCodeErrorText,
-  commandCodeErrorMessage,
-  isUpgradeRequiredError,
-} from "./redact.js"
+import { redactCommandCodeErrorText, commandCodeErrorMessage, readGate } from "./redact.js"
 import { calculateCommandCodeCost, costUsageFromAiSdkUsage } from "./cost.js"
 import { ZERO_MODEL_COST, MODEL_COSTS } from "./pricing.js"
 import {
@@ -65,9 +61,11 @@ import {
   NETWORK_FAILURE,
   TRUNCATION_FAILURE,
   UPGRADE_REQUIRED_FAILURE,
+  VERSION_GATE_FAILURE,
   type Failure,
 } from "./retry.js"
 import { projectSlugFromPath } from "./project-slug.js"
+import { FACTS_PACKAGE_VERSION } from "../catalog/facts.js"
 
 export interface CommandCodeModelOptions {
   name?: string
@@ -87,7 +85,21 @@ export interface CommandCodeModelOptions {
   plan?: string
 }
 
-const COMMAND_CODE_CLI_VERSION = "1.15.1"
+/**
+ * The `x-command-code-version` the legacy `/alpha/generate` transport reports
+ * (issue #173). The gateway version-gates this header — an absent, unparseable
+ * or too-old value answers `403 upgrade_required` with a `minVersion` — so a
+ * frozen literal drifts into a hard failure as upstream moves (the pre-#173
+ * `1.15.1` was ten CLI releases stale). The value is the command-code build the
+ * Snapshot was refreshed from: `npm run refresh:snapshot` rewrites
+ * `FACTS_PACKAGE_VERSION` from the published package's `latest` dist-tag, and
+ * the release pipeline gates on that refresh (ADR-0003), so the reported
+ * version moves with the published CLI instead of a frozen literal.
+ * `tests/provider-version-gate.test.ts` keeps it clear of the floor the live
+ * gate last recorded. The legacy gateway is the only consumer:
+ * `/provider/v1/*` is not version-gated.
+ */
+export const COMMAND_CODE_CLI_VERSION = FACTS_PACKAGE_VERSION
 const DEFAULT_GENERATE_MAX_TOKENS = 64_000
 /**
  * The plugin's own ladder is short and fast on purpose (issue #171): the hosts
@@ -253,6 +265,31 @@ class MissingUsageError extends Error implements ClassifiedTransportError {
       ),
     )
     this.name = "MissingUsageError"
+  }
+}
+
+/**
+ * The server refused the version this plugin reports (issue #173): the legacy
+ * gateway's `403 upgrade_required` whose body names a `minVersion` (or says the
+ * client is out of date). The body's own wording tells the reader to update
+ * "the Command Code CLI" — a binary a plugin user is not running — so the
+ * message is rebuilt here to name the plugin instead, and the server's minimum
+ * when it named one. It is a fatal status, never the transport flip: nothing
+ * about the plan changed, and the same build would get the same 403 on either
+ * endpoint.
+ */
+class VersionGateError extends Error implements ClassifiedTransportError {
+  readonly transportError = true as const
+  readonly failure = VERSION_GATE_FAILURE
+  readonly status = 403
+  constructor(minimumVersion: string | undefined, reportedVersion: string) {
+    const floor = minimumVersion === undefined ? "" : `, server minimum ${minimumVersion}`
+    super(
+      redactCommandCodeErrorText(
+        `Command Code rejected this plugin as out of date (reported client version ${reportedVersion}${floor}). Update the opencode-cmd-provider plugin to continue.`,
+      ),
+    )
+    this.name = "VersionGateError"
   }
 }
 
@@ -494,7 +531,12 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
         ),
         system: systemPromptToText(promptSystem(options.prompt)),
         max_tokens: maxTokens,
-        temperature: 0.3,
+        // The host's own knob when it sets one (opencode's v1 `chat.params`
+        // hook and the v2 call options both reach `temperature`), otherwise
+        // the 0.3 this transport has always sent (issue #173). Upstream omits
+        // the field entirely when it has no value, but the legacy gateway has
+        // been sent 0.3 since before #55 and nothing asks it to change.
+        temperature: options.temperature ?? 0.3,
         stream: true,
         ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
       },
@@ -502,6 +544,14 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
     }
   }
 
+  /**
+   * The legacy `/alpha/generate` headers, rebuilt per attempt off the
+   * descriptor (issue #171). `x-co-flag` was dropped in #173: it does not
+   * exist anywhere in `command-code@1.54.0` and is inert (identical responses
+   * with and without it). `User-Agent`, `x-session-id` and `traceparent` stay
+   * out on purpose — there is no session channel inside `doStream`, and their
+   * effect is unobservable.
+   */
   private headersFor(options: ModelCallOptions): Record<string, string> {
     const apiKey = resolveApiKey({
       apiKey: this.options.apiKey,
@@ -514,7 +564,6 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
       "x-cli-environment": "production",
       "x-project-slug": projectSlugFromPath(process.cwd()),
       "x-taste-learning": "true",
-      "x-co-flag": "false",
       ...this.options.headers,
       ...(options.headers ?? {}),
     }
@@ -528,6 +577,11 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
         {
           model: this.modelId,
           maxOutputTokens: options.maxOutputTokens,
+          // Forwarded only when the host set one (issue #173): upstream's own
+          // request builders omit the field when it has no value, and Anthropic
+          // rejects a temperature alongside extended thinking — an invented
+          // 0.3 here would break reasoning models.
+          temperature: options.temperature,
           providerOptions: options.providerOptions,
           tools: options.tools as unknown,
           allowImages,
@@ -539,6 +593,7 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
       {
         model: this.modelId,
         maxOutputTokens: options.maxOutputTokens,
+        temperature: options.temperature,
         providerOptions: options.providerOptions,
         tools: options.tools as unknown,
         allowImages,
@@ -838,6 +893,17 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
                     // Preserve useful plain-text provider errors only after secret
                     // redaction; upstream/proxy bodies may echo credentials.
                   }
+                  // One reading of the 403 body for both gates (issues #56,
+                  // #173): whichever it is, it is never replayed, and only the
+                  // plan gate may flip the transport.
+                  const gate = readGate(response.status, parsedBody ?? errBody)
+                  // The version gate (issue #173) is checked first: the server
+                  // refused the version this build reports, so the fix is an
+                  // updated plugin, not the legacy transport. The message names
+                  // the plugin instead of the CLI the server's body blames.
+                  if (gate.versionGate) {
+                    throw new VersionGateError(gate.minimumVersion, COMMAND_CODE_CLI_VERSION)
+                  }
                   // Safety net (issue #56): the plan-gate 403 on the Provider
                   // API flips the session to the legacy transport — the
                   // documented `upgrade_required` envelope or the live
@@ -845,10 +911,7 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
                   // legacy descriptor itself never flips (so the retry is
                   // bounded to one), and any other status flows through the
                   // existing error/redaction pipeline unchanged.
-                  if (
-                    t.flipOnUpgradeRequired &&
-                    isUpgradeRequiredError(response.status, parsedBody ?? errBody)
-                  ) {
+                  if (t.flipOnUpgradeRequired && gate.planGate) {
                     throw new UpgradeRequiredError()
                   }
                   const failure = classifyHttpFailure({

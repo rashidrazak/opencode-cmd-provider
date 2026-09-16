@@ -88,6 +88,25 @@ run([
     },
   ],
   [
+    "temperature is forwarded only when the caller sets one (issue #173)",
+    () => {
+      const prompt = [{ role: "user", content: [{ type: "text", text: "hi" }] }] as any
+      const oa = (opts: Record<string, unknown>) =>
+        messagesToOpenAI(prompt, { model: "gpt-5.6-terra", ...opts }) as any
+      const ant = (opts: Record<string, unknown>) =>
+        messagesToAnthropic(prompt, { model: "claude-sonnet-5", ...opts }) as any
+      assertEqual(oa({ temperature: 0.7 }).temperature, 0.7)
+      assertEqual(ant({ temperature: 0.7 }).temperature, 0.7)
+      // 0 is a value, not an absent one.
+      assertEqual(oa({ temperature: 0 }).temperature, 0)
+      assertEqual(ant({ temperature: 0 }).temperature, 0)
+      // Unset means absent: no invented default on the Provider API bodies,
+      // where Anthropic rejects a temperature alongside extended thinking.
+      assert(!("temperature" in oa({})), "no temperature field when unset (OpenAI)")
+      assert(!("temperature" in ant({})), "no temperature field when unset (Anthropic)")
+    },
+  ],
+  [
     "tool calling remains byte-equivalent via toJsonSchema",
     () => {
       const tools = {

@@ -649,6 +649,12 @@ export interface ProviderRequestOptions {
   prompt: PromptLike
   model?: string
   maxOutputTokens?: number
+  /**
+   * The host's temperature, forwarded verbatim when it set one (issue #173).
+   * Never defaulted here: the Provider API bodies have always omitted the
+   * field, and Anthropic rejects a temperature alongside extended thinking.
+   */
+  temperature?: number
   providerOptions?: unknown
   tools?: unknown
   allowImages?: boolean
@@ -681,6 +687,7 @@ function buildOpenAIBody(options: ProviderRequestOptions): Record<string, unknow
   // but transport caps at DEFAULT_PROVIDER_MAX_TOKENS.
   const maxTokens = cappedMaxTokens(options.maxOutputTokens)
   body.max_tokens = maxTokens
+  if (options.temperature !== undefined) body.temperature = options.temperature
   // System is already inside messages for OpenAI, but also accept explicit systemPrompt
   const explicitSystem = systemPromptToText(options.systemPrompt)
   if (explicitSystem && !prompt.some((m) => m.role === "system")) {
@@ -727,6 +734,7 @@ function buildAnthropicBody(options: ProviderRequestOptions): Record<string, unk
   }
   const maxTokens = cappedMaxTokens(options.maxOutputTokens)
   body.max_tokens = maxTokens
+  if (options.temperature !== undefined) body.temperature = options.temperature
   const effort = reasoningEffortFor(options.providerOptions, options.model)
   if (effort) body.reasoning_effort = effort
   return body

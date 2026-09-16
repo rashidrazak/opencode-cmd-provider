@@ -2,8 +2,9 @@
 // Go legacy preservation + non-Go zero-leak + shared-layer parity
 //
 // Proves at the LanguageModel seam (doStream/doGenerate with fetch spies):
-//   1. Go-plan traffic stays byte-for-byte on the pre-51 /alpha/generate wire
-//      format (golden captured from the 6df7653 baseline; volatile fields
+//   1. Go-plan traffic stays on the /alpha/generate wire format of the golden
+//      below (captured from the 6df7653 baseline, re-pinned by issue #173 for
+//      the version header and the dropped x-co-flag; volatile fields
 //      normalized) — both doStream and doGenerate.
 //   2. Non-Go sessions never emit /alpha/generate (whole-session fetch spy).
 //   3. Shared layers — tools, images, system prompt text, max_tokens,
@@ -25,6 +26,7 @@ import { assert, assertEqual, rejects, run, withEnvVars } from "./harness.js"
 import { calculateCommandCodeCost, costUsageFromAiSdkUsage } from "../src/provider/cost.js"
 import { MODEL_COSTS } from "../src/provider/pricing.js"
 import { MODEL_EFFORTS } from "../src/provider/reasoning.js"
+import { FACTS_PACKAGE_VERSION } from "../src/catalog/facts.js"
 import { assert } from "./harness.js"
 
 type Model = ReturnType<ReturnType<typeof createCommandCode>["languageModel"]>
@@ -103,8 +105,16 @@ async function collect(
 // input below; volatile fields (config.date, config.workingDir,
 // config.environment, threadId, x-project-slug) are normalized to
 // placeholders. `normalizeLegacyCall` reproduces the normalization on the
-// live capture, so assertEqual below is a byte-for-byte comparison of the
-// wire format pre-51 vs now.
+// live capture, so assertEqual below is a byte-for-byte comparison against the
+// golden below — the baseline shape, with the deliberate re-pins recorded next.
+//
+// Issue #173 superseded the freeze deliberately, re-pinned here in the same
+// commit: `x-co-flag` is gone (it exists nowhere in command-code@1.54.0 and is
+// inert), the reported version is the snapshot's command-code build
+// (`FACTS_PACKAGE_VERSION`) rather than the pre-#51 literal, because the
+// gateway version-gates that header, and the capture now sets the host's
+// temperature (0.7) so the golden pins the forwarded value instead of a
+// hardcoded one.
 const LEGACY_INPUT_TOOLS = [
   {
     type: "function",
@@ -120,11 +130,10 @@ const LEGACY_GOLDEN = {
   headers: {
     "Content-Type": "application/json",
     Authorization: "Bearer user_test",
-    "x-command-code-version": "1.15.1",
+    "x-command-code-version": FACTS_PACKAGE_VERSION,
     "x-cli-environment": "production",
     "x-project-slug": "<slug>",
     "x-taste-learning": "true",
-    "x-co-flag": "false",
   },
   body: {
     config: {
@@ -158,7 +167,10 @@ const LEGACY_GOLDEN = {
       ],
       system: "You are a test.",
       max_tokens: 1000,
-      temperature: 0.3,
+      // The host's own value, forwarded (issue #173 — the golden used to pin a
+      // hardcoded 0.3 here). The 0.3 fallback for a host that sets none is
+      // pinned by the temperature parity test below.
+      temperature: 0.7,
       stream: true,
     },
     threadId: "<uuid>",
@@ -194,6 +206,8 @@ async function captureLegacyCall(): Promise<{
       { role: "user", content: "hi" },
     ],
     maxOutputTokens: 1000,
+    // The golden's temperature: the host's value, forwarded (issue #173).
+    temperature: 0.7,
     tools: LEGACY_INPUT_TOOLS,
   })
   const call = calls.find((c) => c.method === "POST")!
@@ -233,7 +247,7 @@ const SYSTEM_PROMPT = [
 run([
   // --- Acceptance 1: Go legacy preservation, byte-for-byte vs pre-51 ---
   [
-    "legacy: doStream /alpha/generate wire format is byte-for-byte unchanged vs pre-51",
+    "legacy: doStream /alpha/generate wire format matches the re-pinned golden (issue #173)",
     async () => {
       const { call, parts } = await captureLegacyCall()
       assertEqual(normalizeLegacyCall(call), LEGACY_GOLDEN)
@@ -250,7 +264,6 @@ run([
         "Authorization",
         "Content-Type",
         "x-cli-environment",
-        "x-co-flag",
         "x-command-code-version",
         "x-project-slug",
         "x-taste-learning",
@@ -278,6 +291,7 @@ run([
         ],
         mode: { type: "regular" },
         maxOutputTokens: 1000,
+        temperature: 0.7,
         tools: LEGACY_INPUT_TOOLS,
       } as never)
       const call = calls.find((c) => c.method === "POST")!
@@ -731,6 +745,66 @@ run([
           }
           assertEqual(ant.max_tokens, expected, `anthropic max_tokens for ${requested}`)
         }
+      })
+    },
+  ],
+  [
+    "parity: the host's temperature is forwarded on all three transports (legacy keeps its 0.3 default)",
+    async () => {
+      // Issue #173: the host's call options carry `temperature` (v1's
+      // `chat.params` hook, v2's settings) and the legacy body used to ignore
+      // it in favour of a hardcoded 0.3. Legacy now forwards it and falls back
+      // to 0.3 only when the host sets none; the Provider API bodies forward
+      // the value only, because upstream's own builders omit the field and
+      // Anthropic rejects a temperature alongside extended thinking.
+      // legacy
+      {
+        const { fetch, calls } = makeSpy((call) => {
+          if (call.url.includes("/alpha/generate")) return sseResponse([finishEvent()])
+          return new Response("not found", { status: 404 })
+        })
+        const provider = createCommandCode({ apiKey: "k", baseURL: "https://x", fetch, plan: "go" })
+        const model = provider.languageModel("claude-sonnet-5")
+        const temperatureOf = (call: SpyCall) =>
+          (call.body as { params: { temperature?: unknown } }).params.temperature
+        await collect(model, { prompt: [{ role: "user", content: "hi" }], temperature: 0.7 })
+        assertEqual(temperatureOf(calls[0]), 0.7, "legacy forwards the host's temperature")
+        // 0 is a value, not an absent one.
+        await collect(model, { prompt: [{ role: "user", content: "hi" }], temperature: 0 })
+        assertEqual(temperatureOf(calls[1]), 0, "legacy forwards a temperature of 0")
+        await collect(model, { prompt: [{ role: "user", content: "hi" }] })
+        assertEqual(temperatureOf(calls[2]), 0.3, "legacy falls back to 0.3 when unset")
+      }
+      await withEnvVars({ COMMANDCODE_PLAN: "goat" }, async () => {
+        const { fetch, calls } = makeSpy(
+          providerHandler(
+            [openAIChunk("hi"), openAIFinishChunk()],
+            [anthropicContentBlockDelta("hi"), anthropicMessageDelta()],
+          ),
+        )
+        const provider = createCommandCode({ apiKey: "k", baseURL: "https://x", fetch })
+        const prompt = [{ role: "user", content: "hi" }]
+        await collect(provider.languageModel("gpt-5.6-terra"), { prompt, temperature: 0.7 })
+        const oa = calls.find((c) => c.url.includes("chat/completions"))!.body as {
+          temperature?: unknown
+        }
+        assertEqual(oa.temperature, 0.7, "OpenAI body forwards the host's temperature")
+        await collect(provider.languageModel("claude-sonnet-5"), { prompt, temperature: 0.7 })
+        const ant = calls.find((c) => c.url.includes("/messages"))!.body as {
+          temperature?: unknown
+        }
+        assertEqual(ant.temperature, 0.7, "Anthropic body forwards the host's temperature")
+        // Unset means absent — never an invented default.
+        await collect(provider.languageModel("gpt-5.6-terra"), { prompt })
+        const oaUnset = calls.filter((c) => c.url.includes("chat/completions")).at(-1)!.body as {
+          temperature?: unknown
+        }
+        assert(!("temperature" in oaUnset), "no temperature when the host sets none (OpenAI)")
+        await collect(provider.languageModel("claude-sonnet-5"), { prompt })
+        const antUnset = calls.filter((c) => c.url.includes("/messages")).at(-1)!.body as {
+          temperature?: unknown
+        }
+        assert(!("temperature" in antUnset), "no temperature when the host sets none (Anthropic)")
       })
     },
   ],

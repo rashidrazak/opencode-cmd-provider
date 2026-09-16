@@ -3,8 +3,15 @@ import {
   redactCommandCodeErrorText,
   commandCodeErrorMessage,
   isUpgradeRequiredError,
+  isVersionGateError,
+  readGate,
 } from "../src/provider/redact.js"
-import { liveChatUpgradeBody, liveMessagesUpgradeBody, versionGateBody } from "./helpers/mock-cc.js"
+import {
+  liveChatUpgradeBody,
+  liveMessagesUpgradeBody,
+  upgradeRequiredBody,
+  versionGateBody,
+} from "./helpers/mock-cc.js"
 import { assertEqual, run } from "./harness.js"
 
 run([
@@ -222,6 +229,72 @@ run([
       assertEqual(isUpgradeRequiredError(403, { error: { message: "forbidden" } }), false)
       assertEqual(isUpgradeRequiredError(403, "forbidden"), false)
       assertEqual(isUpgradeRequiredError(403, { error: { code: "rate_limit_error" } }), false)
+    },
+  ],
+
+  [
+    "isVersionGateError: the live version-gate 403 is detected (parsed and raw), never a plan body",
+    () => {
+      // Issue #173: the legacy gateway refuses a client below its minimum with
+      // the same `upgrade_required` code the plan gate uses, so the gate's own
+      // markers (`minVersion` / "out of date") are what identify it.
+      assertEqual(isVersionGateError(403, JSON.parse(versionGateBody())), true)
+      assertEqual(isVersionGateError(403, versionGateBody()), true)
+      assertEqual(
+        isVersionGateError(403, { error: { message: "Your Command Code CLI is out of date." } }),
+        true,
+      )
+      // The plan gate is not a version gate, in either live envelope.
+      assertEqual(isVersionGateError(403, JSON.parse(upgradeRequiredBody())), false)
+      assertEqual(isVersionGateError(403, JSON.parse(liveMessagesUpgradeBody())), false)
+      assertEqual(isVersionGateError(403, JSON.parse(liveChatUpgradeBody())), false)
+      // Only a 403 is ever a gate.
+      assertEqual(isVersionGateError(422, JSON.parse(versionGateBody())), false)
+      assertEqual(isVersionGateError(403, { error: { message: "forbidden" } }), false)
+    },
+  ],
+
+  [
+    "readGate: one reading decides the version gate, the plan gate, or neither",
+    () => {
+      // Issue #173: the legacy gateway refuses a client below its minimum with
+      // the same `upgrade_required` code the plan gate uses, so the gate's own
+      // markers (`minVersion` / "out of date") are what identify it — and the
+      // reading is exclusive: one gate or the other, never both.
+      const version = readGate(403, JSON.parse(versionGateBody()))
+      assertEqual(version.versionGate, true)
+      assertEqual(version.planGate, false)
+      assertEqual(version.minimumVersion, "0.18.10")
+      // Raw, unparsed bodies read the same.
+      assertEqual(readGate(403, versionGateBody()).minimumVersion, "0.18.10")
+      assertEqual(
+        readGate(403, { error: { message: "Your Command Code CLI is out of date." } }).versionGate,
+        true,
+      )
+      // The plan gate is not a version gate, in either live envelope, and never
+      // names a floor.
+      for (const planBody of [
+        JSON.parse(upgradeRequiredBody()),
+        JSON.parse(liveMessagesUpgradeBody()),
+        JSON.parse(liveChatUpgradeBody()),
+      ]) {
+        const plan = readGate(403, planBody)
+        assertEqual(plan.planGate, true, `plan gate: ${JSON.stringify(planBody)}`)
+        assertEqual(plan.versionGate, false)
+        assertEqual(plan.minimumVersion, undefined)
+      }
+      // `minVersion` from the envelope or the top level, string or number.
+      assertEqual(readGate(403, { minVersion: 1.2 }).minimumVersion, "1.2")
+      assertEqual(readGate(403, { error: { minVersion: "2.0.0" } }).minimumVersion, "2.0.0")
+      // Only a 403 is ever a gate; an unrelated 403 is neither.
+      assertEqual(readGate(422, JSON.parse(versionGateBody())), {
+        versionGate: false,
+        planGate: false,
+      })
+      assertEqual(readGate(403, { error: { message: "forbidden" } }), {
+        versionGate: false,
+        planGate: false,
+      })
     },
   ],
 ])

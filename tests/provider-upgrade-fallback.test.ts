@@ -16,6 +16,7 @@
 //      stale-client version gate (minVersion / "out of date") is one of them.
 //   4. Usage/cost surfaced is the retried legacy response's — no double-counting.
 import { createCommandCode } from "../src/provider/index.js"
+import { COMMAND_CODE_CLI_VERSION } from "../src/provider/command-code-model.js"
 import {
   finishEvent,
   textDelta,
@@ -164,7 +165,7 @@ run([
       assertEqual(legacyBody.params.stream, true)
       assert(legacyBody.threadId, "legacy threadId present")
       const legacyHeaders = legacyCalls(calls)[0].headers
-      assertEqual(legacyHeaders["x-command-code-version"], "1.15.1")
+      assertEqual(legacyHeaders["x-command-code-version"], COMMAND_CODE_CLI_VERSION)
       assertEqual(legacyHeaders["authorization"], "Bearer k")
       // The legacy response is the one surfaced — content and usage, no error.
       const deltas = parts
@@ -356,11 +357,14 @@ run([
     },
   ],
   [
-    "safety net: a stale-client version-gate 403 never flips — the version guard wins (issue #175)",
+    "safety net: a stale-client version-gate 403 never flips — it surfaces its own message (issue #175, #173)",
     async () => {
       // The guard keeps a version-gate body out of the flip even though it
       // carries the plan gate's `upgrade_required` code: the `minVersion`
-      // field / "out of date" wording decides first (issue #175).
+      // field / "out of date" wording decides first (issue #175). Since #173
+      // the message names the plugin rather than the CLI the server's body
+      // blames — the transport's own `VersionGateError`, pinned in
+      // tests/provider-version-gate.test.ts.
       for (const modelId of ["claude-sonnet-5", "gpt-5.6-terra"]) {
         const { fetch, calls } = errorSpy(403, VERSION_GATE_BODY)
         const provider = createCommandCode({
@@ -374,12 +378,16 @@ run([
         const err = parts.find((p) => p.type === "error") as { error?: Error }
         assert(err, `${modelId}: error part surfaced`)
         assert(
-          err.error!.message.includes("Command Code API error 403"),
-          `${modelId}: 403 status in message, got: ${err.error!.message}`,
+          err.error!.message.includes("opencode-cmd-provider"),
+          `${modelId}: names the plugin, got: ${err.error!.message}`,
         )
         assert(
           err.error!.message.includes("out of date"),
           `${modelId}: version-gate wording surfaced, got: ${err.error!.message}`,
+        )
+        assert(
+          !err.error!.message.includes("CLI"),
+          `${modelId}: does not blame a CLI, got: ${err.error!.message}`,
         )
         assertEqual(providerCalls(calls).length, 1, `${modelId}: one Provider API attempt`)
         assertEqual(legacyCalls(calls).length, 0, `${modelId}: no legacy retry`)
