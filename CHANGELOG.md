@@ -1,3 +1,128 @@
+## 2.1.0 - 2026-09-16
+
+Feature: Claude turns through the Provider API reuse a cached system prefix, and
+a paused turn now continues instead of ending the response. The rest is parity
+and repair work against `command-code@1.54.0`
+([#169](https://github.com/rashidrazak/opencode-cmd-provider/issues/169)): the
+stream lifecycle, the retry ladder, the plan-gate fallback, and the legacy wire
+format now behave the way the live provider does.
+
+### Features
+
+- **Claude prompt caching on the Provider API path**
+  ([#177](https://github.com/rashidrazak/opencode-cmd-provider/issues/177)):
+  `/provider/v1/messages` sent the system prompt as a flat string and never a
+  cache breakpoint, so every turn re-billed the whole prefix as fresh input.
+  `buildAnthropicBody` now emits one ephemeral `cache_control` breakpoint on the
+  `system` prefix, mirroring the official CLI's `toWireSystem()`. Measured live
+  on a ~7k-token prefix: a cold turn wrote 7142 tokens and a byte-identical warm
+  turn read them back for 13 fresh tokens (~99.8% reuse). The legacy
+  `/alpha/generate` body is untouched, and conversation-history caching stays
+  out of scope.
+- **`pause_turn` continues the turn instead of reporting it finished**
+  ([#172](https://github.com/rashidrazak/opencode-cmd-provider/issues/172)): a
+  paused response passed through as an unknown `other` reason, so v1 called the
+  turn completed and v2 rejected it as a retryable incomplete stream. The
+  transport now detects the pause on the finish part, re-POSTs the same body
+  (bounded at five continuations), appends the continuation's parts to the same
+  stream, folds its usage with `addAiSdkUsage`, and never emits the pause itself.
+
+### Fixes
+
+- **A truncated stream fails instead of fabricating a finish**
+  ([#170](https://github.com/rashidrazak/opencode-cmd-provider/issues/170)): a
+  body that closed cleanly with no terminal event was reported as a successful
+  `stop` with zeroed usage, so a proxy or CDN truncation looked like a complete
+  answer. The read loop now raises `TruncatedStreamError` (upstream's wording,
+  502 attached, distinguishable `name`), and the synthetic finish is gone: open
+  parts close and the stream ends with the redacted error part.
+- **Failures are classified before retrying, with a short ladder on by default**
+  ([#171](https://github.com/rashidrazak/opencode-cmd-provider/issues/171)): the
+  transport did zero retries unless `maxRetries` was set, and then replayed every
+  failure it could reach — 400/401/403/404/422 included — while never replaying
+  the failure the server itself flags as retryable. Only transient kinds are
+  replayed now (network failures, 408/429/5xx, and the server's own retryable
+  error events); permanent answers, version gates, and a turn that already
+  streamed text are not. A `Retry-After` above the cap no longer replays the cap
+  error it just raised.
+- **The Provider API plan-gate 403 flips to the legacy transport again**
+  ([#175](https://github.com/rashidrazak/opencode-cmd-provider/issues/175),
+  restoring the [#56](https://github.com/rashidrazak/opencode-cmd-provider/issues/56)
+  safety net): the
+  live gate answers the Anthropic `permission_error` envelope with no
+  `error.code`, which none of the three hardcoded literals matched, so a Go-plan
+  Claude request surfaced a single error part instead of reaching the on-demand
+  credits the legacy path serves. The matcher reads the plan phrasing when the
+  code is absent, and checks the version gate first so a version 403 is never
+  misread as a plan flip.
+- **Anthropic usage is mapped cache-exclusive**
+  ([#178](https://github.com/rashidrazak/opencode-cmd-provider/issues/178)):
+  Anthropic reports `input_tokens` excluding the cached prefix, so the shared
+  cache-inclusive arithmetic — the OpenAI-side shape fixed in
+  [#158](https://github.com/rashidrazak/opencode-cmd-provider/issues/158) —
+  turned a 7155-token cached Claude prompt into
+  `total 13, noCache 0` — a prompt 550× smaller than the real one, and the wrong
+  cost with it. Each provider now pins its own mapper: the OpenAI shape stays
+  cache-inclusive, Anthropic becomes cache-exclusive.
+- **The bare `message_stop` no longer zeroes every Claude turn**
+  ([#174](https://github.com/rashidrazak/opencode-cmd-provider/issues/174)): the Provider
+  API sends usage and the real `stop_reason` on `message_delta` and then closes
+  with a bare `message_stop`, which the parser mapped to a second, zeroed finish
+  — so every Claude turn reported `{total: 0}` and `$0` cost, and a real
+  `max_tokens` stop was masked as `stop`.
+- **Reasoning parts keep the id they opened with**
+  ([#71](https://github.com/rashidrazak/opencode-cmd-provider/issues/71)): the
+  Anthropic parser re-derived the part id from the block index for deltas and
+  stops, so a gateway that labels its thinking blocks left a reasoning part
+  unfilled and sent deltas for a part it never opened — the `reasoning part <id>
+not found` failure from
+  [#69](https://github.com/rashidrazak/opencode-cmd-provider/issues/69). Block
+  state now carries the chosen id, so start, delta and stop agree.
+- **Every part a stream opened is closed**
+  ([#72](https://github.com/rashidrazak/opencode-cmd-provider/issues/72)): a
+  stream that failed mid-generation — an error event, an abort, a body that
+  stopped early, a read error that survived the retry budget — left a
+  `reasoning-start` or `text-start` with no matching end. Parsers expose an
+  idempotent `closeStream()`, which the transport calls before the error part on
+  mapper errors, aborts and read failures.
+- **The legacy wire format tracks the shipped CLI**
+  ([#173](https://github.com/rashidrazak/opencode-cmd-provider/issues/173)): the
+  legacy request carried a version header frozen at `1.15.1`, an inert
+  `x-co-flag`, and a forced `temperature: 0.3` that ignored the host's own knob.
+  The reported version is now `FACTS_PACKAGE_VERSION` — the command-code build
+  the Snapshot was refreshed from, `1.54.0`, comfortably above the `0.18.10`
+  floor the gate last recorded — the host's `temperature` is forwarded on every
+  transport, and a version-gate 403 stays fatal with a message that names
+  `opencode-cmd-provider` and quotes the server's minimum.
+- **`/connect` waits for you, and offers a pasted key**
+  ([#145](https://github.com/rashidrazak/opencode-cmd-provider/issues/145),
+  ADR-0012): the browser flow capped its callback at 15 seconds and closed the
+  callback server on expiry, so any sign-in slower than that — page load, login,
+  org pick, approve, transfer — posted the key to a closed port. The budget is
+  five minutes now (under OpenChamber's own 15-minute budget for the route), the
+  timer is cleared on both exits so a successful login no longer holds the event
+  loop open, and a **Command Code API key** method joins the provider list for
+  hosts where the browser cannot reach OpenCode's loopback callback at all.
+
+### Dependencies
+
+- The npm minor/patch group (8 updates,
+  [#157](https://github.com/rashidrazak/opencode-cmd-provider/pull/157)) and the
+  GitHub Actions group
+  ([#156](https://github.com/rashidrazak/opencode-cmd-provider/pull/156)) are
+  current.
+- `solid-js` and `zod` are held at the exact versions upstream pins (`1.9.12`,
+  `4.1.8`), with `tests/dependency-pins.test.ts` gating drift.
+
+### Chores
+
+- The dead local cost calculation is gone
+  ([#176](https://github.com/rashidrazak/opencode-cmd-provider/issues/176)):
+  `calculateCommandCodeCost` and the internal `src/provider/cost.ts` module were
+  never read — displayed cost comes from the advertised rates plus the usage the
+  transport forwards, so the pass was dead arithmetic. No public surface
+  changes: `cost.ts` was never reachable through the package's exports map.
+
 ## 2.0.0 - 2026-09-15
 
 ### Compatibility
