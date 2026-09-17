@@ -137,6 +137,29 @@ run([
   ],
 
   [
+    "reasoning and text sharing one stream id still resume as separate blocks (issue #189)",
+    () => {
+      // The OpenAI codec names both the reasoning part and the text part after
+      // the chunk's own id, so on a real Command Code stream the two blocks
+      // share one. They are different blocks and keep the order they streamed
+      // in — merging them would hand the model its reasoning as its answer.
+      const streamed = parts(
+        { type: "reasoning-start", id: "chatcmpl-1" },
+        { type: "reasoning-delta", id: "chatcmpl-1", delta: "hmm" },
+        { type: "reasoning-end", id: "chatcmpl-1" },
+        { type: "text-start", id: "chatcmpl-1" },
+        { type: "text-delta", id: "chatcmpl-1", delta: "hi" },
+        { type: "text-end", id: "chatcmpl-1" },
+      )
+      assertEqual(resumedAssistantMessage(streamed, "openai"), {
+        role: "assistant",
+        content: "hi",
+        reasoning_content: "hmm",
+      })
+    },
+  ],
+
+  [
     "a tool call the wire cannot take fails loudly (issue #189)",
     () => {
       const call = (toolCallId: string, toolName: string, input: string): unknown[] => [

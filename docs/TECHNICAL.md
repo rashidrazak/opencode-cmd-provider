@@ -275,10 +275,11 @@ retry that _replaced_ an attempt is not part of the sum). What the continuation
 _asks for_ differs by transport: the legacy `/alpha/generate` transport re-POSTs
 the same body, byte for byte, while the Provider API re-sends the request with
 the paused assistant turn appended (upstream's AI-SDK path resumes it exactly
-that way). That appended turn is the paused response's own content in the
-dialect's shape: text as content, tool calls with their ids, names and arguments
-verbatim, and signed thinking blocks with the signature they arrived with —
-which is what keeps a resumed turn the turn the model was making. A paused turn
+that way). That appended turn is everything the turn has produced so far —
+every continuation included, so a turn the provider paused twice carries both
+segments — in the dialect's shape: text as content, tool calls with their ids,
+names and arguments verbatim, and signed thinking blocks with the signature they
+arrived with. That is what keeps a resumed turn the turn the model was making. A paused turn
 carrying a shape the continuation cannot represent faithfully is failed loudly,
 naming what could not be carried, rather than resumed as a turn the model never
 made: unsigned thinking (Anthropic requires a signature and the plugin cannot
@@ -308,6 +309,9 @@ before matching:
 | `error`                                                                                                           | `error`      |
 | `stop`, `end_turn`, `stop_sequence`, `refusal`, `content_filter`, `max_turn_requests`, `cancelled`, anything else | `stop`       |
 
+Each spelling is taken with either separator (`tool_calls` / `tool-calls`,
+`max_tokens` / `max-tokens`, `max_output_tokens` / `max-output-tokens`,
+`model_context_window_exceeded` and its hyphenated form), since the wire chooses.
 The last row is upstream's own default (`normalizeStopReason2` completes every
 reason it does not know), and `refusal` / `content_filter` follow it too: the
 plugin's contract is CLI parity, and the model's refusal is the answer the user

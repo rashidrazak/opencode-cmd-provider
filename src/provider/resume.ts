@@ -42,8 +42,10 @@ interface ResumedToolCall {
 
 /**
  * The assistant message a continuation appends to the request the paused turn
- * was sent with. Returns undefined when the paused response produced no content
- * at all — there is nothing to append, and the request is re-sent as it was.
+ * was sent with. `parts` is everything the turn has produced so far — a turn
+ * that paused twice contributes both segments, in order, as one assistant
+ * message. Returns undefined when the paused response produced no content at
+ * all — there is nothing to append, and the request is re-sent as it was.
  * Throws when the turn carries a shape this module cannot represent.
  */
 export function resumedAssistantMessage(
@@ -53,6 +55,29 @@ export function resumedAssistantMessage(
   const blocks = collectBlocks(parts)
   if (blocks.length === 0) return undefined
   return dialect === "anthropic" ? anthropicMessage(blocks) : openAIMessage(blocks)
+}
+
+/**
+ * The request body a continuation sends: the body the paused turn was sent
+ * with, plus the resumed assistant turn. A body the append cannot be made to
+ * (no `messages` array) is a bug in the caller's own encoder, not a provider
+ * failure — it fails loudly rather than sending the conversation without the
+ * turn being continued.
+ */
+export function withResumedAssistantTurn(
+  body: Record<string, unknown>,
+  parts: readonly LanguageModelV3StreamPart[],
+  dialect: ResumeDialect,
+): Record<string, unknown> {
+  const resumed = resumedAssistantMessage(parts, dialect)
+  if (resumed === undefined) return body
+  const messages = body.messages
+  if (!Array.isArray(messages)) {
+    throw new Error(
+      "Command Code request body has no messages array to append the resumed assistant turn to",
+    )
+  }
+  return { ...body, messages: [...messages, resumed] }
 }
 
 /**

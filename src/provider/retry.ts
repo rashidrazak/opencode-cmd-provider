@@ -7,8 +7,9 @@
 // when its own kind says it is transient, never because of where it was
 // caught. The vocabulary is the one the issue names: network, 408/429/5xx,
 // 4xx-fatal, window-limit (fatal), `upgrade_required` (a transport flip the
-// model owns), truncation (retryable while nothing is visible), and the
-// server's own mid-stream error event.
+// model owns), truncation (retryable while nothing is visible), the server's
+// own mid-stream error event, the pause-turn bound, and a paused turn the
+// continuation cannot represent (issues #172, #188).
 
 /**
  * Statuses upstream's `isRetryableStatus` treats as transient: 408, 429 and
@@ -312,8 +313,8 @@ export function abortError(message = "The operation was aborted"): DOMException 
  * `Failure` rides on the error so the retry loop reads the cause instead of the
  * catch site; the message is the transport's own, already redacted where it is
  * built, and `status` is the HTTP status the failure named when it named one.
- * `failureOf` reads the failure and `isTransportError` the marker, so an error
- * raised anywhere in the transport carries its classification with it.
+ * The transport reads the `failure` field and the `transportError` marker, so an
+ * error raised anywhere in the transport carries its classification with it.
  */
 export class TransportFailureError extends Error {
   readonly transportError = true as const

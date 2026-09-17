@@ -43,7 +43,7 @@ import {
 import { getApiBase, getCmdZdr } from "../env.js"
 import { normalizePlan } from "../catalog/plans.js"
 import { redactCommandCodeErrorText, commandCodeErrorMessage, readGate } from "./redact.js"
-import { resumedAssistantMessage } from "./resume.js"
+import { withResumedAssistantTurn } from "./resume.js"
 import {
   mappedReasoningEffort,
   resolveProviderReasoning,
@@ -331,8 +331,9 @@ interface TransportDescriptor {
    * carry the paused assistant turn (issues #185, #188). Called once per
    * attempt, so a credential rotated mid-ladder is picked up by the next
    * request (issue #171 — the Authorization header is not a per-stream constant
-   * any more). `pausedTurn` is the content the response being continued
-   * emitted, and is empty for a first request and for a replay. */
+   * any more). `pausedTurn` is everything the turn has produced so far — every
+   * continuation's parts included, so a turn that paused twice carries both
+   * segments — and is empty for a first request and for a replay. */
   requestFor: (pausedTurn: readonly LanguageModelV3StreamPart[]) => TransportRequest
   /** A parser per attempt: a replay is a new stream, so per-stream state (block
    * lifecycles, tool buffers, the OpenAI last finish reason) must not cross
@@ -637,13 +638,11 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
     // paused turn is empty there. A turn the append cannot represent throws
     // out of here, which the transport surfaces instead of sending a request
     // that would resume a *different* turn than the one the provider paused.
-    const resumed = resumedAssistantMessage(pausedTurn, isClaude ? "anthropic" : "openai")
-    if (resumed !== undefined) {
-      const record = body as Record<string, unknown>
-      const messages = Array.isArray(record.messages) ? record.messages : []
-      record.messages = [...messages, resumed]
-    }
-    return body
+    return withResumedAssistantTurn(
+      body as Record<string, unknown>,
+      pausedTurn,
+      isClaude ? "anthropic" : "openai",
+    )
   }
 
   private providerHeadersFor(options: ModelCallOptions): Record<string, string> {
@@ -673,6 +672,27 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
     return headers
   }
 
+  /**
+   * The legacy `/alpha/generate` descriptor, built the same way wherever it is
+   * used: the session's transport, and the plan-gate fallback off the Provider
+   * API. Only the flip differs between the two, and it is never the legacy
+   * descriptor's own (issue #56).
+   */
+  private legacyDescriptor(options: ModelCallOptions): TransportDescriptor {
+    // Frozen once per call: a continuation re-POSTs these exact bytes, which is
+    // upstream `command-code@1.54.0`'s own behaviour on this endpoint (issue
+    // #172). Rebuilding the body per pass would move its `threadId` and
+    // timestamp under the continuation, so the builder ignores the paused turn.
+    const bodyStr = JSON.stringify(this.bodyFor(options))
+    return {
+      url: `${this.apiBase()}/alpha/generate`,
+      requestFor: () => ({ bodyStr, headers: this.headersFor(options) }),
+      createParser: () => statelessParser(ccEventToStreamPart),
+      isTerminalEvent: ccEventIsTerminal,
+      flipOnUpgradeRequired: false,
+    }
+  }
+
   private providerRunStream(
     options: ModelCallOptions,
     isClaude: boolean,
@@ -684,19 +704,7 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
     // call once via POST {base}/alpha/generate with the legacy CLI wire
     // format. The legacy descriptor itself never flips, so the retry is
     // bounded to one.
-    const legacyBodyStr = JSON.stringify(this.bodyFor(options))
-    const legacyFallback: TransportDescriptor = {
-      url: `${this.apiBase()}/alpha/generate`,
-      // The legacy transport re-POSTs the same bytes for a continuation
-      // (upstream `command-code@1.54.0` loops on the same request), so the
-      // builder ignores the paused turn and returns the body frozen once for
-      // this call. Rebuilding it per pass would move its `threadId` and
-      // timestamp under the continuation.
-      requestFor: () => ({ bodyStr: legacyBodyStr, headers: this.headersFor(options) }),
-      createParser: () => statelessParser(ccEventToStreamPart),
-      isTerminalEvent: ccEventIsTerminal,
-      flipOnUpgradeRequired: false,
-    }
+    const legacyFallback = this.legacyDescriptor(options)
     return this.transportStream(
       {
         url,
@@ -723,21 +731,7 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
     options: ModelCallOptions,
     sink?: LanguageModelV3StreamPart[],
   ): ReadableStream<LanguageModelV3StreamPart> {
-    // Frozen once per call: a continuation re-POSTs these exact bytes, which
-    // is upstream `command-code@1.54.0`'s own behaviour on this endpoint
-    // (issue #172).
-    const bodyStr = JSON.stringify(this.bodyFor(options))
-    return this.transportStream(
-      {
-        url: `${this.apiBase()}/alpha/generate`,
-        requestFor: () => ({ bodyStr, headers: this.headersFor(options) }),
-        createParser: () => statelessParser(ccEventToStreamPart),
-        isTerminalEvent: ccEventIsTerminal,
-        flipOnUpgradeRequired: false,
-      },
-      options.abortSignal,
-      sink,
-    )
+    return this.transportStream(this.legacyDescriptor(options), options.abortSignal, sink)
   }
 
   /**
@@ -780,17 +774,19 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
         // only the parts *it* emitted make its replay unsafe; the continuations
         // before it are never re-requested (issue #172). Reset per request.
         let attemptEmitted = false
-        // The content the response being continued emitted. A continuation
-        // carries it back into its own request (issue #188), so it is reset at
-        // every request and read only by the builder of the next one — never
-        // replayed, since a replay only follows an attempt that emitted
-        // nothing (issue #185).
-        let responseParts: LanguageModelV3StreamPart[] = []
+        // Every content part this *turn* has emitted, across all of its
+        // continuations. A continuation re-sends the request with the whole
+        // paused turn appended — not just the segment that paused it last — so
+        // the consumer's view (segment after segment of one turn) and the
+        // request's view stay the same thing (issues #188, #189). Never reset:
+        // a replay only follows an attempt that emitted nothing, so nothing is
+        // ever counted twice.
+        const turnParts: LanguageModelV3StreamPart[] = []
         const emit = (part: LanguageModelV3StreamPart) => {
           if (part.type !== "finish") {
             visibleEmitted = true
             attemptEmitted = true
-            responseParts.push(part)
+            turnParts.push(part)
           }
           sink?.push(part)
           streamController.enqueue(part)
@@ -940,11 +936,6 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
             requestLoop: for (let continuations = 0; ; continuations++) {
               clearTerminalState()
               attemptEmitted = false
-              // The paused turn this request continues: the parts the previous
-              // response emitted, closed parts included. Empty for the first
-              // request, whose builder sees no continuation.
-              const pausedTurn = responseParts
-              responseParts = []
               retryLoop: for (let attempt = 0; ; attempt++) {
                 // A fresh parser: a replay is a new stream, and the previous
                 // attempt's per-stream state (open blocks, tool buffers, the
@@ -981,7 +972,7 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
                 // issue #188) is a statement about the request, not about a
                 // response — the ladder never replays it, and the turn's
                 // already-settled bookkeeping must not swallow it either.
-                const request = t.requestFor(pausedTurn)
+                const request = t.requestFor(turnParts)
 
                 try {
                   try {

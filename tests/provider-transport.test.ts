@@ -2216,6 +2216,65 @@ run([
     },
   ],
   [
+    "transport: a turn that pauses twice carries every segment so far, not just the last (issues #188, #189)",
+    async () => {
+      // A paused turn is one turn, however many times the provider pauses it:
+      // the second continuation re-sends the request with the whole turn
+      // appended, so the segment the consumer already read is not dropped from
+      // the request that continues it — the model would otherwise answer a
+      // conversation in which its own first segment never happened.
+      const bodies: Array<Record<string, unknown>> = []
+      let requests = 0
+      const pause = (text: string, id: string) => [
+        openAIChunk(text, { id }),
+        { id, choices: [{ delta: {}, finish_reason: "pause_turn" }] },
+        { id, choices: [], usage: { prompt_tokens: 10, completion_tokens: 4 } },
+      ]
+      const options: MockCcOptions = { chatCompletionsStream: pause("one", "chatcmpl-1") }
+      options.onChatCompletions = (body) => {
+        bodies.push(body)
+        requests++
+        if (requests === 2) options.chatCompletionsStream = pause("two", "chatcmpl-2")
+        if (requests === 3) {
+          options.chatCompletionsStream = [
+            openAIChunk("three", { id: "chatcmpl-3" }),
+            {
+              id: "chatcmpl-3",
+              choices: [{ delta: {}, finish_reason: "end_turn" }],
+              usage: { prompt_tokens: 3, completion_tokens: 5 },
+            },
+          ]
+        }
+      }
+      const mock = await startMockCc(options)
+      try {
+        const provider = createCommandCode({ apiKey: "test_key", baseURL: mock.url })
+        const parts = await collect(provider.languageModel("gpt-5.6-terra"), [
+          { role: "user", content: "hi" },
+        ])
+        assertEqual(mock.hits.chatCompletions, 3, "the pause is continued twice")
+        assertEqual(bodies[0]!.messages, [{ role: "user", content: "hi" }])
+        assertEqual(bodies[1]!.messages, [
+          { role: "user", content: "hi" },
+          { role: "assistant", content: "one" },
+        ])
+        assertEqual(bodies[2]!.messages, [
+          { role: "user", content: "hi" },
+          { role: "assistant", content: "onetwo" },
+        ])
+        const finish = parts[parts.length - 1] as {
+          type: string
+          usage: { inputTokens: { total: number }; outputTokens: { total: number } }
+        }
+        assertEqual(finish.type, "finish")
+        assertEqual(finish.usage.inputTokens.total, 23)
+        assertEqual(finish.usage.outputTokens.total, 13)
+      } finally {
+        await mock.close()
+      }
+    },
+  ],
+  [
     "transport: a pause that called tools resumes with those calls, ids included (issue #189)",
     async () => {
       // The paused turn called a tool. The continuation carries the call — id,

@@ -33,6 +33,12 @@ upstream `command-code@1.54.1` normalises (its `normalizeStopReason` /
   failures;
 - **everything else → `stop`**: a completed turn.
 
+Each spelling is accepted with either separator (`tool_calls` / `tool-calls`,
+`max_tokens` / `max-tokens`, `max_output_tokens` / `max-output-tokens`,
+`model_context_window_exceeded` and its hyphenated form): the wire picks one, and
+the mapper has always taken the hyphenated AI SDK forms alongside the provider
+forms.
+
 The last rule is the decision. Upstream's normaliser maps every reason it does
 not recognise to `end_turn` and never fails a turn on an unknown reason, so the
 plugin follows it: a reason from a legacy/provider variant (`max_turn_requests`,
