@@ -250,14 +250,18 @@ usage-bearing finish (the legacy codec's `totalUsage`, Anthropic's
 `message_delta`) has declared the turn complete, while a finish synthesized from
 an OpenAI `finish_reason` chunk — its trailing usage chunk never arrived — fails
 the turn with `MissingUsageError` (`status` 502) instead of reporting a complete,
-zero-cost answer. The legacy `{"type":"abort"}` event is the other terminal: it
-carries no finish part, so the transport closes the parts the parser still holds
-open and ends the turn without inventing one — `ai@6` tolerates a missing finish,
-as upstream's own consumer does (`!finish && !abort` is its truncation check).
-Anything else is a failure: a body that closes with no terminal — truncated by a
-proxy, or ended early by the server — raises `TruncatedStreamError` (upstream's
-wording, `status` 502, `name` on the Error). Both failures surface as the `error`
-part; `doGenerate` fails the same way, off the same transport.
+zero-cost answer. A **pause** is the one exception: the turn is not over, so the
+turn is continued rather than failed, and the unpriced segment contributes
+nothing to the sum the resumed turn reports — a segment the provider never
+priced is unknown, not zero (issue #190). The legacy `{"type":"abort"}` event is
+the other terminal: it carries no finish part, so the transport closes the parts
+the parser still holds open and ends the turn without inventing one — `ai@6`
+tolerates a missing finish, as upstream's own consumer does (`!finish && !abort`
+is its truncation check). Anything else is a failure: a body that closes with no
+terminal — truncated by a proxy, or ended early by the server — raises
+`TruncatedStreamError` (upstream's wording, `status` 502, `name` on the Error).
+Both failures surface as the `error` part; `doGenerate` fails the same way, off
+the same transport.
 
 A `pause_turn` is not an ending either. The provider stopped mid-turn and
 expects the request to continue it — Anthropic reports it as a
@@ -344,7 +348,7 @@ from upstream `command-code@1.54.0` (`isModelCallRetryable`,
 | 429 (or a `RATE_LIMITED` code) naming a usage window                                                                                                                                              | window limit       | no                            |
 | `Retry-After` beyond `maxRetryDelayMs`                                                                                                                                                            | retry-after cap    | no                            |
 | the plan-gate 403: `upgrade_required`, `upgrade to GOAT/provider`, or "without / doesn't include API access"                                                                                      | transport flip     | flipped once, never replayed  |
-| body ended with no terminal, with only a synthesized finish, or with a legacy `finish` reporting `other` and no raw reason                                                                        | truncation         | yes, while nothing is visible |
+| body ended with no terminal, with only a synthesized finish that is not a pause, or with a legacy `finish` reporting `other` and no raw reason                                                    | truncation         | yes, while nothing is visible |
 | server `error` event: `isRetryable: true`, else a reported 408/429/5xx, else retryable unless it says `false` or names `premium_credits_exhausted` / `model_not_in_plan` / `insufficient credits` | stream error       | per that rule                 |
 | a turn still paused after five `pause_turn` continuations                                                                                                                                         | pause-turn limit   | no                            |
 | a paused turn whose continuation cannot represent its content faithfully                                                                                                                          | resume-unsupported | no                            |

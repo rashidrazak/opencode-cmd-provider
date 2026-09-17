@@ -2623,19 +2623,33 @@ run([
     },
   ],
   [
-    "transport: a pause whose usage never arrived fails the turn instead of continuing it (issues #171, #172)",
+    "transport: a pause whose usage never arrived is continued, not failed (issue #190)",
     async () => {
       // A pause finish the codec had to synthesize — the OpenAI `finish_reason`
-      // chunk whose trailing usage-only chunk never arrived — says nothing
-      // about what the response it ended spent, so the sum a resumed turn must
-      // report cannot be known. The #171 rule runs first: the response is not a
-      // completed one, and the turn fails rather than continuing with a segment
-      // billed as zero.
+      // chunk whose trailing usage-only chunk never arrived — says nothing about
+      // what the response it ended spent. The #171 rule would fail the turn, but
+      // the pause means the turn is not over: it is continued, and the unpriced
+      // segment contributes nothing to the sum the resumed turn reports (a
+      // segment the provider never priced is unknown, not zero).
+      let requests = 0
       const options: MockCcOptions = {
         chatCompletionsStream: [
           openAIChunk("first ", { id: "chatcmpl-1" }),
           { id: "chatcmpl-1", choices: [{ delta: {}, finish_reason: "pause_turn" }] },
         ],
+      }
+      options.onChatCompletions = () => {
+        requests++
+        if (requests === 2) {
+          options.chatCompletionsStream = [
+            openAIChunk("second", { id: "chatcmpl-2" }),
+            {
+              id: "chatcmpl-2",
+              choices: [{ delta: {}, finish_reason: "end_turn" }],
+              usage: { prompt_tokens: 3, completion_tokens: 5 },
+            },
+          ]
+        }
       }
       const mock = await startMockCc(options)
       try {
@@ -2643,7 +2657,57 @@ run([
         const parts = await collect(provider.languageModel("gpt-5.6-terra"), [
           { role: "user", content: "hi" },
         ])
-        assertEqual(mock.hits.chatCompletions, 1, "no continuation is attempted")
+        assertEqual(mock.hits.chatCompletions, 2, "the pause is continued once")
+        assertEqual(
+          parts.map((p) => p.type),
+          [
+            "text-start",
+            "text-delta",
+            "text-end",
+            "text-start",
+            "text-delta",
+            "text-end",
+            "finish",
+          ],
+        )
+        const finish = parts[parts.length - 1] as {
+          finishReason: unknown
+          usage: { inputTokens: { total: number }; outputTokens: { total: number } }
+        }
+        assertEqual(finish.finishReason, { unified: "stop", raw: "end_turn" })
+        // Only the continuation's own report: nothing was invented for the
+        // segment the provider never priced.
+        assertEqual(finish.usage.inputTokens.total, 3)
+        assertEqual(finish.usage.outputTokens.total, 5)
+      } finally {
+        await mock.close()
+      }
+    },
+  ],
+  [
+    "transport: a non-pause finish whose usage never arrived still fails the turn (issue #190)",
+    async () => {
+      // The #171 rule is untouched for a turn that *did* end: an OpenAI
+      // `finish_reason` chunk whose trailing usage chunk never arrived reports a
+      // complete turn at zero cost, so it is retried (while nothing is visible)
+      // and then surfaced — a pause is the only finish this transport continues
+      // past.
+      const mock = await startMockCc({
+        chatCompletionsStream: [
+          { id: "chatcmpl-1", choices: [{ delta: {}, finish_reason: "end_turn" }] },
+        ],
+      })
+      try {
+        const provider = createCommandCode({
+          apiKey: "test_key",
+          baseURL: mock.url,
+          maxRetries: 1,
+          maxRetryDelayMs: 0,
+        })
+        const parts = await collect(provider.languageModel("gpt-5.6-terra"), [
+          { role: "user", content: "hi" },
+        ])
+        assertEqual(mock.hits.chatCompletions, 2, "the usage-less finish is replayed")
         assertEqual(
           parts.filter((p) => p.type === "finish"),
           [],

@@ -1094,11 +1094,16 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
                   // it came from an OpenAI `finish_reason` chunk whose trailing
                   // usage-only chunk never arrived, so holding it would report a
                   // complete turn at zero cost. Retryable while nothing is
-                  // visible, exactly like a truncation (issue #171).
+                  // visible, exactly like a truncation (issue #171) — unless the
+                  // finish is a pause, which the next request continues: a
+                  // resumed turn does not need the paused segment priced, it
+                  // needs the turn finished, and the segment is folded as
+                  // unreported rather than as zero (issue #190).
                   if (
                     !closed &&
                     heldFinish !== undefined &&
-                    !finishCarriesReportedUsage(heldFinish)
+                    !finishCarriesReportedUsage(heldFinish) &&
+                    !finishIsPauseTurn(heldFinish)
                   ) {
                     throw new MissingUsageError()
                   }
@@ -1175,10 +1180,11 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
               if (closed) return
 
               // The provider paused the turn: no turn has ended, so the held
-              // finish is not emitted. Its usage joins the turn's total and the
-              // same body is re-POSTed for the continuation — up to
-              // MAX_PAUSE_CONTINUATIONS, after which the turn is failed rather
-              // than reported with the pause as its finish reason (issue #172).
+              // finish is not emitted. The same request is re-sent for the
+              // continuation — up to MAX_PAUSE_CONTINUATIONS, after which the
+              // turn is failed rather than reported with the pause as its finish
+              // reason (issue #172) — and the response's usage joins the turn's
+              // total.
               if (heldFinish === undefined || !finishIsPauseTurn(heldFinish)) break requestLoop
               if (continuations >= MAX_PAUSE_CONTINUATIONS) {
                 throw new PauseTurnLimitError(MAX_PAUSE_CONTINUATIONS)
@@ -1186,7 +1192,11 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
               // The continuation is a new response: close whatever the paused one
               // left open before its successor opens its own parts.
               closeOpenParts()
-              accumulateUsage(heldFinish.usage)
+              // Only a usage the provider actually reported is folded in. A
+              // paused segment the provider never priced is not billed as zero:
+              // nothing about it is known, so it contributes nothing to the sum
+              // the turn reports (issue #190).
+              if (finishCarriesReportedUsage(heldFinish)) accumulateUsage(heldFinish.usage)
             }
 
             // An error part already ended the stream; nothing else may follow it.
