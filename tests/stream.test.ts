@@ -874,18 +874,19 @@ run([
         content_block: { type: "server_tool_use", id: "srv_1", name: "web_search" },
       })
       parser({ type: "content_block_stop", index: 0 })
-      // Modelled blocks are not reported, and neither is a start with no type.
+      // Modelled blocks are not reported.
       parser({ type: "content_block_start", index: 1, content_block: { type: "text", text: "" } })
       parser({ type: "content_block_stop", index: 1 })
       parser({ type: "content_block_start", index: 2, content_block: {} })
-      // The same type twice is one entry; a nameless block is still named.
+      // The same type twice is one entry; a block whose start carried no type
+      // is still reported, as `untyped`.
       parser({
         type: "content_block_start",
         index: 3,
         content_block: { type: "server_tool_use", id: "srv_2", name: "web_search" },
       })
       parser({ type: "content_block_stop", index: 3 })
-      assertEqual(parser.unmodelledBlocks?.(), ["server_tool_use", "unknown"])
+      assertEqual(parser.unmodelledBlocks?.(), ["server_tool_use", "untyped"])
 
       // The OpenAI-shaped parser has no content blocks at all: it reports none.
       assertEqual(createOpenAIStreamParser().unmodelledBlocks, undefined)
@@ -1162,6 +1163,21 @@ run([
       assertEqual(labelled({ type: "content_block_stop", index: 0 }), [
         { type: "reasoning-end", id: "red_7" },
       ])
+
+      // A redacted block with no payload has nothing to replay, so it stays
+      // unmodelled: no part, and a pause that carried it is refused (#192)
+      // rather than handing the provider an empty block.
+      const payloadless = createAnthropicStreamParser()
+      assertEqual(
+        payloadless({
+          type: "content_block_start",
+          index: 0,
+          content_block: { type: "redacted_thinking" },
+        }),
+        [],
+      )
+      assertEqual(payloadless({ type: "content_block_stop", index: 0 }), [])
+      assertEqual(payloadless.unmodelledBlocks?.(), ["redacted_thinking"])
     },
   ],
 

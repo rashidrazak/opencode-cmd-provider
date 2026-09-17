@@ -45,6 +45,15 @@ async function collect(
   return parts
 }
 
+/** The provider metadata the first part of `type` carried, when it carried any
+ * — where a thinking block's signature or a redacted block's payload rides. */
+function providerMetadataOf(parts: Array<Record<string, unknown>>, type: string): unknown {
+  const part = parts.find(
+    (candidate) => candidate.type === type && candidate.providerMetadata !== undefined,
+  ) as { providerMetadata?: unknown } | undefined
+  return part?.providerMetadata
+}
+
 /** The transport's truncation failure, mirrored from upstream
  * `command-code@1.54.0` (issue #170). */
 const TRUNCATION_MESSAGE =
@@ -2413,9 +2422,9 @@ run([
         ])
         // The signature reached the consumer on the reasoning-end part, which
         // is where the continuation read it from.
-        const reasoningEnd = parts.find((p) => p.type === "reasoning-end") as
-          { providerMetadata?: unknown } | undefined
-        assertEqual(reasoningEnd?.providerMetadata, { anthropic: { signature: "sig-1" } })
+        assertEqual(providerMetadataOf(parts, "reasoning-end"), {
+          anthropic: { signature: "sig-1" },
+        })
         assertEqual(parts[parts.length - 1]!.type, "finish")
       } finally {
         await mock.close()
@@ -2492,11 +2501,7 @@ run([
         ])
         // The payload reached the consumer on the block's reasoning-start, and
         // the block is modelled — so the #192 safety net has nothing to refuse.
-        const reasoningStart = parts.find(
-          (p) =>
-            p.type === "reasoning-start" && (p as { providerMetadata?: unknown }).providerMetadata,
-        ) as { providerMetadata?: unknown } | undefined
-        assertEqual(reasoningStart?.providerMetadata, {
+        assertEqual(providerMetadataOf(parts, "reasoning-start"), {
           anthropic: { redactedData: "EncryptedThought==" },
         })
         assertEqual(parts[parts.length - 1]!.type, "finish")
@@ -2543,6 +2548,73 @@ run([
         const failure = parts[parts.length - 1]!.error as Error
         assert(failure.message.includes("unsigned reasoning"), failure.message)
         assert(failure.message.includes("cannot be carried"), failure.message)
+      } finally {
+        await mock.close()
+      }
+    },
+  ],
+  [
+    "transport: a turn paused twice carries every segment's redacted payload (issue #194)",
+    async () => {
+      // Each response names its blocks from the same per-response counters, so
+      // both segments carry a `redacted-0` and a `text-1`. They are two blocks
+      // with two payloads: the second continuation must carry both, in order,
+      // rather than keeping only the last — the silent partial resume #191
+      // forbids.
+      const bodies: Array<Record<string, unknown>> = []
+      const segment = (payload: string, text: string) => [
+        {
+          type: "content_block_start",
+          index: 0,
+          content_block: { type: "redacted_thinking", data: payload },
+        },
+        { type: "content_block_stop", index: 0 },
+        { type: "content_block_start", index: 1, content_block: { type: "text", text: "" } },
+        anthropicContentBlockDelta(text, 1),
+        { type: "content_block_stop", index: 1 },
+        anthropicMessageDelta({ input_tokens: 10, output_tokens: 4 }, "pause_turn"),
+      ]
+      let requests = 0
+      const options: MockCcOptions = { messagesStream: segment("PAYLOAD-ONE", "one ") }
+      options.onMessages = (body) => {
+        bodies.push(body)
+        requests++
+        if (requests === 2) options.messagesStream = segment("PAYLOAD-TWO", "two ")
+        if (requests === 3) {
+          options.messagesStream = [
+            { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+            anthropicContentBlockDelta("done"),
+            { type: "content_block_stop", index: 0 },
+            anthropicMessageDelta({ input_tokens: 3, output_tokens: 5 }),
+          ]
+        }
+      }
+      const mock = await startMockCc(options)
+      try {
+        const provider = createCommandCode({ apiKey: "test_key", baseURL: mock.url })
+        const parts = await collect(provider.languageModel("claude-sonnet-5"), [
+          { role: "user", content: "hi" },
+        ])
+        assertEqual(mock.hits.messages, 3, "the pause is continued twice")
+        const assistant = (body: Record<string, unknown>): unknown =>
+          (body.messages as Array<{ role: string }>)[1]
+        assertEqual(assistant(bodies[1]!), {
+          role: "assistant",
+          content: [
+            { type: "redacted_thinking", data: "PAYLOAD-ONE" },
+            { type: "text", text: "one " },
+          ],
+        })
+        assertEqual(assistant(bodies[2]!), {
+          role: "assistant",
+          content: [
+            { type: "redacted_thinking", data: "PAYLOAD-ONE" },
+            { type: "text", text: "one " },
+            { type: "redacted_thinking", data: "PAYLOAD-TWO" },
+            { type: "text", text: "two " },
+          ],
+        })
+        assertEqual(parts[parts.length - 1]!.type, "finish")
       } finally {
         await mock.close()
       }

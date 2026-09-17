@@ -24,11 +24,22 @@ import { RESUME_UNSUPPORTED_FAILURE, TransportFailureError } from "./retry.js"
 export type ResumeDialect = "anthropic" | "openai"
 
 /** One content block of the paused assistant turn, in the order the response
- * streamed it. */
+ * streamed it. Blocks are delimited by their start and end parts: a reasoning
+ * block's metadata — a signature, or a redacted payload — belongs to the block
+ * that carried it, and a later block may reuse the id (each response of a paused
+ * turn names its blocks from the same counters), so blocks never merge. */
 type ResumedBlock =
   | { kind: "text"; text: string }
-  | { kind: "reasoning"; text: string; signature?: string; redactedData?: string }
+  | { kind: "reasoning"; text: string; metadata?: ReasoningMetadata }
   | { kind: "tool-call"; id: string; name: string; input: string }
+
+/** What a reasoning block carries beyond its text: Anthropic's signature for a
+ * thinking block, or the encrypted payload of a redacted one. Neither can be
+ * re-derived, so both are replayed verbatim. */
+interface ReasoningMetadata {
+  signature?: string
+  redactedData?: string
+}
 
 /** A tool call's arguments, parsed and checked, in the two encodings the wires
  * need: the JSON object Anthropic takes and the JSON text OpenAI takes. */
@@ -86,6 +97,10 @@ export function withResumedAssistantTurn(
  */
 function collectBlocks(parts: readonly LanguageModelV3StreamPart[]): ResumedBlock[] {
   const blocks: ResumedBlock[] = []
+  // The blocks still open, by part id. A block's end removes it, so a later
+  // block that reuses the id opens a new one instead of merging into a finished
+  // block — which would lose the earlier block's signature or payload, and with
+  // it the order the turn was streamed in (issues #189, #194).
   const openById = new Map<string, ResumedBlock>()
 
   const reasoningFor = (id: string): Extract<ResumedBlock, { kind: "reasoning" }> => {
@@ -97,35 +112,38 @@ function collectBlocks(parts: readonly LanguageModelV3StreamPart[]): ResumedBloc
     return created
   }
 
-  /** Records whatever the reasoning part carries for its block — Anthropic's
-   * signature, or the encrypted payload of a redacted block. Both may ride on
-   * the block's start or its end, so either part is read. */
+  const textFor = (id: string): Extract<ResumedBlock, { kind: "text" }> => {
+    const open = openById.get(id)
+    if (open?.kind === "text") return open
+    const created: ResumedBlock = { kind: "text", text: "" }
+    blocks.push(created)
+    openById.set(id, created)
+    return created
+  }
+
+  /** Records whatever the reasoning part carries for its open block — Anthropic
+   * puts a redacted payload on a block's start and this transport puts a
+   * signature on its end, so either part is read. */
   const recordReasoningMetadata = (id: string, part: LanguageModelV3StreamPart): void => {
-    const { signature, redactedData } = reasoningMetadataOf(part)
-    if (signature === undefined && redactedData === undefined) return
+    const metadata = reasoningMetadataOf(part)
+    if (metadata === undefined) return
     const block = reasoningFor(id)
-    if (signature !== undefined) block.signature = signature
-    if (redactedData !== undefined) block.redactedData = redactedData
+    block.metadata = { ...block.metadata, ...metadata }
   }
 
   for (const part of parts) {
     switch (part.type) {
       case "text-start":
-      case "text-end":
       case "tool-input-start":
       case "tool-input-delta":
       case "tool-input-end":
         break
-      case "text-delta": {
-        const open = openById.get(part.id)
-        if (open?.kind === "text") open.text += part.delta
-        else {
-          const created: ResumedBlock = { kind: "text", text: part.delta }
-          blocks.push(created)
-          openById.set(part.id, created)
-        }
+      case "text-delta":
+        textFor(part.id).text += part.delta
         break
-      }
+      case "text-end":
+        openById.delete(part.id)
+        break
       case "reasoning-start":
         recordReasoningMetadata(part.id, part)
         break
@@ -134,6 +152,7 @@ function collectBlocks(parts: readonly LanguageModelV3StreamPart[]): ResumedBloc
         break
       case "reasoning-end":
         recordReasoningMetadata(part.id, part)
+        openById.delete(part.id)
         break
       case "tool-call":
         blocks.push({
@@ -160,15 +179,12 @@ function collectBlocks(parts: readonly LanguageModelV3StreamPart[]): ResumedBloc
  * Anthropic provider puts the payload on the block's start, this transport puts
  * a signature on its end, and a gateway may do either (issues #189, #194).
  */
-function reasoningMetadataOf(part: LanguageModelV3StreamPart): {
-  signature?: string
-  redactedData?: string
-} {
+function reasoningMetadataOf(part: LanguageModelV3StreamPart): ReasoningMetadata | undefined {
   const metadata = (part as { providerMetadata?: unknown }).providerMetadata
-  if (!isRecord(metadata) || !isRecord(metadata.anthropic)) return {}
-  const anthropic = metadata.anthropic
-  const signature = stringValue(anthropic.signature)
-  const redactedData = stringValue(anthropic.redactedData)
+  if (!isRecord(metadata) || !isRecord(metadata.anthropic)) return undefined
+  const signature = stringValue(metadata.anthropic.signature)
+  const redactedData = stringValue(metadata.anthropic.redactedData)
+  if (signature === undefined && redactedData === undefined) return undefined
   return {
     ...(signature !== undefined ? { signature } : {}),
     ...(redactedData !== undefined ? { redactedData } : {}),
@@ -188,17 +204,18 @@ function anthropicMessage(blocks: readonly ResumedBlock[]): Record<string, unkno
     if (block.kind === "text") {
       content.push({ type: "text", text: block.text })
     } else if (block.kind === "reasoning") {
-      if (block.redactedData !== undefined) {
+      const metadata = block.metadata ?? {}
+      if (metadata.redactedData !== undefined) {
         // Encrypted reasoning: the payload *is* the block — it has no text, and
         // the API validates it on replay, so it goes back byte for byte (#194).
-        content.push({ type: "redacted_thinking", data: block.redactedData })
-      } else if (block.signature === undefined) {
+        content.push({ type: "redacted_thinking", data: metadata.redactedData })
+      } else if (metadata.signature === undefined) {
         // No signature means the provider never signed the block (or the
         // gateway dropped the delta), so the API would reject the replay. A
         // resume that silently loses the model's reasoning is not a resume.
         throw unrepresentable("unsigned reasoning")
       } else {
-        content.push({ type: "thinking", thinking: block.text, signature: block.signature })
+        content.push({ type: "thinking", thinking: block.text, signature: metadata.signature })
       }
     } else {
       const call = encodedToolCall(block)
@@ -226,7 +243,7 @@ function openAIMessage(blocks: readonly ResumedBlock[]): Record<string, unknown>
   for (const block of blocks) {
     if (block.kind === "text") text.push(block.text)
     else if (block.kind === "reasoning") {
-      if (block.redactedData !== undefined) {
+      if (block.metadata?.redactedData !== undefined) {
         throw unrepresentable("encrypted reasoning this dialect cannot carry")
       }
       reasoning.push(block.text)

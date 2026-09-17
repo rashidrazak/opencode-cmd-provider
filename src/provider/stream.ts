@@ -974,7 +974,9 @@ export function createAnthropicStreamParser(): StreamEventParser {
   // The content-block types this stream carried that the parser does not model.
   // They emit no part (#72), which is invisible for a turn that ends and a lie
   // for a paused turn whose continuation is rebuilt from the parts — the
-  // transport reads this before continuing one (issue #192).
+  // transport reads this before continuing one (issue #192). Not cleared by
+  // `closeStream`: a parser is one attempt's stream (`createParser`), and the
+  // transport asks once, at the pause decision.
   const unmodelled = new Set<string>()
   // True once a `message_delta` finished this stream. Anthropic reports usage
   // (and the real stop_reason) on `message_delta` and then closes with a bare
@@ -1040,16 +1042,21 @@ export function createAnthropicStreamParser(): StreamEventParser {
         // SDK's own Anthropic provider uses (`anthropic.redactedData`). It has
         // to be visible on the stream, or a paused turn's continuation cannot
         // put it back (issues #192, #193).
-        const id = stringValue(block?.id) ?? `redacted-${index}`
-        const data = stringValue(block?.data) ?? ""
-        blocks.set(index, { type: "redacted_thinking", id })
-        return [
-          {
-            type: "reasoning-start",
-            id,
-            providerMetadata: { anthropic: { redactedData: data } },
-          },
-        ]
+        const data = stringValue(block?.data)
+        if (data !== undefined && data.length > 0) {
+          const id = stringValue(block?.id) ?? `redacted-${index}`
+          blocks.set(index, { type: "redacted_thinking", id })
+          return [
+            {
+              type: "reasoning-start",
+              id,
+              providerMetadata: { anthropic: { redactedData: data } },
+            },
+          ]
+        }
+        // No payload: there is nothing to replay, so the block falls through to
+        // unmodelled — a pause that carried it is refused (#192) rather than
+        // handing the provider an empty block.
       }
       // server tool blocks, a future addition: recorded as
       // unmodelled so its stop does not fall through to a text-end for a part
@@ -1057,7 +1064,7 @@ export function createAnthropicStreamParser(): StreamEventParser {
       // discarded: a paused turn is continued from the parts, so the transport
       // has to know a block it cannot see was there (issue #192).
       blocks.set(index, { type: "other", id: stringValue(block?.id) ?? `block-${index}` })
-      unmodelled.add(blockType ?? "unknown")
+      unmodelled.add(blockType ?? "untyped")
       return []
     }
     if (type === "content_block_delta") {
@@ -1139,12 +1146,10 @@ export function createAnthropicStreamParser(): StreamEventParser {
             },
           ]
         }
-      } else if (entry?.type === "thinking") {
+      } else if (entry?.type === "thinking" || entry?.type === "redacted_thinking") {
+        // A redacted block carries no signature, so the helper emits its bare
+        // end — the payload rode on the start part.
         return [reasoningEndPart(entry)]
-      } else if (entry?.type === "redacted_thinking") {
-        // The payload rode on the start part; the block closes with a bare end,
-        // like every reasoning block.
-        return [{ type: "reasoning-end", id: entry.id }]
       } else if (entry?.type === "text") {
         return [{ type: "text-end", id: entry.id }]
       } else if (entry) {

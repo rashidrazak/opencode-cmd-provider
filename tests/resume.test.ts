@@ -38,7 +38,13 @@ run([
   [
     "text resumes as the dialect's own assistant message (issue #188)",
     () => {
-      const streamed = parts(...text("t", "first "), ...text("t", "second"))
+      // One block, streamed across deltas: its text is one answer.
+      const streamed = parts(
+        { type: "text-start", id: "t" },
+        { type: "text-delta", id: "t", delta: "first " },
+        { type: "text-delta", id: "t", delta: "second" },
+        { type: "text-end", id: "t" },
+      )
       assertEqual(resumedAssistantMessage(streamed, "openai"), {
         role: "assistant",
         content: "first second",
@@ -46,6 +52,21 @@ run([
       assertEqual(resumedAssistantMessage(streamed, "anthropic"), {
         role: "assistant",
         content: [{ type: "text", text: "first second" }],
+      })
+      // Two blocks that reuse the id — every response of a paused turn names
+      // its blocks from the same counters — stay two blocks, in order: merging
+      // them would move text across whatever streamed between them.
+      const twoBlocks = parts(...text("t", "first "), ...text("t", "second"))
+      assertEqual(resumedAssistantMessage(twoBlocks, "anthropic"), {
+        role: "assistant",
+        content: [
+          { type: "text", text: "first " },
+          { type: "text", text: "second" },
+        ],
+      })
+      assertEqual(resumedAssistantMessage(twoBlocks, "openai"), {
+        role: "assistant",
+        content: "first second",
       })
     },
   ],
@@ -196,6 +217,60 @@ run([
         () => resumedAssistantMessage(streamed, "openai"),
         /encrypted reasoning.*cannot be carried/,
       )
+    },
+  ],
+
+  [
+    "each paused segment's reasoning keeps its own metadata, in order (issues #189, #194)",
+    () => {
+      // Every response of a paused turn names its blocks from the same
+      // counters, so two segments both carry `thinking-0` / `redacted-0`. They
+      // are two blocks with two signatures and two payloads: merging them by id
+      // would keep only the last of each and silently drop the rest of the turn
+      // the consumer already read.
+      const segment = (signature: string, payload: string): unknown[] => [
+        { type: "reasoning-start", id: "thinking-0" },
+        { type: "reasoning-delta", id: "thinking-0", delta: "hmm " },
+        {
+          type: "reasoning-end",
+          id: "thinking-0",
+          providerMetadata: { anthropic: { signature } },
+        },
+        {
+          type: "reasoning-start",
+          id: "redacted-0",
+          providerMetadata: { anthropic: { redactedData: payload } },
+        },
+        { type: "reasoning-end", id: "redacted-0" },
+      ]
+      const streamed = parts(...segment("sig-1", "PAYLOAD-ONE"), ...segment("sig-2", "PAYLOAD-TWO"))
+      assertEqual(resumedAssistantMessage(streamed, "anthropic"), {
+        role: "assistant",
+        content: [
+          { type: "thinking", thinking: "hmm ", signature: "sig-1" },
+          { type: "redacted_thinking", data: "PAYLOAD-ONE" },
+          { type: "thinking", thinking: "hmm ", signature: "sig-2" },
+          { type: "redacted_thinking", data: "PAYLOAD-TWO" },
+        ],
+      })
+    },
+  ],
+
+  [
+    "a signature carried on the block's start resumes too (issues #189, #194)",
+    () => {
+      // This transport puts a thinking block's signature on its end part, but a
+      // gateway may put one on the start — where the AI SDK's Anthropic provider
+      // puts a redacted payload. Either is read.
+      const streamed = parts({
+        type: "reasoning-start",
+        id: "thinking-0",
+        providerMetadata: { anthropic: { signature: "sig-start" } },
+      })
+      assertEqual(resumedAssistantMessage(streamed, "anthropic"), {
+        role: "assistant",
+        content: [{ type: "thinking", thinking: "", signature: "sig-start" }],
+      })
     },
   ],
 
