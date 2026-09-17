@@ -112,7 +112,6 @@ export default {
   async setup(ctx) {
     await original(ctx)
     report("setup", "returned")
-    const location = { directory: ctx.location.directory }
     try {
       const raw = await ctx.provider.get({ providerID: "commandcode" }).catch(() => undefined)
       const info = raw?.data ?? raw?.provider ?? raw

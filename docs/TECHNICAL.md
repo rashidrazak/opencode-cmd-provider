@@ -13,11 +13,11 @@ config keys, and generated catalogs.
 
 One package serves both OpenCode lines; three host processes load it.
 
-| Host               | Configured in                                   | Default export                       | Registrations                                                                                                  |
-| ------------------ | ----------------------------------------------- | ------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
-| OpenCode v1 server | `opencode.json` → `plugin`                      | `dist/index.js` → `{ id, server }`   | `config` hook (auto-registration + Deals enrichment), `auth` (OAuth browser flow + API-key method), `tool` map |
-| OpenCode v2 server | `opencode.json` → `plugins`                     | `dist/index.js` → `{ id, setup }`    | `ctx.provider.transform` + `ctx.model.transform`, `ctx.integration.transform`, `ctx.tool.transform`, `ctx.aisdk.hook("sdk")`            |
-| TUI (both lines)   | v1: `tui.json`; v2: the package's `./tui` entry | `dist/tui.js` → `{ id, tui, setup }` | v1: `api.slots.register` on `sidebar_content`; v2: `ctx.ui.slot({ append: "sidebar.content" })`                |
+| Host               | Configured in                                   | Default export                       | Registrations                                                                                                                |
+| ------------------ | ----------------------------------------------- | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
+| OpenCode v1 server | `opencode.json` → `plugin`                      | `dist/index.js` → `{ id, server }`   | `config` hook (auto-registration + Deals enrichment), `auth` (OAuth browser flow + API-key method), `tool` map               |
+| OpenCode v2 server | `opencode.json` → `plugins`                     | `dist/index.js` → `{ id, setup }`    | `ctx.provider.transform` + `ctx.model.transform`, `ctx.integration.transform`, `ctx.tool.transform`, `ctx.aisdk.hook("sdk")` |
+| TUI (both lines)   | v1: `tui.json`; v2: the package's `./tui` entry | `dist/tui.js` → `{ id, tui, setup }` | v1: `api.slots.register` on `sidebar_content`; v2: `ctx.ui.slot({ append: "sidebar.content" })`                              |
 
 - The v1 and v2 halves are **independent implementations** of the same
   capabilities — v2 does not translate v1 hooks. The v2 host context is mirrored

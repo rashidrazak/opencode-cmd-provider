@@ -2,7 +2,7 @@
 // (ADR-0010).
 //
 // The host is faked at the draft level, reproducing the two seeding rules the
-// real editors apply (`provider/model/integration editors at v2.0.5):
+// real editors apply (`provider/model/integration` editors at v2.0.5):
 //
 //   provider.update(id) on a missing provider seeds `Provider.Info.empty(id)`
 //     = { id, name: id, activation: "auto", package: "" }
@@ -591,8 +591,10 @@ run([
       const editor = providerEditor(draft)
       registerModels(editor)
       enrichCommandCodeModelsV2(editor, {})
-      const row = MODEL_SNAPSHOT[0]!
-      assertEqual(draft.get(PROVIDER_ID)?.models.get(row.id)?.settings?.["cmd"], {
+      const row = MODEL_SNAPSHOT.find(({ id }) => id === "Qwen/Qwen3.8-27B")!
+      const model = draft.get(PROVIDER_ID)?.models.get(row.id)
+      assertEqual(model?.family, "qwen", "family is vendor-derived, never from deals")
+      assertEqual(model?.settings?.["cmd"], {
         unavailable: true,
       })
     },

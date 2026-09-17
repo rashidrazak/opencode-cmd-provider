@@ -1,5 +1,5 @@
 // src/deals/enrichment.ts — docs-derived model enrichment for the config hook
-// (v1) and the catalog transform (v2). Purely additive: every field is
+// (v1) and the provider transform (v2). Purely additive: every field is
 // gap-filled only when the user left it unset. When the Deals catalog is empty
 // the mitigated state is visible: `cmd.unavailable` is injected instead of
 // leaving `cmd` absent, while `family`/`cost` are preserved and Declared `cmd`
@@ -92,19 +92,15 @@ export function enrichCommandCodeModelsV2(
   const isEmpty = Object.keys(deals).length === 0
   for (const [modelId, current] of record.models) {
     const entry = deals[modelId]
-    if (!entry) {
-      if (isEmpty && current.settings?.["cmd"] === undefined) {
-        editor.models.update(PROVIDER_ID, modelId, (model) => {
+    const family = current.family === undefined ? vendorFamilyForModel(modelId) : undefined
+    editor.models.update(PROVIDER_ID, modelId, (model) => {
+      if (family !== undefined && model.family === undefined) model.family = family
+      if (!entry) {
+        if (isEmpty && model.settings?.["cmd"] === undefined) {
           model.settings ??= {}
           model.settings["cmd"] = { unavailable: true }
-        })
-      }
-      continue
-    }
-    editor.models.update(PROVIDER_ID, modelId, (model) => {
-      if (model.family === undefined) {
-        const family = vendorFamilyForModel(modelId)
-        if (family !== undefined) model.family = family
+        }
+        return
       }
       if (model.settings?.["cmd"] === undefined) {
         model.settings ??= {}

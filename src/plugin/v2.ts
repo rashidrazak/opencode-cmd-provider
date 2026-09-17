@@ -90,7 +90,6 @@ export async function setupCommandCode(
  * the v2 counterpart of v1's `??=` fills.
  */
 export function registerProvider(editor: V2ProviderEditor, specifier: string): void {
-  ensureProvider(editor)
   editor.update(PROVIDER_ID, (provider: V2ProviderInfo) => {
     if (provider.name === provider.id) provider.name = PROVIDER_NAME
     if (provider.package === "") provider.package = specifier
@@ -115,7 +114,6 @@ export function registerModels(
   editor: V2ProviderEditor,
   snapshot: readonly CatalogModel[] = MODEL_SNAPSHOT,
 ): void {
-  ensureProvider(editor)
   const prefix = displayPrefixFromDraft(editor)
   for (const model of snapshot) {
     const declared = editor.get(PROVIDER_ID)?.models.get(model.id) !== undefined
@@ -126,19 +124,6 @@ export function registerModels(
       }
       Object.assign(entry, catalogModelForV2(model, prefix))
     })
-  }
-}
-
-/** Ensures the provider record exists even on hosts whose `update` is not an upsert. */
-function ensureProvider(editor: V2ProviderEditor): void {
-  if (editor.get(PROVIDER_ID) !== undefined) return
-  try {
-    editor.add({
-      info: { id: PROVIDER_ID, name: PROVIDER_ID, activation: "auto", package: "" },
-      models: [],
-    })
-  } catch {
-    // Hosts with upserting `update` never reach here meaningfully; ignore.
   }
 }
 

@@ -1,7 +1,7 @@
 /** @jsxImportSource @opentui/solid */
 // src/deals/tui.tsx — TUI plugin: "Command Code" deals section in the session
 // sidebar. Renders deal details from the picked model's enriched `cmd`
-// (produced by the server plugin's config hook on v1 and its catalog transform
+// (produced by the server plugin's config hook on v1 and its provider transform
 // on v2). Renders nothing when the model has no deals data — zero sidebar
 // noise.
 //
