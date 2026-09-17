@@ -29,7 +29,13 @@ import type {
 } from "@ai-sdk/provider"
 import { isRecord, stringValue, numberValue, recordOrEmpty } from "./converters.js"
 import { commandCodeErrorMessage, redactCommandCodeErrorText } from "./redact.js"
-import type { StreamErrorFacts } from "./retry.js"
+import {
+  NETWORK_FAILURE,
+  TRUNCATION_FAILURE,
+  TRUNCATION_MESSAGE,
+  TransportFailureError,
+  type StreamErrorFacts,
+} from "./retry.js"
 
 type FinishPart = Extract<LanguageModelV3StreamPart, { type: "finish" }>
 
@@ -150,22 +156,62 @@ export function parseStreamEventLine(line: string): unknown | undefined {
   }
 }
 
+/**
+ * The tool-call spellings: Anthropic's `tool_use`, the OpenAI `tool_calls`, the
+ * hyphenated AI SDK form, and OpenAI's older `function_call`. Upstream
+ * `command-code@1.54.1` normalises the reason by lowercasing it first
+ * (`normalizeStopReason` / `normalizeStopReason2`), so the match is
+ * case-insensitive here too (issue #186).
+ */
+const TOOL_CALL_FINISH_REASONS = new Set([
+  "tool_use",
+  "tool-calls",
+  "tool_calls",
+  "function_call",
+  "function-call",
+])
+
+/**
+ * The length family: OpenAI's `length`, the `max_tokens` /
+ * `max_output_tokens` spellings, and Anthropic's context-window exhaustion.
+ * Upstream groups exactly these under `max_tokens`.
+ */
+const LENGTH_FINISH_REASONS = new Set([
+  "length",
+  "max_tokens",
+  "max-tokens",
+  "max_output_tokens",
+  "max-output-tokens",
+  "model_context_window_exceeded",
+  "model-context-window-exceeded",
+])
+
+/**
+ * Maps a wire stop reason to the AI SDK v3 finish reason (issue #186).
+ *
+ * The vocabulary is the one the wire can actually send, matched
+ * case-insensitively the way upstream's normaliser matches. Everything else —
+ * `stop`, `end_turn`, `stop_sequence`, `refusal`, `content_filter`,
+ * `max_turn_requests`, `cancelled`, and any reason this build has never seen —
+ * is a **completed turn**: upstream's normaliser maps every reason it does not
+ * recognise to `end_turn`, and a turn that ended must never be reported as
+ * `unified: "other"` (OpenCode v2 coerces that to `unknown` and fails the turn
+ * as a retryable incomplete stream — ADR-0013). Deliberately, no refusal or
+ * content-filter spelling maps to the AI SDK's `content-filter` either: the
+ * plugin's contract is CLI parity, and the CLI completes such a turn (the
+ * model's refusal is the answer) rather than labelling it filtered.
+ *
+ * The one reason whose unified value is not decided here is the pause marker:
+ * `pause_turn` maps to a completed turn too, but the transport intercepts the
+ * finish by its raw reason before any part is emitted (issue #172).
+ */
 export function mapFinishReason(reason: unknown): LanguageModelV3FinishReason {
   const raw = stringValue(reason) ?? "unknown"
-  if (raw === "tool_use" || raw === "tool-calls") return { unified: "tool-calls", raw }
-  if (
-    raw === "length" ||
-    raw === "max_tokens" ||
-    raw === "max-tokens" ||
-    raw === "max_output_tokens"
-  ) {
-    return { unified: "length", raw }
-  }
-  if (raw === "stop" || raw === "end_turn" || raw === "stop_sequence")
-    return { unified: "stop", raw }
-  if (raw === "error") return { unified: "error", raw }
-  if (raw === "content-filter") return { unified: "content-filter", raw }
-  return { unified: "other", raw }
+  const normalised = raw.toLowerCase()
+  if (TOOL_CALL_FINISH_REASONS.has(normalised)) return { unified: "tool-calls", raw }
+  if (LENGTH_FINISH_REASONS.has(normalised)) return { unified: "length", raw }
+  if (normalised === "error") return { unified: "error", raw }
+  return { unified: "stop", raw }
 }
 
 export function ccUsageToAiSdkUsage(
@@ -188,6 +234,52 @@ export function ccUsageToAiSdkUsage(
 
 function toolCallIdOf(event: Record<string, unknown>): string {
   return stringValue(event.toolCallId) ?? stringValue(event.id) ?? ""
+}
+
+/**
+ * Upstream's `isNetworkFailureFinish` (`command-code@1.54.1`): a finish reason
+ * naming a failure of the connection that carried the stream — `network`,
+ * `connection` or `upstream` + `error`, with any separator and in any case.
+ * Such a turn died mid-stream; it never ended.
+ */
+export function isNetworkFailureFinishReason(reason: string): boolean {
+  return /^(?:network|connection|upstream)[-_\s]?error$/i.test(reason.trim())
+}
+
+/**
+ * The two guards upstream's legacy consume loop carries on its finish event and
+ * this codec did not (issue #187). Both are raised instead of mapped, because
+ * neither is an ending: the vocabulary mapper completes every reason it does
+ * not recognise (issue #186), so without these a truncated or connection-failed
+ * turn would be reported to the Host as a finished one — and OpenCode v2 would
+ * fail it anyway as an unknown finish reason.
+ *
+ * - A finish reporting the AI SDK's `other` **with no raw reason** never ended a
+ *   turn: upstream's condition is `stopReason === "other" && rawFinishReason ===
+ *   undefined`, and it raises its own truncation error for it (retryable while
+ *   the consumer has seen nothing — the body may simply have been cut).
+ * - A reason naming a network/connection/upstream error is a transport failure
+ *   that died mid-stream, retryable the same way.
+ *
+ * The two fields are read the way the finish mapping below reads them: the
+ * unified reason off `finishReason`, the effective raw reason off
+ * `rawFinishReason ?? finishReason`.
+ */
+function assertLegacyFinishEndedTurn(event: Record<string, unknown>): void {
+  const rawReason = stringValue(event.rawFinishReason)
+  if (rawReason === undefined && stringValue(event.finishReason)?.toLowerCase() === "other") {
+    throw new TransportFailureError(TRUNCATION_MESSAGE, TRUNCATION_FAILURE, 502)
+  }
+  const reason = rawReason ?? stringValue(event.finishReason)
+  if (reason !== undefined && isNetworkFailureFinishReason(reason)) {
+    throw new TransportFailureError(
+      redactCommandCodeErrorText(
+        `Provider finished with reason "${reason}" — upstream connection failed mid-stream`,
+      ),
+      NETWORK_FAILURE,
+      502,
+    )
+  }
 }
 
 export function ccEventToStreamPart(event: unknown): LanguageModelV3StreamPart[] {
@@ -237,7 +329,9 @@ export function ccEventToStreamPart(event: unknown): LanguageModelV3StreamPart[]
       // own consumer reads the terminal's two reason fields apart — the
       // unified reason off `finishReason`, the raw one off `rawFinishReason ??
       // finishReason` — and the transport loops on the raw one, where
-      // `pause_turn` is reported (issue #172).
+      // `pause_turn` is reported (issue #172). Two of those readings are not
+      // endings at all and are refused before any part exists (issue #187).
+      assertLegacyFinishEndedTurn(event)
       const reason = mapFinishReason(event.finishReason)
       const rawReason = stringValue(event.rawFinishReason)
       return [
@@ -452,6 +546,24 @@ function reasoningDeltaPart(id: unknown, delta: string): LanguageModelV3StreamPa
   return { type: "reasoning-delta", id: stringValue(id) ?? "reasoning", delta }
 }
 
+/**
+ * The end of a thinking block. Anthropic signs such a block with a
+ * `signature_delta`, an event with no part of its own; the signature rides here
+ * instead, in the provider metadata the AI SDK reserves for provider-specific
+ * data (the Anthropic convention is `providerMetadata.anthropic.signature`), so
+ * a request that continues a paused turn can replay the block verbatim rather
+ * than re-derive a signature it cannot (issue #189).
+ */
+function reasoningEndPart(entry: { id: string; signature?: string }): LanguageModelV3StreamPart {
+  return entry.signature === undefined
+    ? { type: "reasoning-end", id: entry.id }
+    : {
+        type: "reasoning-end",
+        id: entry.id,
+        providerMetadata: { anthropic: { signature: entry.signature } },
+      }
+}
+
 // --- OpenAI Chat Completions streaming ---
 export function openAIEventToStreamPart(event: unknown): LanguageModelV3StreamPart[] {
   if (!isRecord(event)) return []
@@ -638,10 +750,20 @@ interface ToolCallBuffer {
  * closes every part the stream still has open when the transport ends it
  * without a terminal event — a mid-stream error, an abort, or a body that stops
  * early (issue #72). It is idempotent.
+ *
+ * `unmodelledBlocks` reports the content-block types the stream carried that
+ * this parser does not model — content it deliberately emits no part for, so
+ * nothing downstream can see it (issue #72). A turn that *ends* is unaffected by
+ * that: the block is simply not among the parts. A turn the provider **paused**
+ * is a different matter, because its continuation is rebuilt from those parts
+ * and would silently resume a turn that never contained the block — so the
+ * transport asks here before continuing (issue #192). A parser whose dialect has
+ * no such concept omits the method.
  */
 export interface StreamEventParser {
   (event: unknown): LanguageModelV3StreamPart[]
   closeStream(): LanguageModelV3StreamPart[]
+  unmodelledBlocks?(): readonly string[]
 }
 
 export function createOpenAIStreamParser(): StreamEventParser {
@@ -836,9 +958,26 @@ export function createAnthropicStreamParser(): StreamEventParser {
   // delta and stop events so they close the part the consumer saw opened.
   // Anthropic's thinking blocks carry no `id` today, but a gateway may add one,
   // and re-deriving the id from the index at every event would then orphan the
-  // open reasoning part (issue #71). A block type this parser does not model is
-  // recorded as "other" so its stop closes nothing (issue #72).
-  const blocks = new Map<number, { type: "text" | "tool_use" | "thinking" | "other"; id: string }>()
+  // open reasoning part (issue #71). `signature` is the thinking block's
+  // cryptographic signature, which arrives in a `signature_delta` after the
+  // thinking deltas: it is what lets a resumed request replay the block, so it
+  // rides on the block's `reasoning-end` (issue #189). A block type this parser
+  // does not model is recorded as "other" so its stop closes nothing (#72).
+  const blocks = new Map<
+    number,
+    {
+      type: "text" | "tool_use" | "thinking" | "redacted_thinking" | "other"
+      id: string
+      signature?: string
+    }
+  >()
+  // The content-block types this stream carried that the parser does not model.
+  // They emit no part (#72), which is invisible for a turn that ends and a lie
+  // for a paused turn whose continuation is rebuilt from the parts — the
+  // transport reads this before continuing one (issue #192). Not cleared by
+  // `closeStream`: a parser is one attempt's stream (`createParser`), and the
+  // transport asks once, at the pause decision.
+  const unmodelled = new Set<string>()
   // True once a `message_delta` finished this stream. Anthropic reports usage
   // (and the real stop_reason) on `message_delta` and then closes with a bare
   // `message_stop`; mapping that terminal too would hand the transport a
@@ -885,7 +1024,10 @@ export function createAnthropicStreamParser(): StreamEventParser {
       }
       if (blockType === "thinking") {
         const id = stringValue(block?.id) ?? `thinking-${index}`
-        blocks.set(index, { type: "thinking", id })
+        // A gateway may put the signature on the block start instead of
+        // streaming it as a delta; either way it belongs to this block.
+        const signature = stringValue(block?.signature)
+        blocks.set(index, { type: "thinking", id, ...(signature ? { signature } : {}) })
         return [{ type: "reasoning-start", id }]
       }
       if (blockType === "text") {
@@ -893,10 +1035,36 @@ export function createAnthropicStreamParser(): StreamEventParser {
         blocks.set(index, { type: "text", id })
         return [{ type: "text-start", id }]
       }
-      // redacted_thinking, server tool blocks, a future addition: recorded as
+      if (blockType === "redacted_thinking") {
+        // Anthropic's encrypted thinking block: it carries no deltas — the
+        // whole block is the `data` payload — and it streams as a reasoning
+        // block whose start carries the payload in the provider metadata the AI
+        // SDK's own Anthropic provider uses (`anthropic.redactedData`). It has
+        // to be visible on the stream, or a paused turn's continuation cannot
+        // put it back (issues #192, #193).
+        const data = stringValue(block?.data)
+        if (data !== undefined && data.length > 0) {
+          const id = stringValue(block?.id) ?? `redacted-${index}`
+          blocks.set(index, { type: "redacted_thinking", id })
+          return [
+            {
+              type: "reasoning-start",
+              id,
+              providerMetadata: { anthropic: { redactedData: data } },
+            },
+          ]
+        }
+        // No payload: there is nothing to replay, so the block falls through to
+        // unmodelled — a pause that carried it is refused (#192) rather than
+        // handing the provider an empty block.
+      }
+      // server tool blocks, a future addition: recorded as
       // unmodelled so its stop does not fall through to a text-end for a part
-      // that was never opened (issue #72).
+      // that was never opened (issue #72). The type is remembered, not just
+      // discarded: a paused turn is continued from the parts, so the transport
+      // has to know a block it cannot see was there (issue #192).
       blocks.set(index, { type: "other", id: stringValue(block?.id) ?? `block-${index}` })
+      unmodelled.add(blockType ?? "untyped")
       return []
     }
     if (type === "content_block_delta") {
@@ -945,6 +1113,18 @@ export function createAnthropicStreamParser(): StreamEventParser {
         }
         return out
       }
+      const signature = stringValue(delta?.signature)
+      if (typeof signature === "string" && signature.length > 0) {
+        // Anthropic signs a thinking block with a `signature_delta` between its
+        // thinking deltas and `content_block_stop`. The signature has no part
+        // of its own — it is remembered for the block's `reasoning-end`, which
+        // is where the transport reads it back for a continuation (issue #189).
+        // A signature for a block this parser does not model is ignored, like
+        // the block itself.
+        const entry = blocks.get(index)
+        if (entry?.type === "thinking") entry.signature = signature
+        return []
+      }
       return []
     }
     if (type === "content_block_stop") {
@@ -966,8 +1146,10 @@ export function createAnthropicStreamParser(): StreamEventParser {
             },
           ]
         }
-      } else if (entry?.type === "thinking") {
-        return [{ type: "reasoning-end", id: entry.id }]
+      } else if (entry?.type === "thinking" || entry?.type === "redacted_thinking") {
+        // A redacted block carries no signature, so the helper emits its bare
+        // end — the payload rode on the start part.
+        return [reasoningEndPart(entry)]
       } else if (entry?.type === "text") {
         return [{ type: "text-end", id: entry.id }]
       } else if (entry) {
@@ -1012,12 +1194,15 @@ export function createAnthropicStreamParser(): StreamEventParser {
   parse.closeStream = () => {
     const parts: LanguageModelV3StreamPart[] = []
     for (const entry of blocks.values()) {
-      if (entry.type === "thinking") parts.push({ type: "reasoning-end", id: entry.id })
+      if (entry.type === "thinking") parts.push(reasoningEndPart(entry))
+      else if (entry.type === "redacted_thinking")
+        parts.push({ type: "reasoning-end", id: entry.id })
       else if (entry.type === "text") parts.push({ type: "text-end", id: entry.id })
     }
     blocks.clear()
     return parts
   }
+  parse.unmodelledBlocks = () => [...unmodelled]
   return parse
 }
 

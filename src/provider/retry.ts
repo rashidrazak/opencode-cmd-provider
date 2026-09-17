@@ -7,8 +7,9 @@
 // when its own kind says it is transient, never because of where it was
 // caught. The vocabulary is the one the issue names: network, 408/429/5xx,
 // 4xx-fatal, window-limit (fatal), `upgrade_required` (a transport flip the
-// model owns), truncation (retryable while nothing is visible), and the
-// server's own mid-stream error event.
+// model owns), truncation (retryable while nothing is visible), the server's
+// own mid-stream error event, the pause-turn bound, and a paused turn the
+// continuation cannot represent (issues #172, #188).
 
 /**
  * Statuses upstream's `isRetryableStatus` treats as transient: 408, 429 and
@@ -76,6 +77,7 @@ export type FailureKind =
   | "truncation" // the body ended without a complete turn
   | "stream-error" // the server's own error event mid-stream
   | "pause-turn-limit" // the provider kept pausing the turn past the continuation bound
+  | "resume-unsupported" // a paused turn the continuation cannot represent faithfully
 
 export interface Failure {
   kind: FailureKind
@@ -108,6 +110,15 @@ function failure(
 /** A network failure: no response at all, or a response that died mid-body. */
 export const NETWORK_FAILURE: Failure = failure("network", true)
 
+/**
+ * Upstream's own wording for a stream that ended without a turn — a proxy or
+ * CDN truncation, or a server that flushed partial work and closed the body
+ * (issues #170, #187). One string, so the transport's own truncation and the
+ * legacy codec's finish-event guard surface the same thing.
+ */
+export const TRUNCATION_MESSAGE =
+  "Stream ended unexpectedly before completion (no finish event) — response was truncated"
+
 /** The documented `403 upgrade_required`: a transport flip the ladder never
  * replays (the model owns the flip and re-runs the call on the legacy
  * transport instead — issue #56). */
@@ -132,6 +143,14 @@ export const TRUNCATION_FAILURE: Failure = failure("truncation", true, { status:
  * turn and the ladder never replays it.
  */
 export const PAUSE_TURN_LIMIT_FAILURE: Failure = failure("pause-turn-limit", false)
+
+/**
+ * The Provider API paused a turn and the continuation cannot represent what the
+ * paused response produced (issue #188). Permanent for the turn: the ladder
+ * re-sends the same request, which could only pause it again — and resuming
+ * with a partial turn would hand the model a turn it never made.
+ */
+export const RESUME_UNSUPPORTED_FAILURE: Failure = failure("resume-unsupported", false)
 
 /**
  * Upstream's terminal error markers (`hasTerminalMarker`): an error event
@@ -287,6 +306,26 @@ export function classifyStreamError(facts: StreamErrorFacts): Failure {
 
 export function abortError(message = "The operation was aborted"): DOMException {
   return new DOMException(message, "AbortError")
+}
+
+/**
+ * A failure the transport (or its codecs) classified itself (issue #171). The
+ * `Failure` rides on the error so the retry loop reads the cause instead of the
+ * catch site; the message is the transport's own, already redacted where it is
+ * built, and `status` is the HTTP status the failure named when it named one.
+ * The transport reads the `failure` field and the `transportError` marker, so an
+ * error raised anywhere in the transport carries its classification with it.
+ */
+export class TransportFailureError extends Error {
+  readonly transportError = true as const
+  readonly failure: Failure
+  readonly status?: number
+  constructor(message: string, failure: Failure, status?: number) {
+    super(message)
+    this.name = "TransportFailureError"
+    this.failure = failure
+    this.status = status
+  }
 }
 
 export function timeoutError(timeoutMs: number | undefined): Error {

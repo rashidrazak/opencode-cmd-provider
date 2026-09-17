@@ -43,6 +43,7 @@ import {
 import { getApiBase, getCmdZdr } from "../env.js"
 import { normalizePlan } from "../catalog/plans.js"
 import { redactCommandCodeErrorText, commandCodeErrorMessage, readGate } from "./redact.js"
+import { withResumedAssistantTurn } from "./resume.js"
 import {
   mappedReasoningEffort,
   resolveProviderReasoning,
@@ -60,9 +61,12 @@ import {
   delay,
   NETWORK_FAILURE,
   TRUNCATION_FAILURE,
+  TRUNCATION_MESSAGE,
+  TransportFailureError,
   UPGRADE_REQUIRED_FAILURE,
   VERSION_GATE_FAILURE,
   PAUSE_TURN_LIMIT_FAILURE,
+  RESUME_UNSUPPORTED_FAILURE,
   type Failure,
 } from "./retry.js"
 import { projectSlugFromPath } from "./project-slug.js"
@@ -218,21 +222,6 @@ function classifyCaught(error: unknown, fallback?: Failure): Failure | undefined
 }
 
 /**
- * A failure the transport itself classified (issue #171). The `Failure` rides
- * on the error so the retry loop reads the cause instead of the catch site;
- * the message is the transport's own, already redacted where it is built.
- */
-class TransportFailureError extends Error implements ClassifiedTransportError {
-  readonly transportError = true as const
-  readonly failure: Failure
-  constructor(message: string, failure: Failure) {
-    super(message)
-    this.name = "TransportFailureError"
-    this.failure = failure
-  }
-}
-
-/**
  * The response body ended cleanly without a terminal event — a proxy/CDN
  * truncation, or a server that flushed partial work and ended the body. It is
  * raised instead of fabricating a `finish(stop)` with zeroed usage, which
@@ -247,11 +236,7 @@ class TruncatedStreamError extends Error implements ClassifiedTransportError {
   constructor() {
     // Redacted where it is built, so `fail` may surface the instance as-is even
     // if the wording ever grows a provider-supplied part.
-    super(
-      redactCommandCodeErrorText(
-        "Stream ended unexpectedly before completion (no finish event) — response was truncated",
-      ),
-    )
+    super(redactCommandCodeErrorText(TRUNCATION_MESSAGE))
     this.name = "TruncatedStreamError"
   }
 }
@@ -300,6 +285,29 @@ class PauseTurnLimitError extends Error implements ClassifiedTransportError {
 }
 
 /**
+ * The provider paused a turn whose response carried content this build never
+ * turned into a stream part (issue #192). The continuation is rebuilt from those
+ * parts, so continuing would resume a turn that never contained the block — the
+ * silent partial resume the resume work forbids. Permanent for the turn: the
+ * same request would hand back the same block. Redacted where it is built, like
+ * every transport-raised error.
+ */
+class UnmodelledBlockPauseError extends Error implements ClassifiedTransportError {
+  readonly transportError = true as const
+  readonly failure = RESUME_UNSUPPORTED_FAILURE
+  constructor(types: readonly string[]) {
+    super(
+      redactCommandCodeErrorText(
+        `Command Code paused this turn with a content block this build does not model (${types.join(
+          ", ",
+        )}) — the continuation cannot carry it, so the turn did not finish`,
+      ),
+    )
+    this.name = "UnmodelledBlockPauseError"
+  }
+}
+
+/**
  * The server refused the version this plugin reports (issue #173): the legacy
  * gateway's `403 upgrade_required` whose body names a `minVersion` (or says the
  * client is out of date). The body's own wording tells the reader to update
@@ -324,7 +332,16 @@ class VersionGateError extends Error implements ClassifiedTransportError {
   }
 }
 
-/** One transport pass: endpoint, body, headers, event mapper, and whether the
+/** One request the transport will POST: the serialized body and the headers to
+ * send it with. Built by the descriptor, never held on it, so a paused turn's
+ * continuation can ask for a different body than the request it continues
+ * (issue #185). */
+interface TransportRequest {
+  bodyStr: string
+  headers: Record<string, string>
+}
+
+/** One transport pass: endpoint, request builder, event mapper, and whether the
  * Provider API plan-gate `403` on this endpoint flips the session to the
  * legacy transport. Only the Provider API descriptor flips; the legacy
  * descriptor never does, so a 403 on `/alpha/generate` — a stale-client
@@ -332,11 +349,16 @@ class VersionGateError extends Error implements ClassifiedTransportError {
  * re-entering the fallback (issue #56 "retries once"). */
 interface TransportDescriptor {
   url: string
-  bodyStr: string
-  /** Rebuilt for every attempt, so a credential rotated mid-ladder is picked
-   * up by the next request (issue #171 — the Authorization header is not a
-   * per-stream constant any more). */
-  headersFor: () => Record<string, string>
+  /** Builds the request for one pass. The transport asks here for every request
+   * it sends — the first one, a replay, and a paused turn's continuation —
+   * instead of reusing one frozen body, which is what lets a continuation
+   * carry the paused assistant turn (issues #185, #188). Called once per
+   * attempt, so a credential rotated mid-ladder is picked up by the next
+   * request (issue #171 — the Authorization header is not a per-stream constant
+   * any more). `pausedTurn` is everything the turn has produced so far — every
+   * continuation's parts included, so a turn that paused twice carries both
+   * segments — and is empty for a first request and for a replay. */
+  requestFor: (pausedTurn: readonly LanguageModelV3StreamPart[]) => TransportRequest
   /** A parser per attempt: a replay is a new stream, so per-stream state (block
    * lifecycles, tool buffers, the OpenAI last finish reason) must not cross
    * attempts (issue #171 — the ladder can newly replay after a synthesized
@@ -425,7 +447,12 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
     const content: LanguageModelV3Content[] = []
     let text = ""
     let reasoning = ""
-    let finishReason: LanguageModelV3FinishReason = { unified: "other", raw: "unknown" }
+    // A generation that produced a result ends the turn: `other` is not a
+    // finish reason a completed turn may carry (OpenCode v2 reads it as an
+    // unknown, retryable failure — ADR-0013). A stream with no finish part at
+    // all ends with the legacy `abort` terminal, whose turn upstream completes
+    // too.
+    let finishReason: LanguageModelV3FinishReason = { unified: "stop", raw: "unknown" }
     let usage: LanguageModelV3Usage | undefined
     for (const part of parts) {
       switch (part.type) {
@@ -596,35 +623,49 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
     }
   }
 
-  private providerBodyFor(options: ModelCallOptions, isClaude: boolean): unknown {
+  private providerBodyFor(
+    options: ModelCallOptions,
+    isClaude: boolean,
+    pausedTurn: readonly LanguageModelV3StreamPart[] = [],
+  ): unknown {
     const allowImages = modelSupportsImageInput(this.modelId)
-    if (isClaude) {
-      return (messagesToAnthropic as unknown as (prompt: unknown, opts: unknown) => unknown)(
-        options.prompt as unknown,
-        {
-          model: this.modelId,
-          maxOutputTokens: options.maxOutputTokens,
-          // Forwarded only when the host set one (issue #173): upstream's own
-          // request builders omit the field when it has no value, and Anthropic
-          // rejects a temperature alongside extended thinking — an invented
-          // 0.3 here would break reasoning models.
-          temperature: options.temperature,
-          providerOptions: options.providerOptions,
-          tools: options.tools as unknown,
-          allowImages,
-        },
-      )
-    }
-    return (messagesToOpenAI as unknown as (prompt: unknown, opts: unknown) => unknown)(
-      options.prompt as unknown,
-      {
-        model: this.modelId,
-        maxOutputTokens: options.maxOutputTokens,
-        temperature: options.temperature,
-        providerOptions: options.providerOptions,
-        tools: options.tools as unknown,
-        allowImages,
-      },
+    const body = isClaude
+      ? (messagesToAnthropic as unknown as (prompt: unknown, opts: unknown) => unknown)(
+          options.prompt as unknown,
+          {
+            model: this.modelId,
+            maxOutputTokens: options.maxOutputTokens,
+            // Forwarded only when the host set one (issue #173): upstream's own
+            // request builders omit the field when it has no value, and Anthropic
+            // rejects a temperature alongside extended thinking — an invented
+            // 0.3 here would break reasoning models.
+            temperature: options.temperature,
+            providerOptions: options.providerOptions,
+            tools: options.tools as unknown,
+            allowImages,
+          },
+        )
+      : (messagesToOpenAI as unknown as (prompt: unknown, opts: unknown) => unknown)(
+          options.prompt as unknown,
+          {
+            model: this.modelId,
+            maxOutputTokens: options.maxOutputTokens,
+            temperature: options.temperature,
+            providerOptions: options.providerOptions,
+            tools: options.tools as unknown,
+            allowImages,
+          },
+        )
+    // A continuation re-sends the request with the paused assistant turn
+    // appended — upstream's AI-SDK path resumes a pause exactly this way
+    // (issue #188). Nothing is appended for a first request or a replay: the
+    // paused turn is empty there. A turn the append cannot represent throws
+    // out of here, which the transport surfaces instead of sending a request
+    // that would resume a *different* turn than the one the provider paused.
+    return withResumedAssistantTurn(
+      body as Record<string, unknown>,
+      pausedTurn,
+      isClaude ? "anthropic" : "openai",
     )
   }
 
@@ -655,31 +696,49 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
     return headers
   }
 
+  /**
+   * The legacy `/alpha/generate` descriptor, built the same way wherever it is
+   * used: the session's transport, and the plan-gate fallback off the Provider
+   * API. Only the flip differs between the two, and it is never the legacy
+   * descriptor's own (issue #56).
+   */
+  private legacyDescriptor(options: ModelCallOptions): TransportDescriptor {
+    // Frozen once per call: a continuation re-POSTs these exact bytes, which is
+    // upstream `command-code@1.54.0`'s own behaviour on this endpoint (issue
+    // #172). Rebuilding the body per pass would move its `threadId` and
+    // timestamp under the continuation, so the builder ignores the paused turn.
+    const bodyStr = JSON.stringify(this.bodyFor(options))
+    return {
+      url: `${this.apiBase()}/alpha/generate`,
+      requestFor: () => ({ bodyStr, headers: this.headersFor(options) }),
+      createParser: () => statelessParser(ccEventToStreamPart),
+      isTerminalEvent: ccEventIsTerminal,
+      flipOnUpgradeRequired: false,
+    }
+  }
+
   private providerRunStream(
     options: ModelCallOptions,
     isClaude: boolean,
     sink?: LanguageModelV3StreamPart[],
   ): ReadableStream<LanguageModelV3StreamPart> {
     const url = this.providerEndpoint()
-    const bodyStr = JSON.stringify(this.providerBodyFor(options, isClaude))
     // Safety net (issue #56): the plan-gate `403` — either envelope, issue
     // #175 — pins this session to the legacy transport and retries the same
     // call once via POST {base}/alpha/generate with the legacy CLI wire
     // format. The legacy descriptor itself never flips, so the retry is
     // bounded to one.
-    const legacyFallback: TransportDescriptor = {
-      url: `${this.apiBase()}/alpha/generate`,
-      bodyStr: JSON.stringify(this.bodyFor(options)),
-      headersFor: () => this.headersFor(options),
-      createParser: () => statelessParser(ccEventToStreamPart),
-      isTerminalEvent: ccEventIsTerminal,
-      flipOnUpgradeRequired: false,
-    }
+    const legacyFallback = this.legacyDescriptor(options)
     return this.transportStream(
       {
         url,
-        bodyStr,
-        headersFor: () => this.providerHeadersFor(options),
+        // Rebuilt per pass, so a continuation re-sends the request the paused
+        // turn was sent with, carrying the paused assistant turn (issues #185,
+        // #188).
+        requestFor: (pausedTurn) => ({
+          bodyStr: JSON.stringify(this.providerBodyFor(options, isClaude, pausedTurn)),
+          headers: this.providerHeadersFor(options),
+        }),
         // Per-stream stateful parsers complete tool calls whose arguments
         // arrive across multiple SSE events (issue #55 tool-call parity); the
         // stateless mappers are kept for direct codec use.
@@ -696,18 +755,7 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
     options: ModelCallOptions,
     sink?: LanguageModelV3StreamPart[],
   ): ReadableStream<LanguageModelV3StreamPart> {
-    return this.transportStream(
-      {
-        url: `${this.apiBase()}/alpha/generate`,
-        bodyStr: JSON.stringify(this.bodyFor(options)),
-        headersFor: () => this.headersFor(options),
-        createParser: () => statelessParser(ccEventToStreamPart),
-        isTerminalEvent: ccEventIsTerminal,
-        flipOnUpgradeRequired: false,
-      },
-      options.abortSignal,
-      sink,
-    )
+    return this.transportStream(this.legacyDescriptor(options), options.abortSignal, sink)
   }
 
   /**
@@ -750,10 +798,19 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
         // only the parts *it* emitted make its replay unsafe; the continuations
         // before it are never re-requested (issue #172). Reset per request.
         let attemptEmitted = false
+        // Every content part this *turn* has emitted, across all of its
+        // continuations. A continuation re-sends the request with the whole
+        // paused turn appended — not just the segment that paused it last — so
+        // the consumer's view (segment after segment of one turn) and the
+        // request's view stay the same thing (issues #188, #189). Never reset:
+        // a replay only follows an attempt that emitted nothing, so nothing is
+        // ever counted twice.
+        const turnParts: LanguageModelV3StreamPart[] = []
         const emit = (part: LanguageModelV3StreamPart) => {
           if (part.type !== "finish") {
             visibleEmitted = true
             attemptEmitted = true
+            turnParts.push(part)
           }
           sink?.push(part)
           streamController.enqueue(part)
@@ -934,14 +991,21 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
                     throw error
                   })
 
+                // Asked for before the attempt is classified: a builder that
+                // refuses the request (a paused turn this build cannot resume,
+                // issue #188) is a statement about the request, not about a
+                // response — the ladder never replays it, and the turn's
+                // already-settled bookkeeping must not swallow it either.
+                const request = t.requestFor(turnParts)
+
                 try {
                   try {
                     response = await fetchImpl(t.url, {
                       method: "POST",
                       // Rebuilt per attempt (issue #171): a credential or header
                       // rotated mid-ladder is picked up by the next request.
-                      headers: t.headersFor(),
-                      body: t.bodyStr,
+                      headers: request.headers,
+                      body: request.bodyStr,
                       signal: attemptController.signal,
                     })
                   } catch (fetchError: unknown) {
@@ -1045,11 +1109,16 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
                   // it came from an OpenAI `finish_reason` chunk whose trailing
                   // usage-only chunk never arrived, so holding it would report a
                   // complete turn at zero cost. Retryable while nothing is
-                  // visible, exactly like a truncation (issue #171).
+                  // visible, exactly like a truncation (issue #171) — unless the
+                  // finish is a pause, which the next request continues: a
+                  // resumed turn does not need the paused segment priced, it
+                  // needs the turn finished, and the segment is folded as
+                  // unreported rather than as zero (issue #190).
                   if (
                     !closed &&
                     heldFinish !== undefined &&
-                    !finishCarriesReportedUsage(heldFinish)
+                    !finishCarriesReportedUsage(heldFinish) &&
+                    !finishIsPauseTurn(heldFinish)
                   ) {
                     throw new MissingUsageError()
                   }
@@ -1126,18 +1195,30 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
               if (closed) return
 
               // The provider paused the turn: no turn has ended, so the held
-              // finish is not emitted. Its usage joins the turn's total and the
-              // same body is re-POSTed for the continuation — up to
-              // MAX_PAUSE_CONTINUATIONS, after which the turn is failed rather
-              // than reported with the pause as its finish reason (issue #172).
+              // finish is not emitted. The same request is re-sent for the
+              // continuation — up to MAX_PAUSE_CONTINUATIONS, after which the
+              // turn is failed rather than reported with the pause as its finish
+              // reason (issue #172) — and the response's usage joins the turn's
+              // total.
               if (heldFinish === undefined || !finishIsPauseTurn(heldFinish)) break requestLoop
               if (continuations >= MAX_PAUSE_CONTINUATIONS) {
                 throw new PauseTurnLimitError(MAX_PAUSE_CONTINUATIONS)
               }
+              // A continuation is built from the parts this turn produced. When
+              // the parser dropped a block it does not model, that block is not
+              // among them, and continuing would resume a turn the model never
+              // made — so the pause is failed instead, naming what could not be
+              // carried (issue #192).
+              const unmodelled = parser?.unmodelledBlocks?.() ?? []
+              if (unmodelled.length > 0) throw new UnmodelledBlockPauseError(unmodelled)
               // The continuation is a new response: close whatever the paused one
               // left open before its successor opens its own parts.
               closeOpenParts()
-              accumulateUsage(heldFinish.usage)
+              // Only a usage the provider actually reported is folded in. A
+              // paused segment the provider never priced is not billed as zero:
+              // nothing about it is known, so it contributes nothing to the sum
+              // the turn reports (issue #190).
+              if (finishCarriesReportedUsage(heldFinish)) accumulateUsage(heldFinish.usage)
             }
 
             // An error part already ended the stream; nothing else may follow it.

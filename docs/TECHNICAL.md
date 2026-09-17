@@ -183,7 +183,21 @@ request field; `off`, unsupported levels, and models with no metadata add no
 reasoning fields. No prompt instructions are injected. Reasoning blocks from
 completed assistant turns are not replayed upstream in later requests; only
 user-visible text and completed tool calls are sent back as history, so private
-reasoning traces cannot interfere with later turns.
+reasoning traces cannot interfere with later turns. The one exception is a
+paused turn's continuation, which replays the portion of the turn the provider
+paused — its signed thinking blocks included, signature and all (issue #189):
+Anthropic requires the signature on a replayed thinking block, and the parser
+carries it on the block's `reasoning-end` part in
+`providerMetadata.anthropic.signature` for exactly that replay.
+
+Anthropic's `redacted_thinking` block — reasoning the provider's safety system
+encrypted — surfaces as a reasoning part too: no text, and its payload in
+`providerMetadata.anthropic.redactedData` on the `reasoning-start` part (issue
+#193). That is the shape the AI SDK's own Anthropic provider emits, and it is
+what makes the block replayable — a continuation puts it back verbatim, because
+the payload cannot be re-derived. A block type the parser does _not_ model emits
+no part at all (#72): harmless for a turn that ends, refused for a pause whose
+continuation would otherwise drop it (issue #192).
 
 ## Image input
 
@@ -245,46 +259,115 @@ usage-bearing finish (the legacy codec's `totalUsage`, Anthropic's
 `message_delta`) has declared the turn complete, while a finish synthesized from
 an OpenAI `finish_reason` chunk — its trailing usage chunk never arrived — fails
 the turn with `MissingUsageError` (`status` 502) instead of reporting a complete,
-zero-cost answer. The legacy `{"type":"abort"}` event is the other terminal: it
-carries no finish part, so the transport closes the parts the parser still holds
-open and ends the turn without inventing one — `ai@6` tolerates a missing finish,
-as upstream's own consumer does (`!finish && !abort` is its truncation check).
-Anything else is a failure: a body that closes with no terminal — truncated by a
-proxy, or ended early by the server — raises `TruncatedStreamError` (upstream's
-wording, `status` 502, `name` on the Error). Both failures surface as the `error`
-part; `doGenerate` fails the same way, off the same transport.
+zero-cost answer. A **pause** is the one exception: the turn is not over, so the
+turn is continued rather than failed, and the unpriced segment contributes
+nothing to the sum the resumed turn reports — a segment the provider never
+priced is unknown, not zero (issue #190). The legacy `{"type":"abort"}` event is
+the other terminal: it carries no finish part, so the transport closes the parts
+the parser still holds open and ends the turn without inventing one — `ai@6`
+tolerates a missing finish, as upstream's own consumer does (`!finish && !abort`
+is its truncation check). Anything else is a failure: a body that closes with no
+terminal — truncated by a proxy, or ended early by the server — raises
+`TruncatedStreamError` (upstream's wording, `status` 502, `name` on the Error).
+Both failures surface as the `error` part; `doGenerate` fails the same way, off
+the same transport.
 
 A `pause_turn` is not an ending either. The provider stopped mid-turn and
-expects the same request to continue it — Anthropic reports it as a
+expects the request to continue it — Anthropic reports it as a
 `message_delta` stop_reason, the legacy codec in its `finish` event (upstream
 reads `rawFinishReason ?? finishReason` there), the OpenAI shape as a
 `finish_reason` — and upstream `command-code@1.54.0` loops on it in both of its
-paths (`Ph = 5`). This transport re-POSTs the same body, appends the
-continuation's parts to the same stream, and folds each continuation's usage
-into the turn's single `finish` (upstream's `addUsage2`, the only place the CLI
-sums usage — the usage of a retry that _replaced_ an attempt is not part of the
-sum). The bound is five continuations: a turn still paused there fails with
-`PauseTurnLimitError` instead of emitting `finish{other, pause_turn}`, which v1
-reads as a completed turn and v2 rejects as a retryable incomplete stream.
-Whatever the paused response left open is closed before its continuation opens
-its own parts.
+paths (`Ph = 5`). This transport appends the continuation's parts to the same
+stream and folds each continuation's usage into the turn's single `finish`
+(upstream's `addUsage2`, the only place the CLI sums usage — the usage of a
+retry that _replaced_ an attempt is not part of the sum). What the continuation
+_asks for_ differs by transport: the legacy `/alpha/generate` transport re-POSTs
+the same body, byte for byte, while the Provider API re-sends the request with
+the paused assistant turn appended (upstream's AI-SDK path resumes it exactly
+that way). That appended turn is everything the turn has produced so far —
+every continuation included, so a turn the provider paused twice carries both
+segments — in the dialect's shape: text as content, tool calls with their ids,
+names and arguments verbatim, and thinking blocks with whatever the provider gave
+them — a signature, or the encrypted payload of a redacted block — because
+neither can be re-derived. That is what keeps a resumed turn the turn the model was making. A paused turn
+carrying a shape the continuation cannot represent faithfully is failed loudly,
+naming what could not be carried, rather than resumed as a turn the model never
+made: unsigned thinking (Anthropic requires a signature and the plugin cannot
+derive one), a tool call with no id or name, arguments that are not JSON, and any
+part the builder does not model. Content the stream never turned into a part is
+invisible to that builder, so it is refused a step earlier: the Anthropic parser
+reports the content-block types it does not model, and the transport refuses to
+continue a pause whose response held one, naming the type — the alternative is a
+continuation that silently drops it (ADR-0014). A turn that _ends_ with such a
+block is unaffected: #72 still emits no part for it. The bound is five
+continuations: a turn still paused there fails with `PauseTurnLimitError` instead
+of emitting `finish{pause_turn}`, which v1 reads as a completed turn and v2
+rejects as a retryable incomplete stream. Whatever the paused response left open
+is closed before its continuation opens its own parts.
+
+### Finish reasons
+
+A turn that ended must never be reported with `unified: "other"`: OpenCode v2
+coerces that to `unknown` and fails the turn as a retryable incomplete stream,
+while v1 completes it quietly — the failure was invisible anywhere except v2
+(ADR-0013). The mapper therefore knows the vocabulary the wire can actually
+send, matched case-insensitively the way upstream's own normaliser lowercases
+before matching:
+
+| wire reason                                                                                                       | unified      |
+| ----------------------------------------------------------------------------------------------------------------- | ------------ |
+| `tool_use`, `tool_calls`, `tool-calls`, `function_call`                                                           | `tool-calls` |
+| `length`, `max_tokens`, `max_output_tokens`, `model_context_window_exceeded`                                      | `length`     |
+| `error`                                                                                                           | `error`      |
+| `stop`, `end_turn`, `stop_sequence`, `refusal`, `content_filter`, `max_turn_requests`, `cancelled`, anything else | `stop`       |
+
+Each spelling is taken with either separator (`tool_calls` / `tool-calls`,
+`max_tokens` / `max-tokens`, `max_output_tokens` / `max-output-tokens`,
+`model_context_window_exceeded` and its hyphenated form), since the wire chooses.
+The last row is upstream's own default (`normalizeStopReason2` completes every
+reason it does not know), and `refusal` / `content_filter` follow it too: the
+plugin's contract is CLI parity, and the model's refusal is the answer the user
+is meant to read, not a turn the Host should treat as blocked. `pause_turn` is
+in that row as well — it maps to a completed turn like any other unknown reason,
+and the transport intercepts it by its **raw** reason before any finish part is
+emitted. The old vocabulary gap (the OpenAI spellings `tool_calls` /
+`content_filter`, Anthropic's `refusal` / `model_context_window_exceeded`,
+`function_call`, `max_turn_requests`, `cancelled`, and every casing variant) sent
+those reasons to `other`, which is exactly the v2 failure ADR-0013 records.
+`tests/stream.test.ts` holds the vocabulary table and an invariant test that no
+stream the three codecs can produce ends `other`.
+
+Two finish _events_ never reach that mapper, because they are not endings at all
+— upstream's own guards on its legacy consume loop, mirrored here (issue #187).
+A legacy `finish` reporting `other` with **no** raw reason is upstream's
+truncation condition (`stopReason === "other" && rawFinishReason === undefined`):
+the codec raises `TruncatedStreamError`'s wording as a classified, retryable
+truncation instead of completing the turn. A reason matching
+`network` / `connection` / `upstream` + `error` (any separator or case —
+upstream's `isNetworkFailureFinish` regex) is a connection that died mid-stream:
+the codec raises a retryable transport failure naming the reason. Both are
+replayed only while the consumer has seen nothing, like every other transient
+failure, and both surface as the `error` part after the budget. A raw reason
+beside `other` is the explanation the guard was waiting for, so that turn ends
+normally.
 
 Retries are causal: every failure is classified first, and only the kinds whose
 own shape says "transient" are replayed. The vocabulary and the rules are ported
 from upstream `command-code@1.54.0` (`isModelCallRetryable`,
 `isStreamErrorRetryable`, `parseWindowLimitError`):
 
-| failure                                                                                                                                                                                           | kind             | replayed                      |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- | ----------------------------- |
-| fetch rejection, read failure, per-attempt timeout                                                                                                                                                | network          | yes                           |
-| HTTP 408 / 429 / 5xx                                                                                                                                                                              | retryable status | yes                           |
-| HTTP 400 / 401 / 403 / 404 / 422, and every other status                                                                                                                                          | fatal status     | no                            |
-| 429 (or a `RATE_LIMITED` code) naming a usage window                                                                                                                                              | window limit     | no                            |
-| `Retry-After` beyond `maxRetryDelayMs`                                                                                                                                                            | retry-after cap  | no                            |
-| the plan-gate 403: `upgrade_required`, `upgrade to GOAT/provider`, or "without / doesn't include API access"                                                                                      | transport flip   | flipped once, never replayed  |
-| body ended with no terminal, or with only a synthesized finish                                                                                                                                    | truncation       | yes, while nothing is visible |
-| server `error` event: `isRetryable: true`, else a reported 408/429/5xx, else retryable unless it says `false` or names `premium_credits_exhausted` / `model_not_in_plan` / `insufficient credits` | stream error     | per that rule                 |
-| a turn still paused after five `pause_turn` continuations                                                                                                                                         | pause-turn limit | no                            |
+| failure                                                                                                                                                                                           | kind               | replayed                      |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ | ----------------------------- |
+| fetch rejection, read failure, per-attempt timeout, or a legacy `finish` naming a network/connection/upstream error                                                                               | network            | yes                           |
+| HTTP 408 / 429 / 5xx                                                                                                                                                                              | retryable status   | yes                           |
+| HTTP 400 / 401 / 403 / 404 / 422, and every other status                                                                                                                                          | fatal status       | no                            |
+| 429 (or a `RATE_LIMITED` code) naming a usage window                                                                                                                                              | window limit       | no                            |
+| `Retry-After` beyond `maxRetryDelayMs`                                                                                                                                                            | retry-after cap    | no                            |
+| the plan-gate 403: `upgrade_required`, `upgrade to GOAT/provider`, or "without / doesn't include API access"                                                                                      | transport flip     | flipped once, never replayed  |
+| body ended with no terminal, with only a synthesized finish that is not a pause, or with a legacy `finish` reporting `other` and no raw reason                                                    | truncation         | yes, while nothing is visible |
+| server `error` event: `isRetryable: true`, else a reported 408/429/5xx, else retryable unless it says `false` or names `premium_credits_exhausted` / `model_not_in_plan` / `insufficient credits` | stream error       | per that rule                 |
+| a turn still paused after five `pause_turn` continuations                                                                                                                                         | pause-turn limit   | no                            |
+| a paused turn whose continuation cannot represent its content faithfully                                                                                                                          | resume-unsupported | no                            |
 
 `maxRetries` defaults to **2**: the hosts already run their own slower ladders
 outside the plugin (v1 1.18.30: 5 retries; v2 2.0.3: 4, behind a hard
@@ -423,3 +506,5 @@ Both e2e scripts are excluded from `npm test`.
 | [0010](adr/0010-dual-v1-v2-plugin-entrypoint.md)               | One package and entrypoint for OpenCode v1 and v2 (server and TUI halves) |
 | [0011](adr/0011-billing-derived-plan-identity.md)              | Plan identity from the billing subscription, never a default              |
 | [0012](adr/0012-connect-callback-budget-and-api-key-method.md) | Human-scale connect callback budget, `api` method without `authorize`     |
+| [0013](adr/0013-finish-reason-vocabulary.md)                   | A turn that ended is never reported with `unified: "other"`               |
+| [0014](adr/0014-unmodelled-block-refuses-resume.md)            | A resumed turn never silently drops a block the stream did not model      |

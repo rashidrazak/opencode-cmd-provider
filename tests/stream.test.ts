@@ -16,8 +16,49 @@ import {
   createAnthropicStreamParser,
   finishIsPauseTurn,
   addAiSdkUsage,
+  isNetworkFailureFinishReason,
 } from "../src/provider/stream.js"
-import { assert, assertEqual, rejects, run } from "./harness.js"
+import { assert, assertEqual, rejects, run, throws } from "./harness.js"
+
+/**
+ * Every stop reason the wire can send, in both dialects plus the legacy /
+ * provider variants, with the unified reason each one means (issue #186). The
+ * table is shared by the vocabulary test and the `other`-invariant test below,
+ * so a reason added to the wire's vocabulary is exercised by both.
+ */
+const FINISH_VOCABULARY: Array<[reason: string, unified: string]> = [
+  // Anthropic Messages stop_reason
+  ["end_turn", "stop"],
+  ["stop_sequence", "stop"],
+  ["max_tokens", "length"],
+  ["tool_use", "tool-calls"],
+  ["refusal", "stop"],
+  ["model_context_window_exceeded", "length"],
+  // OpenAI Chat Completions finish_reason
+  ["stop", "stop"],
+  ["length", "length"],
+  ["tool_calls", "tool-calls"],
+  ["content_filter", "stop"],
+  ["function_call", "tool-calls"],
+  // legacy / provider variants
+  ["tool-calls", "tool-calls"],
+  ["max-tokens", "length"],
+  ["max_output_tokens", "length"],
+  ["max_turn_requests", "stop"],
+  ["cancelled", "stop"],
+  ["error", "error"],
+  // mixed casing is the same reason
+  ["END_TURN", "stop"],
+  ["End_Turn", "stop"],
+  ["MAX_TOKENS", "length"],
+  ["Tool_Calls", "tool-calls"],
+  ["Content_Filter", "stop"],
+  ["MoDeL_CoNtExT_WiNdOw_ExCeEdEd", "length"],
+  ["Refusal", "stop"],
+  ["Pause_Turn", "stop"],
+  // anything this build has never seen still ends the turn
+  ["banana", "stop"],
+]
 
 run([
   [
@@ -58,7 +99,126 @@ run([
         raw: "max_output_tokens",
       })
       assertEqual(mapFinishReason("error"), { unified: "error", raw: "error" })
-      assertEqual(mapFinishReason("weird"), { unified: "other", raw: "weird" })
+      // An unrecognised reason completes the turn, exactly as upstream's
+      // normaliser does — never `other`, which OpenCode v2 fails the turn on
+      // (issues #184, #186).
+      assertEqual(mapFinishReason("weird"), { unified: "stop", raw: "weird" })
+    },
+  ],
+
+  [
+    "mapFinishReason knows every stop reason the wire can send, in either dialect and case (issue #186)",
+    () => {
+      // One table, both dialects: the spelling each provider actually emits
+      // (Anthropic on the left, OpenAI on the right) plus the legacy/provider
+      // variants, matched case-insensitively the way upstream's normaliser
+      // (`command-code@1.54.1` `normalizeStopReason2`, which lowercases first)
+      // matches. Every entry completes the turn.
+      for (const [reason, unified] of FINISH_VOCABULARY) {
+        assertEqual(mapFinishReason(reason), { unified, raw: reason }, `reason ${reason}`)
+      }
+      // The two codecs' own terminals agree with the mapper: the reason each
+      // dialect puts on the wire maps the same way (issue #186).
+      assertEqual(
+        ccEventToStreamPart({
+          type: "finish",
+          finishReason: "TOOL_CALLS",
+          totalUsage: { inputTokens: 10, outputTokens: 4 },
+        })[0],
+        {
+          type: "finish",
+          finishReason: { unified: "tool-calls", raw: "TOOL_CALLS" },
+          usage: {
+            inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 },
+            outputTokens: { total: 4, text: 4, reasoning: 0 },
+          },
+        },
+      )
+      const anthropicFinish = createAnthropicStreamParser()({
+        type: "message_delta",
+        delta: { stop_reason: "refusal" },
+        usage: { input_tokens: 10, output_tokens: 4 },
+      })[0] as { finishReason: unknown }
+      assertEqual(anthropicFinish.finishReason, { unified: "stop", raw: "refusal" })
+      const openAIFinish = createOpenAIStreamParser()({
+        id: "chatcmpl-1",
+        choices: [{ delta: {}, finish_reason: "content_filter" }],
+        usage: { prompt_tokens: 10, completion_tokens: 4 },
+      })[0] as { finishReason: unknown }
+      assertEqual(openAIFinish.finishReason, { unified: "stop", raw: "content_filter" })
+      // Absent and non-string reasons complete the turn too, with the `unknown`
+      // raw marker this mapper has always used for them.
+      assertEqual(mapFinishReason(undefined), { unified: "stop", raw: "unknown" })
+      assertEqual(mapFinishReason(7), { unified: "stop", raw: "unknown" })
+    },
+  ],
+
+  [
+    "no codec can end a turn with unified other (issue #186)",
+    () => {
+      // OpenCode v2 coerces a finish reason of `other` to `unknown` and fails
+      // the turn as a retryable incomplete stream (ADR-0013), so no stream this
+      // transport can produce may end with one. The invariant is exercised over
+      // the whole vocabulary above — mixed casing and all — across the three
+      // codecs the transport wires in. A codec that refuses the event outright
+      // (the legacy finish guards, issue #187) emitted no turn at all, which is
+      // the other way the invariant holds.
+      const finishOf = (
+        codec: string,
+        build: () => Array<Record<string, unknown>>,
+      ): Record<string, unknown> | undefined => {
+        let parts: Array<Record<string, unknown>>
+        try {
+          parts = build()
+        } catch (error) {
+          assert(error instanceof Error, `${codec}: a refused event throws an Error`)
+          return undefined
+        }
+        const finishes = parts.filter((part) => part.type === "finish")
+        assert(finishes.length <= 1, `${codec}: at most one finish part`)
+        return finishes[0]
+      }
+      for (const [reason] of FINISH_VOCABULARY) {
+        const usage = { inputTokens: 10, outputTokens: 4 }
+        const codecs: Array<[string, () => Array<Record<string, unknown>>]> = [
+          [
+            "legacy",
+            () =>
+              ccEventToStreamPart({
+                type: "finish",
+                finishReason: reason,
+                totalUsage: usage,
+              }) as unknown as Array<Record<string, unknown>>,
+          ],
+          [
+            "openai",
+            () =>
+              createOpenAIStreamParser()({
+                id: "chatcmpl-1",
+                choices: [{ delta: {}, finish_reason: reason }],
+                usage: { prompt_tokens: 10, completion_tokens: 4 },
+              }) as unknown as Array<Record<string, unknown>>,
+          ],
+          [
+            "anthropic",
+            () =>
+              createAnthropicStreamParser()({
+                type: "message_delta",
+                delta: { stop_reason: reason },
+                usage: { input_tokens: 10, output_tokens: 4 },
+              }) as unknown as Array<Record<string, unknown>>,
+          ],
+        ]
+        for (const [codec, build] of codecs) {
+          const finish = finishOf(codec, build)
+          if (!finish) continue
+          const unified = (finish.finishReason as { unified?: string } | undefined)?.unified
+          assert(
+            unified !== undefined && unified !== "other",
+            `${codec} ended "${reason}" with unified ${String(unified)}`,
+          )
+        }
+      }
     },
   ],
 
@@ -601,25 +761,135 @@ run([
   ],
 
   [
+    "createAnthropicStreamParser carries a thinking block's signature on its reasoning-end (issue #189)",
+    () => {
+      // Anthropic's `signature_delta` has no part of its own. The signature is
+      // what lets a continuation replay the block, so it rides on the part that
+      // closes the block — and a block that ends without a stop event (the body
+      // died mid-thought) carries it too.
+      const events = [
+        {
+          type: "content_block_start",
+          index: 0,
+          content_block: { type: "thinking", thinking: "" },
+        },
+        {
+          type: "content_block_delta",
+          index: 0,
+          delta: { type: "thinking_delta", thinking: "hmm" },
+        },
+        {
+          type: "content_block_delta",
+          index: 0,
+          delta: { type: "signature_delta", signature: "sig-1" },
+        },
+        { type: "content_block_stop", index: 0 },
+      ]
+      const parser = createAnthropicStreamParser()
+      const parts = events.flatMap((e) => parser(e))
+      assertEqual(
+        parts.map((p) => (p as { type: string }).type),
+        ["reasoning-start", "reasoning-delta", "reasoning-end"],
+      )
+      assertEqual((parts[2] as { providerMetadata?: unknown }).providerMetadata, {
+        anthropic: { signature: "sig-1" },
+      })
+
+      const open = createAnthropicStreamParser()
+      open({
+        type: "content_block_start",
+        index: 0,
+        content_block: { type: "thinking", thinking: "" },
+      })
+      open({
+        type: "content_block_delta",
+        index: 0,
+        delta: { type: "signature_delta", signature: "sig-2" },
+      })
+      assertEqual(open.closeStream(), [
+        {
+          type: "reasoning-end",
+          id: "thinking-0",
+          providerMetadata: { anthropic: { signature: "sig-2" } },
+        },
+      ])
+
+      // A signature for a block this parser does not model is ignored, like the
+      // block itself; an unsigned thinking block keeps the plain end part.
+      const unmodelled = createAnthropicStreamParser()
+      unmodelled({
+        type: "content_block_start",
+        index: 0,
+        content_block: { type: "redacted_thinking", data: "..." },
+      })
+      assertEqual(
+        unmodelled({
+          type: "content_block_delta",
+          index: 0,
+          delta: { type: "signature_delta", signature: "sig-3" },
+        }),
+        [],
+      )
+      const unsigned = createAnthropicStreamParser()
+      unsigned({ type: "content_block_start", index: 0, content_block: { type: "thinking" } })
+      assertEqual(unsigned({ type: "content_block_stop", index: 0 }), [
+        { type: "reasoning-end", id: "thinking-0" },
+      ])
+    },
+  ],
+
+  [
     "createAnthropicStreamParser never closes a block it did not open (issue #72)",
     () => {
-      // A block type this parser does not model — Anthropic's redacted_thinking,
-      // a server tool block, a future addition — is still a block. Its stop must
-      // not fall through to `text-end` for a part that was never opened: the
-      // consumer rejects an end for an unknown id ("text part text-N not found",
-      // #69).
+      // A block type this parser does not model — a server tool block, a future
+      // addition — is still a block. Its stop must not fall through to
+      // `text-end` for a part that was never opened: the consumer rejects an end
+      // for an unknown id ("text part text-N not found", #69).
       const parser = createAnthropicStreamParser()
       assertEqual(
         parser({
           type: "content_block_start",
           index: 0,
-          content_block: { type: "redacted_thinking", data: "..." },
+          content_block: { type: "server_tool_use", id: "srv_1", name: "web_search" },
         }),
         [],
       )
       assertEqual(parser({ type: "content_block_stop", index: 0 }), [])
       // A stop whose start never arrived is the same shape of nothing-to-close.
       assertEqual(createAnthropicStreamParser()({ type: "content_block_stop", index: 3 }), [])
+    },
+  ],
+
+  [
+    "createAnthropicStreamParser reports the block types it does not model (issue #192)",
+    () => {
+      // The block emits no part (#72), which is invisible for a turn that ends
+      // and a lie for a paused turn whose continuation is rebuilt from those
+      // parts — so the parser names what it dropped and the transport decides.
+      const parser = createAnthropicStreamParser()
+      assertEqual(parser.unmodelledBlocks?.(), [])
+      parser({
+        type: "content_block_start",
+        index: 0,
+        content_block: { type: "server_tool_use", id: "srv_1", name: "web_search" },
+      })
+      parser({ type: "content_block_stop", index: 0 })
+      // Modelled blocks are not reported.
+      parser({ type: "content_block_start", index: 1, content_block: { type: "text", text: "" } })
+      parser({ type: "content_block_stop", index: 1 })
+      parser({ type: "content_block_start", index: 2, content_block: {} })
+      // The same type twice is one entry; a block whose start carried no type
+      // is still reported, as `untyped`.
+      parser({
+        type: "content_block_start",
+        index: 3,
+        content_block: { type: "server_tool_use", id: "srv_2", name: "web_search" },
+      })
+      parser({ type: "content_block_stop", index: 3 })
+      assertEqual(parser.unmodelledBlocks?.(), ["server_tool_use", "untyped"])
+
+      // The OpenAI-shaped parser has no content blocks at all: it reports none.
+      assertEqual(createOpenAIStreamParser().unmodelledBlocks, undefined)
     },
   ],
 
@@ -822,13 +1092,13 @@ run([
       ])
       assertEqual(anthropic.closeStream(), [])
 
-      // Unmodelled (redacted) and tool blocks have no close part: a tool call is
+      // Tool and still-unmodelled blocks have no close part: a tool call is
       // settled by its own tool-call part, never by a bare end.
       const unmodelled = createAnthropicStreamParser()
       unmodelled({
         type: "content_block_start",
         index: 0,
-        content_block: { type: "redacted_thinking" },
+        content_block: { type: "server_tool_use", id: "srv_1", name: "web_search" },
       })
       unmodelled({
         type: "content_block_start",
@@ -836,20 +1106,93 @@ run([
         content_block: { type: "tool_use", id: "call_1", name: "read" },
       })
       assertEqual(unmodelled.closeStream(), [])
+
+      // A redacted thinking block *is* modelled: it opens a reasoning part, so
+      // a stream that ends mid-block closes it (issue #193).
+      const redacted = createAnthropicStreamParser()
+      redacted({
+        type: "content_block_start",
+        index: 0,
+        content_block: { type: "redacted_thinking", data: "..." },
+      })
+      assertEqual(redacted.closeStream(), [{ type: "reasoning-end", id: "redacted-0" }])
+    },
+  ],
+
+  [
+    "createAnthropicStreamParser streams a redacted thinking block as reasoning (issue #193)",
+    () => {
+      // The block is encrypted reasoning: no deltas, the whole block is its
+      // `data`, and it surfaces as a reasoning part whose start carries that
+      // payload in `providerMetadata.anthropic.redactedData` — the shape the AI
+      // SDK's own Anthropic provider emits, and the one a continuation reads to
+      // replay the block verbatim.
+      const parser = createAnthropicStreamParser()
+      assertEqual(
+        parser({
+          type: "content_block_start",
+          index: 0,
+          content_block: { type: "redacted_thinking", data: "EncryptedThought==" },
+        }),
+        [
+          {
+            type: "reasoning-start",
+            id: "redacted-0",
+            providerMetadata: { anthropic: { redactedData: "EncryptedThought==" } },
+          },
+        ],
+      )
+      assertEqual(parser({ type: "content_block_stop", index: 0 }), [
+        { type: "reasoning-end", id: "redacted-0" },
+      ])
+      // It is modelled, so the #192 safety net has nothing to refuse.
+      assertEqual(parser.unmodelledBlocks?.(), [])
+
+      // An id the gateway supplies is the one the end closes, like every block.
+      const labelled = createAnthropicStreamParser()
+      assertEqual(
+        (
+          labelled({
+            type: "content_block_start",
+            index: 0,
+            content_block: { type: "redacted_thinking", id: "red_7", data: "x" },
+          })[0] as { id: string }
+        ).id,
+        "red_7",
+      )
+      assertEqual(labelled({ type: "content_block_stop", index: 0 }), [
+        { type: "reasoning-end", id: "red_7" },
+      ])
+
+      // A redacted block with no payload has nothing to replay, so it stays
+      // unmodelled: no part, and a pause that carried it is refused (#192)
+      // rather than handing the provider an empty block.
+      const payloadless = createAnthropicStreamParser()
+      assertEqual(
+        payloadless({
+          type: "content_block_start",
+          index: 0,
+          content_block: { type: "redacted_thinking" },
+        }),
+        [],
+      )
+      assertEqual(payloadless({ type: "content_block_stop", index: 0 }), [])
+      assertEqual(payloadless.unmodelledBlocks?.(), ["redacted_thinking"])
     },
   ],
 
   [
     "the codecs preserve the pause_turn finish reason the transport loops on (issue #172)",
     () => {
-      // `pause_turn` is a stop reason, not an ending: the unified mapping stays
-      // `other` (it is an unknown reason to the AI SDK) and the raw reason is
-      // what the transport reads. Upstream's legacy consumer reads the
-      // terminal's two reason fields apart — the raw one off
-      // `rawFinishReason ?? finishReason` — so a finish event that reports the
-      // pause only in its raw field is a pause too, with the unified reason
-      // still taken from `finishReason`.
-      assertEqual(mapFinishReason("pause_turn"), { unified: "other", raw: "pause_turn" })
+      // `pause_turn` is a stop reason, not an ending: upstream's vocabulary
+      // does not know it, so it maps to a completed turn like every other
+      // reason and the raw reason is what the transport reads (issue #186
+      // narrowed the unified mapping; issue #172 owns the loop). Upstream's
+      // legacy consumer reads the terminal's two reason fields apart — the raw
+      // one off `rawFinishReason ?? finishReason` — so a finish event that
+      // reports the pause only in its raw field is a pause too, with the
+      // unified reason still taken from `finishReason`.
+      assertEqual(mapFinishReason("pause_turn"), { unified: "stop", raw: "pause_turn" })
       assertEqual(
         ccEventToStreamPart({
           type: "finish",
@@ -877,7 +1220,7 @@ run([
         })[0],
         {
           type: "finish",
-          finishReason: { unified: "other", raw: "pause_turn" },
+          finishReason: { unified: "stop", raw: "pause_turn" },
           usage: {
             inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 },
             outputTokens: { total: 4, text: 4, reasoning: 0 },
@@ -886,12 +1229,9 @@ run([
       )
       // The transport asks the codec's vocabulary rather than matching the raw
       // string at the call site: a paused finish is one thing, an ordinary one
-      // — `other` included — is not.
-      assertEqual(
-        finishIsPauseTurn({ finishReason: { unified: "other", raw: "pause_turn" } }),
-        true,
-      )
-      assertEqual(finishIsPauseTurn({ finishReason: { unified: "other", raw: "unknown" } }), false)
+      // is not.
+      assertEqual(finishIsPauseTurn({ finishReason: { unified: "stop", raw: "pause_turn" } }), true)
+      assertEqual(finishIsPauseTurn({ finishReason: { unified: "stop", raw: "unknown" } }), false)
       assertEqual(finishIsPauseTurn({ finishReason: { unified: "stop", raw: "end_turn" } }), false)
     },
   ],
@@ -936,6 +1276,71 @@ run([
           outputTokens: { total: 5, text: 3, reasoning: 0 },
         },
       )
+    },
+  ],
+
+  [
+    "the legacy finish guards refuse a turn that never ended (issue #187)",
+    () => {
+      // A finish reporting `other` with no raw reason is upstream's own
+      // truncation condition (`stopReason === "other" && rawFinishReason ===
+      // undefined`), so it must not become a completed turn — and it is
+      // classified, not merely refused: the failure rides on the error for the
+      // ladder.
+      const truncated = (() => {
+        try {
+          ccEventToStreamPart({
+            type: "finish",
+            finishReason: "other",
+            totalUsage: { inputTokens: 10, outputTokens: 4 },
+          })
+        } catch (error) {
+          return error as Error & {
+            failure?: { kind?: string; retryable?: boolean }
+            status?: number
+          }
+        }
+        return undefined
+      })()
+      assert(truncated, "other with no raw reason throws")
+      assert(truncated.message.includes("truncated"), truncated.message)
+      assertEqual(truncated.failure, { kind: "truncation", retryable: true, status: 502 })
+      assertEqual(truncated.status, 502)
+      assertEqual((truncated as { transportError?: boolean }).transportError, true)
+
+      // `other` **with** a raw reason is an ending: the wire told us why.
+      const ended = ccEventToStreamPart({
+        type: "finish",
+        finishReason: "other",
+        rawFinishReason: "somewhere-else",
+        totalUsage: { inputTokens: 10, outputTokens: 4 },
+      })[0] as { finishReason: unknown }
+      assertEqual(ended.finishReason, { unified: "stop", raw: "somewhere-else" })
+
+      // The connection-failure spellings upstream's regex accepts.
+      for (const reason of [
+        "network_error",
+        "connection-error",
+        "upstream error",
+        "UPSTREAM_ERROR",
+        "Network_Error",
+      ]) {
+        assert(isNetworkFailureFinishReason(reason), `${reason} is a connection failure`)
+        throws(
+          () =>
+            ccEventToStreamPart({
+              type: "finish",
+              finishReason: reason,
+              totalUsage: { inputTokens: 10, outputTokens: 4 },
+            }),
+          /upstream connection failed mid-stream/,
+        )
+      }
+      // …and the ones it must not (a different separator, a suffix, an
+      // unrelated failure).
+      for (const reason of ["network", "upstream_error_2", "networking_error", "error"]) {
+        assert(!isNetworkFailureFinishReason(reason), `${reason} is not a connection failure`)
+      }
     },
   ],
 ])

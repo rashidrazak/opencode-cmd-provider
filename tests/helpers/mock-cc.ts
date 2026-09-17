@@ -28,8 +28,14 @@ export interface MockCcOptions {
   retryAfter?: number
   /** how many consecutive error responses /alpha/generate serves before falling through to stream (default: always error) */
   generateErrorCount?: number
-  /** called with the parsed /alpha/generate request body and headers */
-  onGenerate?: (body: Record<string, unknown>, headers: Record<string, string>) => void
+  /** called with the parsed /alpha/generate request body, headers, and the raw
+   * body as it arrived (byte-level assertions, e.g. a continuation re-POSTing
+   * the same bytes) */
+  onGenerate?: (
+    body: Record<string, unknown>,
+    headers: Record<string, string>,
+    rawBody: string,
+  ) => void
   /** OpenAI chat completions SSE events for POST /provider/v1/chat/completions */
   chatCompletionsStream?: MockEvents
   chatCompletionsStatus?: number
@@ -238,6 +244,7 @@ export function startMockCc(
         options.onGenerate?.(
           body ? (JSON.parse(body) as Record<string, unknown>) : {},
           (req.headers ?? {}) as Record<string, string>,
+          body,
         )
         const generateErrorsLeft =
           options.generateErrorCount !== undefined
