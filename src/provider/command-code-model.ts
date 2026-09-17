@@ -438,7 +438,12 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
     const content: LanguageModelV3Content[] = []
     let text = ""
     let reasoning = ""
-    let finishReason: LanguageModelV3FinishReason = { unified: "other", raw: "unknown" }
+    // A generation that produced a result ends the turn: `other` is not a
+    // finish reason a completed turn may carry (OpenCode v2 reads it as an
+    // unknown, retryable failure — ADR-0013). A stream with no finish part at
+    // all ends with the legacy `abort` terminal, whose turn upstream completes
+    // too.
+    let finishReason: LanguageModelV3FinishReason = { unified: "stop", raw: "unknown" }
     let usage: LanguageModelV3Usage | undefined
     for (const part of parts) {
       switch (part.type) {

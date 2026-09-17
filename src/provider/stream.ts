@@ -150,22 +150,62 @@ export function parseStreamEventLine(line: string): unknown | undefined {
   }
 }
 
+/**
+ * The tool-call spellings: Anthropic's `tool_use`, the OpenAI `tool_calls`, the
+ * hyphenated AI SDK form, and OpenAI's older `function_call`. Upstream
+ * `command-code@1.54.1` normalises the reason by lowercasing it first
+ * (`normalizeStopReason` / `normalizeStopReason2`), so the match is
+ * case-insensitive here too (issue #186).
+ */
+const TOOL_CALL_FINISH_REASONS = new Set([
+  "tool_use",
+  "tool-calls",
+  "tool_calls",
+  "function_call",
+  "function-call",
+])
+
+/**
+ * The length family: OpenAI's `length`, the `max_tokens` /
+ * `max_output_tokens` spellings, and Anthropic's context-window exhaustion.
+ * Upstream groups exactly these under `max_tokens`.
+ */
+const LENGTH_FINISH_REASONS = new Set([
+  "length",
+  "max_tokens",
+  "max-tokens",
+  "max_output_tokens",
+  "max-output-tokens",
+  "model_context_window_exceeded",
+  "model-context-window-exceeded",
+])
+
+/**
+ * Maps a wire stop reason to the AI SDK v3 finish reason (issue #186).
+ *
+ * The vocabulary is the one the wire can actually send, matched
+ * case-insensitively the way upstream's normaliser matches. Everything else —
+ * `stop`, `end_turn`, `stop_sequence`, `refusal`, `content_filter`,
+ * `max_turn_requests`, `cancelled`, and any reason this build has never seen —
+ * is a **completed turn**: upstream's normaliser maps every reason it does not
+ * recognise to `end_turn`, and a turn that ended must never be reported as
+ * `unified: "other"` (OpenCode v2 coerces that to `unknown` and fails the turn
+ * as a retryable incomplete stream — ADR-0013). Deliberately, no refusal or
+ * content-filter spelling maps to the AI SDK's `content-filter` either: the
+ * plugin's contract is CLI parity, and the CLI completes such a turn (the
+ * model's refusal is the answer) rather than labelling it filtered.
+ *
+ * The one reason whose unified value is not decided here is the pause marker:
+ * `pause_turn` maps to a completed turn too, but the transport intercepts the
+ * finish by its raw reason before any part is emitted (issue #172).
+ */
 export function mapFinishReason(reason: unknown): LanguageModelV3FinishReason {
   const raw = stringValue(reason) ?? "unknown"
-  if (raw === "tool_use" || raw === "tool-calls") return { unified: "tool-calls", raw }
-  if (
-    raw === "length" ||
-    raw === "max_tokens" ||
-    raw === "max-tokens" ||
-    raw === "max_output_tokens"
-  ) {
-    return { unified: "length", raw }
-  }
-  if (raw === "stop" || raw === "end_turn" || raw === "stop_sequence")
-    return { unified: "stop", raw }
-  if (raw === "error") return { unified: "error", raw }
-  if (raw === "content-filter") return { unified: "content-filter", raw }
-  return { unified: "other", raw }
+  const normalised = raw.toLowerCase()
+  if (TOOL_CALL_FINISH_REASONS.has(normalised)) return { unified: "tool-calls", raw }
+  if (LENGTH_FINISH_REASONS.has(normalised)) return { unified: "length", raw }
+  if (normalised === "error") return { unified: "error", raw }
+  return { unified: "stop", raw }
 }
 
 export function ccUsageToAiSdkUsage(

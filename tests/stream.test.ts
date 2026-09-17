@@ -19,6 +19,46 @@ import {
 } from "../src/provider/stream.js"
 import { assert, assertEqual, rejects, run } from "./harness.js"
 
+/**
+ * Every stop reason the wire can send, in both dialects plus the legacy /
+ * provider variants, with the unified reason each one means (issue #186). The
+ * table is shared by the vocabulary test and the `other`-invariant test below,
+ * so a reason added to the wire's vocabulary is exercised by both.
+ */
+const FINISH_VOCABULARY: Array<[reason: string, unified: string]> = [
+  // Anthropic Messages stop_reason
+  ["end_turn", "stop"],
+  ["stop_sequence", "stop"],
+  ["max_tokens", "length"],
+  ["tool_use", "tool-calls"],
+  ["refusal", "stop"],
+  ["model_context_window_exceeded", "length"],
+  // OpenAI Chat Completions finish_reason
+  ["stop", "stop"],
+  ["length", "length"],
+  ["tool_calls", "tool-calls"],
+  ["content_filter", "stop"],
+  ["function_call", "tool-calls"],
+  // legacy / provider variants
+  ["tool-calls", "tool-calls"],
+  ["max-tokens", "length"],
+  ["max_output_tokens", "length"],
+  ["max_turn_requests", "stop"],
+  ["cancelled", "stop"],
+  ["error", "error"],
+  // mixed casing is the same reason
+  ["END_TURN", "stop"],
+  ["End_Turn", "stop"],
+  ["MAX_TOKENS", "length"],
+  ["Tool_Calls", "tool-calls"],
+  ["Content_Filter", "stop"],
+  ["MoDeL_CoNtExT_WiNdOw_ExCeEdEd", "length"],
+  ["Refusal", "stop"],
+  ["Pause_Turn", "stop"],
+  // anything this build has never seen still ends the turn
+  ["banana", "stop"],
+]
+
 run([
   [
     "parseStreamEventLine skips empty/comment/event lines and [DONE]",
@@ -58,7 +98,126 @@ run([
         raw: "max_output_tokens",
       })
       assertEqual(mapFinishReason("error"), { unified: "error", raw: "error" })
-      assertEqual(mapFinishReason("weird"), { unified: "other", raw: "weird" })
+      // An unrecognised reason completes the turn, exactly as upstream's
+      // normaliser does — never `other`, which OpenCode v2 fails the turn on
+      // (issues #184, #186).
+      assertEqual(mapFinishReason("weird"), { unified: "stop", raw: "weird" })
+    },
+  ],
+
+  [
+    "mapFinishReason knows every stop reason the wire can send, in either dialect and case (issue #186)",
+    () => {
+      // One table, both dialects: the spelling each provider actually emits
+      // (Anthropic on the left, OpenAI on the right) plus the legacy/provider
+      // variants, matched case-insensitively the way upstream's normaliser
+      // (`command-code@1.54.1` `normalizeStopReason2`, which lowercases first)
+      // matches. Every entry completes the turn.
+      for (const [reason, unified] of FINISH_VOCABULARY) {
+        assertEqual(mapFinishReason(reason), { unified, raw: reason }, `reason ${reason}`)
+      }
+      // The two codecs' own terminals agree with the mapper: the reason each
+      // dialect puts on the wire maps the same way (issue #186).
+      assertEqual(
+        ccEventToStreamPart({
+          type: "finish",
+          finishReason: "TOOL_CALLS",
+          totalUsage: { inputTokens: 10, outputTokens: 4 },
+        })[0],
+        {
+          type: "finish",
+          finishReason: { unified: "tool-calls", raw: "TOOL_CALLS" },
+          usage: {
+            inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 },
+            outputTokens: { total: 4, text: 4, reasoning: 0 },
+          },
+        },
+      )
+      const anthropicFinish = createAnthropicStreamParser()({
+        type: "message_delta",
+        delta: { stop_reason: "refusal" },
+        usage: { input_tokens: 10, output_tokens: 4 },
+      })[0] as { finishReason: unknown }
+      assertEqual(anthropicFinish.finishReason, { unified: "stop", raw: "refusal" })
+      const openAIFinish = createOpenAIStreamParser()({
+        id: "chatcmpl-1",
+        choices: [{ delta: {}, finish_reason: "content_filter" }],
+        usage: { prompt_tokens: 10, completion_tokens: 4 },
+      })[0] as { finishReason: unknown }
+      assertEqual(openAIFinish.finishReason, { unified: "stop", raw: "content_filter" })
+      // Absent and non-string reasons complete the turn too, with the `unknown`
+      // raw marker this mapper has always used for them.
+      assertEqual(mapFinishReason(undefined), { unified: "stop", raw: "unknown" })
+      assertEqual(mapFinishReason(7), { unified: "stop", raw: "unknown" })
+    },
+  ],
+
+  [
+    "no codec can end a turn with unified other (issue #186)",
+    () => {
+      // OpenCode v2 coerces a finish reason of `other` to `unknown` and fails
+      // the turn as a retryable incomplete stream (ADR-0013), so no stream this
+      // transport can produce may end with one. The invariant is exercised over
+      // the whole vocabulary above — mixed casing and all — across the three
+      // codecs the transport wires in. A codec that refuses the event outright
+      // (the legacy finish guards, issue #187) emitted no turn at all, which is
+      // the other way the invariant holds.
+      const finishOf = (
+        codec: string,
+        build: () => Array<Record<string, unknown>>,
+      ): Record<string, unknown> | undefined => {
+        let parts: Array<Record<string, unknown>>
+        try {
+          parts = build()
+        } catch (error) {
+          assert(error instanceof Error, `${codec}: a refused event throws an Error`)
+          return undefined
+        }
+        const finishes = parts.filter((part) => part.type === "finish")
+        assert(finishes.length <= 1, `${codec}: at most one finish part`)
+        return finishes[0]
+      }
+      for (const [reason] of FINISH_VOCABULARY) {
+        const usage = { inputTokens: 10, outputTokens: 4 }
+        const codecs: Array<[string, () => Array<Record<string, unknown>>]> = [
+          [
+            "legacy",
+            () =>
+              ccEventToStreamPart({
+                type: "finish",
+                finishReason: reason,
+                totalUsage: usage,
+              }) as unknown as Array<Record<string, unknown>>,
+          ],
+          [
+            "openai",
+            () =>
+              createOpenAIStreamParser()({
+                id: "chatcmpl-1",
+                choices: [{ delta: {}, finish_reason: reason }],
+                usage: { prompt_tokens: 10, completion_tokens: 4 },
+              }) as unknown as Array<Record<string, unknown>>,
+          ],
+          [
+            "anthropic",
+            () =>
+              createAnthropicStreamParser()({
+                type: "message_delta",
+                delta: { stop_reason: reason },
+                usage: { input_tokens: 10, output_tokens: 4 },
+              }) as unknown as Array<Record<string, unknown>>,
+          ],
+        ]
+        for (const [codec, build] of codecs) {
+          const finish = finishOf(codec, build)
+          if (!finish) continue
+          const unified = (finish.finishReason as { unified?: string } | undefined)?.unified
+          assert(
+            unified !== undefined && unified !== "other",
+            `${codec} ended "${reason}" with unified ${String(unified)}`,
+          )
+        }
+      }
     },
   ],
 
@@ -842,14 +1001,15 @@ run([
   [
     "the codecs preserve the pause_turn finish reason the transport loops on (issue #172)",
     () => {
-      // `pause_turn` is a stop reason, not an ending: the unified mapping stays
-      // `other` (it is an unknown reason to the AI SDK) and the raw reason is
-      // what the transport reads. Upstream's legacy consumer reads the
-      // terminal's two reason fields apart — the raw one off
-      // `rawFinishReason ?? finishReason` — so a finish event that reports the
-      // pause only in its raw field is a pause too, with the unified reason
-      // still taken from `finishReason`.
-      assertEqual(mapFinishReason("pause_turn"), { unified: "other", raw: "pause_turn" })
+      // `pause_turn` is a stop reason, not an ending: upstream's vocabulary
+      // does not know it, so it maps to a completed turn like every other
+      // reason and the raw reason is what the transport reads (issue #186
+      // narrowed the unified mapping; issue #172 owns the loop). Upstream's
+      // legacy consumer reads the terminal's two reason fields apart — the raw
+      // one off `rawFinishReason ?? finishReason` — so a finish event that
+      // reports the pause only in its raw field is a pause too, with the
+      // unified reason still taken from `finishReason`.
+      assertEqual(mapFinishReason("pause_turn"), { unified: "stop", raw: "pause_turn" })
       assertEqual(
         ccEventToStreamPart({
           type: "finish",
@@ -877,7 +1037,7 @@ run([
         })[0],
         {
           type: "finish",
-          finishReason: { unified: "other", raw: "pause_turn" },
+          finishReason: { unified: "stop", raw: "pause_turn" },
           usage: {
             inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 },
             outputTokens: { total: 4, text: 4, reasoning: 0 },
@@ -886,12 +1046,9 @@ run([
       )
       // The transport asks the codec's vocabulary rather than matching the raw
       // string at the call site: a paused finish is one thing, an ordinary one
-      // — `other` included — is not.
-      assertEqual(
-        finishIsPauseTurn({ finishReason: { unified: "other", raw: "pause_turn" } }),
-        true,
-      )
-      assertEqual(finishIsPauseTurn({ finishReason: { unified: "other", raw: "unknown" } }), false)
+      // is not.
+      assertEqual(finishIsPauseTurn({ finishReason: { unified: "stop", raw: "pause_turn" } }), true)
+      assertEqual(finishIsPauseTurn({ finishReason: { unified: "stop", raw: "unknown" } }), false)
       assertEqual(finishIsPauseTurn({ finishReason: { unified: "stop", raw: "end_turn" } }), false)
     },
   ],

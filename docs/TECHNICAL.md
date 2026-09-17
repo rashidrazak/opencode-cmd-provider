@@ -264,10 +264,38 @@ continuation's parts to the same stream, and folds each continuation's usage
 into the turn's single `finish` (upstream's `addUsage2`, the only place the CLI
 sums usage — the usage of a retry that _replaced_ an attempt is not part of the
 sum). The bound is five continuations: a turn still paused there fails with
-`PauseTurnLimitError` instead of emitting `finish{other, pause_turn}`, which v1
-reads as a completed turn and v2 rejects as a retryable incomplete stream.
-Whatever the paused response left open is closed before its continuation opens
-its own parts.
+`PauseTurnLimitError` instead of emitting `finish{pause_turn}`, which v1 reads as
+a completed turn and v2 rejects as a retryable incomplete stream. Whatever the
+paused response left open is closed before its continuation opens its own parts.
+
+### Finish reasons
+
+A turn that ended must never be reported with `unified: "other"`: OpenCode v2
+coerces that to `unknown` and fails the turn as a retryable incomplete stream,
+while v1 completes it quietly — the failure was invisible anywhere except v2
+(ADR-0013). The mapper therefore knows the vocabulary the wire can actually
+send, matched case-insensitively the way upstream's own normaliser lowercases
+before matching:
+
+| wire reason                                                                                                       | unified      |
+| ----------------------------------------------------------------------------------------------------------------- | ------------ |
+| `tool_use`, `tool_calls`, `tool-calls`, `function_call`                                                           | `tool-calls` |
+| `length`, `max_tokens`, `max_output_tokens`, `model_context_window_exceeded`                                      | `length`     |
+| `error`                                                                                                           | `error`      |
+| `stop`, `end_turn`, `stop_sequence`, `refusal`, `content_filter`, `max_turn_requests`, `cancelled`, anything else | `stop`       |
+
+The last row is upstream's own default (`normalizeStopReason2` completes every
+reason it does not know), and `refusal` / `content_filter` follow it too: the
+plugin's contract is CLI parity, and the model's refusal is the answer the user
+is meant to read, not a turn the Host should treat as blocked. `pause_turn` is
+in that row as well — it maps to a completed turn like any other unknown reason,
+and the transport intercepts it by its **raw** reason before any finish part is
+emitted. The old vocabulary gap (the OpenAI spellings `tool_calls` /
+`content_filter`, Anthropic's `refusal` / `model_context_window_exceeded`,
+`function_call`, `max_turn_requests`, `cancelled`, and every casing variant) sent
+those reasons to `other`, which is exactly the v2 failure ADR-0013 records.
+`tests/stream.test.ts` holds the vocabulary table and an invariant test that no
+stream the three codecs can produce ends `other`.
 
 Retries are causal: every failure is classified first, and only the kinds whose
 own shape says "transient" are replayed. The vocabulary and the rules are ported
@@ -423,3 +451,4 @@ Both e2e scripts are excluded from `npm test`.
 | [0010](adr/0010-dual-v1-v2-plugin-entrypoint.md)               | One package and entrypoint for OpenCode v1 and v2 (server and TUI halves) |
 | [0011](adr/0011-billing-derived-plan-identity.md)              | Plan identity from the billing subscription, never a default              |
 | [0012](adr/0012-connect-callback-budget-and-api-key-method.md) | Human-scale connect callback budget, `api` method without `authorize`     |
+| [0013](adr/0013-finish-reason-vocabulary.md)                   | A turn that ended is never reported with `unified: "other"`               |
