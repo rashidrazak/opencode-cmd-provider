@@ -92,7 +92,7 @@ fixtures (see `scripts/check-deals-coverage.mjs` and
   `src/plugin/v2-tui-types.ts` mirrors the v2 TUI context, and
   `tests/tui-deals-panel.test.ts` plus `tests/contract.test.ts` pin both halves.
 - **`src/deals/` is the excisable Deals slice.** Deleting it plus the two
-  registration lines in `src/plugin/index.ts` (`enrichCatalog` and `tools` in
+  registration lines in `src/plugin/index.ts` (`enrichProvider` and `tools` in
   the v2 `setup`, `enrichCommandCodeModels` and `planSummaryTool` in the v1
   `server`) leaves Core green. Keep the server barrel `src/deals/index.ts` free
   of the TUI re-exports — exporting `tui.tsx` from it pulls

@@ -26,7 +26,7 @@ export type { PlanId } from "../catalog/plans.js"
 export { vendorFamilyForModel } from "./vendor.js"
 
 // Enrichment (family + cmd options + context_over_200k cost) — v1 config hook
-// and v2 catalog transform share one Deals catalog
+// and v2 provider transform share one Deals catalog
 export {
   enrichCommandCodeModels,
   enrichCommandCodeModelsV2,

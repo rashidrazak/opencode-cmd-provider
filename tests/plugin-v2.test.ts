@@ -2,7 +2,7 @@
 // (ADR-0010).
 //
 // The host is faked at the draft level, reproducing the two seeding rules the
-// real editors apply (`packages/core/src/{catalog,integration}.ts` at v2.0.3):
+// real editors apply (`provider/model/integration` editors at v2.0.5):
 //
 //   provider.update(id) on a missing provider seeds `Provider.Info.empty(id)`
 //     = { id, name: id, activation: "auto", package: "" }
@@ -35,7 +35,8 @@ import { enrichCommandCodeModelsV2 } from "../src/deals/enrichment.js"
 import { planSummaryTool, planSummaryV2Tool } from "../src/deals/plan-summary.js"
 import { assert, assertEqual, run } from "./harness.js"
 import type {
-  V2CatalogEditor,
+  V2ProviderEditor,
+  V2ModelEditor,
   V2IntegrationEditor,
   V2IntegrationMethodRegistration,
   V2ModelInfo,
@@ -49,12 +50,12 @@ type ProviderRecord = { provider: V2ProviderInfo; models: Map<string, V2ModelInf
 type IntegrationRecord = { id: string; name: string; methods: unknown[] }
 type DefaultRef = { value?: { providerID: string; modelID: string } }
 
-/** `Provider.Info.empty(id)` — @opencode/schema 2.0.3. */
+/** `Provider.Info.empty(id)` — @opencode/schema 2.0.5. */
 function emptyProvider(id: string): V2ProviderInfo {
   return { id, name: id, activation: "auto", package: "" }
 }
 
-/** `Model.Info.default(providerID, id)` — @opencode/schema 2.0.3. */
+/** `Model.Info.default(providerID, id)` — @opencode/schema 2.0.5. */
 function defaultModel(providerID: string, id: string): V2ModelInfo {
   return {
     id,
@@ -71,11 +72,8 @@ function defaultModel(providerID: string, id: string): V2ModelInfo {
   }
 }
 
-/** `Catalog.Editor` over one draft, with the host's two upsert seeds. */
-function catalogEditor(
-  draft: Map<string, ProviderRecord>,
-  defaultRef: DefaultRef,
-): V2CatalogEditor {
+/** `Provider/Editor` + `Model/Editor` over one draft, with the host's upsert seeds. */
+function providerEditor(draft: Map<string, ProviderRecord>): V2ProviderEditor {
   const record = (providerID: string): ProviderRecord => {
     const current = draft.get(providerID)
     if (current) return current
@@ -84,18 +82,26 @@ function catalogEditor(
     return created
   }
   return {
-    provider: {
-      list: () => [...draft.values()],
-      get: (providerID) => draft.get(providerID),
-      update: (providerID, update) => {
-        const current = record(providerID)
-        update(current.provider)
-        current.provider.id = providerID
-      },
-      remove: (providerID) => void draft.delete(providerID),
+    list: () => [...draft.values()],
+    get: (providerID) => draft.get(providerID),
+    add: (input) => {
+      if (draft.has(input.info.id)) return
+      draft.set(input.info.id, {
+        provider: { ...input.info },
+        models: new Map(input.models.map((m) => [m.id, { ...m }])),
+      })
     },
-    model: {
-      get: (providerID, modelID) => draft.get(providerID)?.models.get(modelID),
+    update: (providerID, update) => {
+      const current = record(providerID)
+      update(current.provider)
+      current.provider.id = providerID
+    },
+    remove: (providerID) => void draft.delete(providerID),
+    models: {
+      set: (providerID, models) => {
+        const current = record(providerID)
+        current.models = new Map(models.map((m) => [m.id, { ...m }]))
+      },
       update: (providerID, modelID, update) => {
         const current = record(providerID)
         const model = current.models.get(modelID) ?? defaultModel(providerID, modelID)
@@ -105,12 +111,35 @@ function catalogEditor(
         model.providerID = providerID
       },
       remove: (providerID, modelID) => void draft.get(providerID)?.models.delete(modelID),
-      default: {
-        get: () => defaultRef.value,
-        set: (providerID, modelID) => {
-          defaultRef.value = { providerID, modelID }
-        },
+    },
+  }
+}
+
+function modelEditor(draft: Map<string, ProviderRecord>, defaultRef: DefaultRef): V2ModelEditor {
+  return {
+    list: (providerID) => {
+      const all: V2ModelInfo[] = []
+      for (const [pid, rec] of draft) {
+        if (providerID !== undefined && pid !== providerID) continue
+        all.push(...rec.models.values())
+      }
+      return all
+    },
+    get: (providerID, modelID) => draft.get(providerID)?.models.get(modelID),
+    update: (providerID, modelID, update) => {
+      const model = draft.get(providerID)?.models.get(modelID)
+      if (model) update(model)
+    },
+    remove: (providerID, modelID) => void draft.get(providerID)?.models.delete(modelID),
+    default: {
+      get: () => defaultRef.value,
+      set: (providerID, modelID) => {
+        defaultRef.value = { providerID, modelID }
       },
+    },
+    provider: {
+      list: () => [...draft.values()],
+      get: (providerID) => draft.get(providerID),
     },
   }
 }
@@ -154,9 +183,9 @@ function integrationEditor(draft: Map<string, IntegrationRecord>): V2Integration
 
 interface FakeHost {
   ctx: V2SetupContext
-  /** Replays every catalog transform onto a fresh draft; returns the draft. */
+  /** Replays every provider transform onto a fresh draft; returns the draft. */
   replay(): Map<string, ProviderRecord>
-  /** Replays the catalog transforms and returns the resulting default model. */
+  /** Replays provider + model transforms and returns the resulting default model. */
   replayDefault(): { providerID: string; modelID: string } | undefined
   /** Replays every integration transform onto a fresh draft. */
   replayIntegrations(): Map<string, IntegrationRecord>
@@ -171,7 +200,8 @@ interface FakeHost {
 }
 
 function fakeHost(): FakeHost {
-  const catalogTransforms: Array<(editor: V2CatalogEditor) => void> = []
+  const providerTransforms: Array<(editor: V2ProviderEditor) => void> = []
+  const modelTransforms: Array<(editor: V2ModelEditor) => void> = []
   const integrationTransforms: Array<(editor: V2IntegrationEditor) => void> = []
   const toolTransforms: Array<(editor: ToolEditor) => void> = []
   const sdkHooks: Array<{ callback: (event: V2SDKEvent) => void; providerID?: string }> = []
@@ -188,9 +218,15 @@ function fakeHost(): FakeHost {
   }
 
   const ctx: V2SetupContext = {
-    catalog: {
+    provider: {
       transform: async (callback) => {
-        catalogTransforms.push(callback)
+        providerTransforms.push(callback)
+        return {}
+      },
+    },
+    model: {
+      transform: async (callback) => {
+        modelTransforms.push(callback)
         return {}
       },
     },
@@ -217,8 +253,10 @@ function fakeHost(): FakeHost {
 
   const replayWith = (): { draft: Map<string, ProviderRecord>; defaultRef: DefaultRef } => {
     const { draft, defaultRef } = build()
-    const editor = catalogEditor(draft, defaultRef)
-    for (const transform of catalogTransforms) transform(editor)
+    const peditor = providerEditor(draft)
+    for (const transform of providerTransforms) transform(peditor)
+    const meditor = modelEditor(draft, defaultRef)
+    for (const transform of modelTransforms) transform(meditor)
     return { draft, defaultRef }
   }
 
@@ -279,7 +317,7 @@ function toolEditor(draft: Map<string, V2ToolDefinition<never>>): ToolEditor {
 async function installed(): Promise<FakeHost> {
   const host = fakeHost()
   await setupCommandCode(host.ctx, {
-    enrichCatalog: enrichCommandCodeModelsV2,
+    enrichProvider: enrichCommandCodeModelsV2,
     tools: [planSummaryV2Tool()],
   })
   return host
@@ -508,7 +546,7 @@ run([
     "registerProvider leaves a non-empty package alone (idempotent replay)",
     () => {
       const draft = new Map<string, ProviderRecord>()
-      const editor = catalogEditor(draft, {})
+      const editor = providerEditor(draft)
       registerProvider(editor, "aisdk:first")
       registerProvider(editor, "aisdk:second")
       assertEqual(draft.get(PROVIDER_ID)?.provider.package, "aisdk:first")
@@ -518,8 +556,8 @@ run([
     "registerModels is additive and never drops a declared model",
     () => {
       const draft = new Map<string, ProviderRecord>()
-      const editor = catalogEditor(draft, {})
-      editor.model.update(PROVIDER_ID, "my-model", (model) => {
+      const editor = providerEditor(draft)
+      editor.models.update(PROVIDER_ID, "my-model", (model) => {
         model.name = "Mine"
       })
       registerModels(editor)
@@ -531,13 +569,13 @@ run([
     "the Deals enrichment carries over to v2 without overwriting declared values",
     () => {
       const draft = new Map<string, ProviderRecord>()
-      const editor = catalogEditor(draft, {})
+      const editor = providerEditor(draft)
       registerModels(editor)
       const overContextId = Object.entries(MODEL_DEALS).find(
         ([, entry]) => entry.overContext !== undefined,
       )?.[0]
       assert(overContextId, "the Deals catalog must carry an over-context rate")
-      editor.model.update(PROVIDER_ID, overContextId, (model) => {
+      editor.models.update(PROVIDER_ID, overContextId, (model) => {
         model.settings = { cmd: { declared: true } }
       })
       enrichCommandCodeModelsV2(editor)
@@ -550,11 +588,13 @@ run([
     "an empty Deals catalog surfaces the mitigated unavailable state in v2",
     () => {
       const draft = new Map<string, ProviderRecord>()
-      const editor = catalogEditor(draft, {})
+      const editor = providerEditor(draft)
       registerModels(editor)
       enrichCommandCodeModelsV2(editor, {})
-      const row = MODEL_SNAPSHOT[0]!
-      assertEqual(draft.get(PROVIDER_ID)?.models.get(row.id)?.settings?.["cmd"], {
+      const row = MODEL_SNAPSHOT.find(({ id }) => id === "Qwen/Qwen3.8-27B")!
+      const model = draft.get(PROVIDER_ID)?.models.get(row.id)
+      assertEqual(model?.family, "qwen", "family is vendor-derived, never from deals")
+      assertEqual(model?.settings?.["cmd"], {
         unavailable: true,
       })
     },
@@ -576,14 +616,14 @@ run([
     },
   ],
   [
-    "the v2.0.3 loader schema admits the dual export and strips the v1 half",
+    "the v2.0.5 loader schema admits the dual export and strips the v1 half",
     async () => {
       // The assumption the whole dual entrypoint rests on: the v2 loader decodes
       // the default export with this exact Effect Schema and `Schema.Struct`
       // strips keys it does not declare, so `server` is invisible to v2 while v1
       // (which only looks for id/server/tui) ignores `setup`. Rather than trust
       // that, run the loader's own schema. Verbatim from
-      // `packages/core/src/plugin/module.ts` @ v2.0.3 (`Schema.declare` guards
+      // `packages/core/src/plugin/module.ts` @ v2.0.5 (`Schema.declare` guards
       // elided to the shape check that matters here).
       const effect = await import("effect").catch(() => undefined)
       if (effect === undefined) {

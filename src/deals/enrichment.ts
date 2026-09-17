@@ -1,11 +1,11 @@
 // src/deals/enrichment.ts — docs-derived model enrichment for the config hook
-// (v1) and the catalog transform (v2). Purely additive: every field is
+// (v1) and the provider transform (v2). Purely additive: every field is
 // gap-filled only when the user left it unset. When the Deals catalog is empty
 // the mitigated state is visible: `cmd.unavailable` is injected instead of
 // leaving `cmd` absent, while `family`/`cost` are preserved and Declared `cmd`
 // is never overwritten.
 import type { Config } from "@opencode-ai/sdk/v2"
-import type { V2CatalogEditor } from "../plugin/v2-types.js"
+import type { V2ProviderEditor } from "../plugin/v2-types.js"
 import { MODEL_DEALS, type ModelDeals } from "./catalog.js"
 import { vendorFamilyForModel } from "./vendor.js"
 
@@ -71,7 +71,7 @@ export function buildCmdOptions(deals: ModelDeals): Record<string, unknown> {
 }
 
 /**
- * v2 counterpart of `enrichCommandCodeModels` (ADR-0010), run as a catalog
+ * v2 counterpart of `enrichCommandCodeModels` (ADR-0010), run as a provider
  * transform extension right after Auto-registration. Field-by-field the same
  * gap-fill against the same Deals catalog:
  *  - `family` ← the vendor table;
@@ -84,38 +84,38 @@ export function buildCmdOptions(deals: ModelDeals): Record<string, unknown> {
  * surfaces `{ unavailable: true }` instead of a silent gap.
  */
 export function enrichCommandCodeModelsV2(
-  catalog: V2CatalogEditor,
+  editor: V2ProviderEditor,
   deals: Readonly<Record<string, ModelDeals>> = MODEL_DEALS,
 ): void {
-  const record = catalog.provider.get(PROVIDER_ID)
+  const record = editor.get(PROVIDER_ID)
   if (!record) return
   const isEmpty = Object.keys(deals).length === 0
-  for (const [modelId, model] of record.models) {
-    if (model.family === undefined) {
-      const family = vendorFamilyForModel(modelId)
-      if (family !== undefined) model.family = family
-    }
+  for (const [modelId, current] of record.models) {
     const entry = deals[modelId]
-    if (!entry) {
-      if (isEmpty && model.settings?.["cmd"] === undefined) {
-        model.settings ??= {}
-        model.settings["cmd"] = { unavailable: true }
+    const family = current.family === undefined ? vendorFamilyForModel(modelId) : undefined
+    editor.models.update(PROVIDER_ID, modelId, (model) => {
+      if (family !== undefined && model.family === undefined) model.family = family
+      if (!entry) {
+        if (isEmpty && model.settings?.["cmd"] === undefined) {
+          model.settings ??= {}
+          model.settings["cmd"] = { unavailable: true }
+        }
+        return
       }
-      continue
-    }
-    if (model.settings?.["cmd"] === undefined) {
-      model.settings ??= {}
-      model.settings["cmd"] = buildCmdOptions(entry)
-    }
-    if (entry.overContext !== undefined && !hasOverContextTier(model)) {
-      const c = entry.overContext
-      model.cost.push({
-        tier: { type: "context", size: OVER_CONTEXT_TIER_SIZE },
-        input: c.input,
-        output: c.output,
-        cache: { read: c.cacheRead, write: c.cacheWrite },
-      })
-    }
+      if (model.settings?.["cmd"] === undefined) {
+        model.settings ??= {}
+        model.settings["cmd"] = buildCmdOptions(entry)
+      }
+      if (entry.overContext !== undefined && !hasOverContextTier(model)) {
+        const c = entry.overContext
+        model.cost.push({
+          tier: { type: "context", size: OVER_CONTEXT_TIER_SIZE },
+          input: c.input,
+          output: c.output,
+          cache: { read: c.cacheRead, write: c.cacheWrite },
+        })
+      }
+    })
   }
 }
 

@@ -7,8 +7,8 @@
 // never resolves that module at runtime — the same load-time landmine the
 // `@opencode-ai/*` rule exists for (see tests/contract.test.ts). Only the
 // members this plugin touches are declared; the shapes are hand-mirrored from
-// `@opencode/plugin@2.0.3` (`dist/promise/{plugin,catalog,integration,tool,aisdk}.d.ts`)
-// and `@opencode/schema@2.0.3` (`Provider.Info`, `Model.Info`, `Tool.Info`).
+// `@opencode/plugin@2.0.5` (`dist/promise/{plugin,provider,model,integration,tool,aisdk}.d.ts`)
+// and `@opencode/schema@2.0.5` (`Provider.Info`, `Model.Info`, `Tool.Info`).
 // Bumping the supported v2 line means re-deriving these from the published
 // package — tests/plugin-v2.test.ts pins the parts we depend on.
 
@@ -62,37 +62,48 @@ export interface V2ModelInfo {
   limit: { context: number; input?: number; output: number }
 }
 
-export interface V2CatalogProviderRecord {
-  provider: V2ProviderInfo
-  models: ReadonlyMap<string, V2ModelInfo>
+export interface V2ProviderRecord {
+  readonly provider: V2ProviderInfo
+  readonly models: ReadonlyMap<string, V2ModelInfo>
 }
 
 /**
- * `catalog.transform` editor. Edits are replayable: the host rebuilds the
- * visible catalog by replaying every active transform onto a fresh value, so a
- * callback must stay synchronous, cheap, and free of one-time side effects.
- *
- * `provider.update` / `model.update` are upserts — a record that does not exist
- * yet is seeded from `Provider.Info.empty(id)` (`{ id, name: id, activation:
- * "auto", package: "" }`) or `Model.Info.default(providerID, id)` (`name = id`,
- * default capabilities, empty `cost`, `limit` 200k/32k) before the callback
- * runs. That seeding is what makes the gap-fill checks below meaningful.
+ * `provider.transform` editor (real v2 API). Source definitions: `update`
+ * edits provider settings, `models.update` edits an owned copy of a source
+ * model. Both are upserts — a missing provider seeds from
+ * `Provider.Info.empty(id)`, a missing model seeds from
+ * `Model.Info.default(providerID, id)` — so gap-fill checks stay meaningful.
  */
-export interface V2CatalogEditor {
-  provider: {
-    list(): readonly V2CatalogProviderRecord[]
-    get(providerID: string): V2CatalogProviderRecord | undefined
-    update(providerID: string, update: (provider: V2ProviderInfo) => void): void
-    remove(providerID: string): void
-  }
-  model: {
-    get(providerID: string, modelID: string): V2ModelInfo | undefined
+export interface V2ProviderEditor {
+  list(): readonly V2ProviderRecord[]
+  get(providerID: string): V2ProviderRecord | undefined
+  add(input: { info: V2ProviderInfo; models: readonly V2ModelInfo[] }): void
+  update(providerID: string, update: (provider: V2ProviderInfo) => void): void
+  remove(providerID: string): void
+  readonly models: {
+    set(providerID: string, models: readonly V2ModelInfo[]): void
     update(providerID: string, modelID: string, update: (model: V2ModelInfo) => void): void
     remove(providerID: string, modelID: string): void
-    default: {
-      get(): { providerID: string; modelID: string } | undefined
-      set(providerID: string, modelID: string): void
-    }
+  }
+}
+
+/**
+ * `model.transform` editor (real v2 API). Edits the active-provider candidate
+ * collection; `provider` exposes immutable source definitions. `default`
+ * selects the first-run fallback.
+ */
+export interface V2ModelEditor {
+  list(providerID?: string): readonly V2ModelInfo[]
+  get(providerID: string, modelID: string): V2ModelInfo | undefined
+  update(providerID: string, modelID: string, update: (model: V2ModelInfo) => void): void
+  remove(providerID: string, modelID: string): void
+  readonly default: {
+    get(): { providerID: string; modelID: string } | undefined
+    set(providerID: string, modelID: string): void
+  }
+  readonly provider: {
+    list(): readonly V2ProviderRecord[]
+    get(providerID: string): V2ProviderRecord | undefined
   }
 }
 
@@ -134,9 +145,9 @@ export interface V2ToolResult {
 }
 
 /**
- * `Tool.Info` as the Promise adapter restates it: `input` is JSON Schema (or a
- * schema codec) and `execute` returns a Promise of the structured result.
- * Declaring the single input parameter is assignable to the host signature.
+ * `Tool.Info` as the Promise adapter restates it: `input` is JSON Schema and
+ * `execute` returns a Promise of the structured result. Declaring the single
+ * input parameter is assignable to the host signature.
  */
 export interface V2ToolDefinition<Input = Record<string, unknown>> {
   name: string
@@ -167,8 +178,11 @@ export interface V2SDKEvent {
  * resolved value is not part of the mirror.
  */
 export interface V2SetupContext {
-  readonly catalog: {
-    transform(callback: (editor: V2CatalogEditor) => void): Promise<unknown>
+  readonly provider: {
+    transform(callback: (editor: V2ProviderEditor) => void): Promise<unknown>
+  }
+  readonly model: {
+    transform(callback: (editor: V2ModelEditor) => void): Promise<unknown>
   }
   readonly integration: {
     transform(callback: (editor: V2IntegrationEditor) => void): Promise<unknown>
@@ -185,7 +199,7 @@ export interface V2SetupContext {
   }
 }
 
-/** `Plugin` from `@opencode/plugin@2.0.3` — the v2 half of the dual export. */
+/** `Plugin` from `@opencode/plugin@2.0.5` — the v2 half of the dual export. */
 export interface V2Plugin {
   readonly id: string
   readonly setup: (context: V2SetupContext) => Promise<void> | void
