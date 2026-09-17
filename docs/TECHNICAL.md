@@ -298,8 +298,8 @@ part the builder does not model. Content the stream never turned into a part is
 invisible to that builder, so it is refused a step earlier: the Anthropic parser
 reports the content-block types it does not model, and the transport refuses to
 continue a pause whose response held one, naming the type — the alternative is a
-continuation that silently drops it. A turn that _ends_ with such a block is
-unaffected: #72 still emits no part for it. The bound is five
+continuation that silently drops it (ADR-0014). A turn that _ends_ with such a
+block is unaffected: #72 still emits no part for it. The bound is five
 continuations: a turn still paused there fails with `PauseTurnLimitError` instead
 of emitting `finish{pause_turn}`, which v1 reads as a completed turn and v2
 rejects as a retryable incomplete stream. Whatever the paused response left open
@@ -507,3 +507,4 @@ Both e2e scripts are excluded from `npm test`.
 | [0011](adr/0011-billing-derived-plan-identity.md)              | Plan identity from the billing subscription, never a default              |
 | [0012](adr/0012-connect-callback-budget-and-api-key-method.md) | Human-scale connect callback budget, `api` method without `authorize`     |
 | [0013](adr/0013-finish-reason-vocabulary.md)                   | A turn that ended is never reported with `unified: "other"`               |
+| [0014](adr/0014-unmodelled-block-refuses-resume.md)            | A resumed turn never silently drops a block the stream did not model      |
