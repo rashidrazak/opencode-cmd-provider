@@ -108,6 +108,15 @@ function failure(
 /** A network failure: no response at all, or a response that died mid-body. */
 export const NETWORK_FAILURE: Failure = failure("network", true)
 
+/**
+ * Upstream's own wording for a stream that ended without a turn — a proxy or
+ * CDN truncation, or a server that flushed partial work and closed the body
+ * (issues #170, #187). One string, so the transport's own truncation and the
+ * legacy codec's finish-event guard surface the same thing.
+ */
+export const TRUNCATION_MESSAGE =
+  "Stream ended unexpectedly before completion (no finish event) — response was truncated"
+
 /** The documented `403 upgrade_required`: a transport flip the ladder never
  * replays (the model owns the flip and re-runs the call on the legacy
  * transport instead — issue #56). */
@@ -287,6 +296,26 @@ export function classifyStreamError(facts: StreamErrorFacts): Failure {
 
 export function abortError(message = "The operation was aborted"): DOMException {
   return new DOMException(message, "AbortError")
+}
+
+/**
+ * A failure the transport (or its codecs) classified itself (issue #171). The
+ * `Failure` rides on the error so the retry loop reads the cause instead of the
+ * catch site; the message is the transport's own, already redacted where it is
+ * built, and `status` is the HTTP status the failure named when it named one.
+ * `failureOf` reads the failure and `isTransportError` the marker, so an error
+ * raised anywhere in the transport carries its classification with it.
+ */
+export class TransportFailureError extends Error {
+  readonly transportError = true as const
+  readonly failure: Failure
+  readonly status?: number
+  constructor(message: string, failure: Failure, status?: number) {
+    super(message)
+    this.name = "TransportFailureError"
+    this.failure = failure
+    this.status = status
+  }
 }
 
 export function timeoutError(timeoutMs: number | undefined): Error {

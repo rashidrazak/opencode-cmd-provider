@@ -297,6 +297,20 @@ those reasons to `other`, which is exactly the v2 failure ADR-0013 records.
 `tests/stream.test.ts` holds the vocabulary table and an invariant test that no
 stream the three codecs can produce ends `other`.
 
+Two finish _events_ never reach that mapper, because they are not endings at all
+— upstream's own guards on its legacy consume loop, mirrored here (issue #187).
+A legacy `finish` reporting `other` with **no** raw reason is upstream's
+truncation condition (`stopReason === "other" && rawFinishReason === undefined`):
+the codec raises `TruncatedStreamError`'s wording as a classified, retryable
+truncation instead of completing the turn. A reason matching
+`network` / `connection` / `upstream` + `error` (any separator or case —
+upstream's `isNetworkFailureFinish` regex) is a connection that died mid-stream:
+the codec raises a retryable transport failure naming the reason. Both are
+replayed only while the consumer has seen nothing, like every other transient
+failure, and both surface as the `error` part after the budget. A raw reason
+beside `other` is the explanation the guard was waiting for, so that turn ends
+normally.
+
 Retries are causal: every failure is classified first, and only the kinds whose
 own shape says "transient" are replayed. The vocabulary and the rules are ported
 from upstream `command-code@1.54.0` (`isModelCallRetryable`,
@@ -304,13 +318,13 @@ from upstream `command-code@1.54.0` (`isModelCallRetryable`,
 
 | failure                                                                                                                                                                                           | kind             | replayed                      |
 | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- | ----------------------------- |
-| fetch rejection, read failure, per-attempt timeout                                                                                                                                                | network          | yes                           |
+| fetch rejection, read failure, per-attempt timeout, or a legacy `finish` naming a network/connection/upstream error                                                                               | network          | yes                           |
 | HTTP 408 / 429 / 5xx                                                                                                                                                                              | retryable status | yes                           |
 | HTTP 400 / 401 / 403 / 404 / 422, and every other status                                                                                                                                          | fatal status     | no                            |
 | 429 (or a `RATE_LIMITED` code) naming a usage window                                                                                                                                              | window limit     | no                            |
 | `Retry-After` beyond `maxRetryDelayMs`                                                                                                                                                            | retry-after cap  | no                            |
 | the plan-gate 403: `upgrade_required`, `upgrade to GOAT/provider`, or "without / doesn't include API access"                                                                                      | transport flip   | flipped once, never replayed  |
-| body ended with no terminal, or with only a synthesized finish                                                                                                                                    | truncation       | yes, while nothing is visible |
+| body ended with no terminal, with only a synthesized finish, or with a legacy `finish` reporting `other` and no raw reason                                                                        | truncation       | yes, while nothing is visible |
 | server `error` event: `isRetryable: true`, else a reported 408/429/5xx, else retryable unless it says `false` or names `premium_credits_exhausted` / `model_not_in_plan` / `insufficient credits` | stream error     | per that rule                 |
 | a turn still paused after five `pause_turn` continuations                                                                                                                                         | pause-turn limit | no                            |
 

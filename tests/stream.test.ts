@@ -16,8 +16,9 @@ import {
   createAnthropicStreamParser,
   finishIsPauseTurn,
   addAiSdkUsage,
+  isNetworkFailureFinishReason,
 } from "../src/provider/stream.js"
-import { assert, assertEqual, rejects, run } from "./harness.js"
+import { assert, assertEqual, rejects, run, throws } from "./harness.js"
 
 /**
  * Every stop reason the wire can send, in both dialects plus the legacy /
@@ -1093,6 +1094,71 @@ run([
           outputTokens: { total: 5, text: 3, reasoning: 0 },
         },
       )
+    },
+  ],
+
+  [
+    "the legacy finish guards refuse a turn that never ended (issue #187)",
+    () => {
+      // A finish reporting `other` with no raw reason is upstream's own
+      // truncation condition (`stopReason === "other" && rawFinishReason ===
+      // undefined`), so it must not become a completed turn — and it is
+      // classified, not merely refused: the failure rides on the error for the
+      // ladder.
+      const truncated = (() => {
+        try {
+          ccEventToStreamPart({
+            type: "finish",
+            finishReason: "other",
+            totalUsage: { inputTokens: 10, outputTokens: 4 },
+          })
+        } catch (error) {
+          return error as Error & {
+            failure?: { kind?: string; retryable?: boolean }
+            status?: number
+          }
+        }
+        return undefined
+      })()
+      assert(truncated, "other with no raw reason throws")
+      assert(truncated.message.includes("truncated"), truncated.message)
+      assertEqual(truncated.failure, { kind: "truncation", retryable: true, status: 502 })
+      assertEqual(truncated.status, 502)
+      assertEqual((truncated as { transportError?: boolean }).transportError, true)
+
+      // `other` **with** a raw reason is an ending: the wire told us why.
+      const ended = ccEventToStreamPart({
+        type: "finish",
+        finishReason: "other",
+        rawFinishReason: "somewhere-else",
+        totalUsage: { inputTokens: 10, outputTokens: 4 },
+      })[0] as { finishReason: unknown }
+      assertEqual(ended.finishReason, { unified: "stop", raw: "somewhere-else" })
+
+      // The connection-failure spellings upstream's regex accepts.
+      for (const reason of [
+        "network_error",
+        "connection-error",
+        "upstream error",
+        "UPSTREAM_ERROR",
+        "Network_Error",
+      ]) {
+        assert(isNetworkFailureFinishReason(reason), `${reason} is a connection failure`)
+        throws(
+          () =>
+            ccEventToStreamPart({
+              type: "finish",
+              finishReason: reason,
+              totalUsage: { inputTokens: 10, outputTokens: 4 },
+            }),
+          /upstream connection failed mid-stream/,
+        )
+      }
+      // …and the ones it must not (a different separator, a suffix, an
+      // unrelated failure).
+      for (const reason of ["network", "upstream_error_2", "networking_error", "error"]) {
+        assert(!isNetworkFailureFinishReason(reason), `${reason} is not a connection failure`)
+      }
     },
   ],
 ])

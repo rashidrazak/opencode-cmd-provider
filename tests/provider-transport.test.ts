@@ -1756,6 +1756,145 @@ run([
     },
   ],
   [
+    "transport: a legacy finish reporting other with no raw reason is a truncation, never a turn (issue #187)",
+    async () => {
+      // Upstream's own condition on the legacy terminal is `stopReason ===
+      // "other" && rawFinishReason === undefined`: the response declared no
+      // reason and ended without a turn, so it is retried while nothing is
+      // visible and surfaced as a truncation after the budget — not reported as
+      // a completed `other` turn, which OpenCode v2 fails anyway.
+      const mock = await startMockCc({
+        stream: [finishEvent({ finishReason: "other" })],
+      })
+      try {
+        const provider = createCommandCode({
+          apiKey: "test_key",
+          baseURL: mock.url,
+          maxRetries: 2,
+          maxRetryDelayMs: 0,
+        })
+        const parts = await collect(
+          provider.languageModel("gpt-5.6-terra"),
+          [{ role: "user", content: "hi" }],
+          { commandcode: { plan: "go" } },
+        )
+        assertEqual(mock.hits.generate, 3, "the truncation is replayed within the budget")
+        assertEqual(
+          parts.filter((p) => p.type === "finish"),
+          [],
+          "never a completed turn",
+        )
+        const failure = parts[parts.length - 1]!.error as Error & { status?: number }
+        assertEqual(failure.message, TRUNCATION_MESSAGE)
+        assertEqual(failure.status, 502)
+      } finally {
+        await mock.close()
+      }
+    },
+  ],
+  [
+    "transport: a legacy finish reporting other with a raw reason still completes the turn (issue #187)",
+    async () => {
+      // The guard is only about a reason the wire never explained. A raw reason
+      // beside `other` is the explanation, and the turn ends on it.
+      const mock = await startMockCc({
+        stream: [
+          textDelta("an answer"),
+          finishEvent({ finishReason: "other", rawFinishReason: "somewhere-else" }),
+        ],
+      })
+      try {
+        const provider = createCommandCode({ apiKey: "test_key", baseURL: mock.url })
+        const parts = await collect(
+          provider.languageModel("gpt-5.6-terra"),
+          [{ role: "user", content: "hi" }],
+          { commandcode: { plan: "go" } },
+        )
+        assertEqual(mock.hits.generate, 1, "no replay: the turn ended")
+        assertEqual(
+          parts.map((p) => p.type),
+          ["text-delta", "finish"],
+        )
+        assertEqual((parts[1] as { finishReason: unknown }).finishReason, {
+          unified: "stop",
+          raw: "somewhere-else",
+        })
+      } finally {
+        await mock.close()
+      }
+    },
+  ],
+  [
+    "transport: a legacy connection-failure finish is replayed while nothing is visible (issue #187)",
+    async () => {
+      // `network` / `connection` / `upstream` + error is upstream's
+      // `isNetworkFailureFinish`: the connection died mid-stream, so the turn is
+      // a retryable transport failure rather than a completed one.
+      const mock = await startMockCc({
+        stream: [finishEvent({ finishReason: "upstream_error" })],
+      })
+      try {
+        const provider = createCommandCode({
+          apiKey: "test_key",
+          baseURL: mock.url,
+          maxRetries: 2,
+          maxRetryDelayMs: 0,
+        })
+        const parts = await collect(
+          provider.languageModel("gpt-5.6-terra"),
+          [{ role: "user", content: "hi" }],
+          { commandcode: { plan: "go" } },
+        )
+        assertEqual(mock.hits.generate, 3, "replayed within the budget")
+        assertEqual(
+          parts.filter((p) => p.type === "finish"),
+          [],
+          "never a completed turn",
+        )
+        const failure = parts[parts.length - 1]!.error as Error & { status?: number }
+        assertEqual(
+          failure.message,
+          'Provider finished with reason "upstream_error" — upstream connection failed mid-stream',
+        )
+        assertEqual(failure.status, 502)
+      } finally {
+        await mock.close()
+      }
+    },
+  ],
+  [
+    "transport: a legacy connection-failure finish after visible content is surfaced, never replayed (issue #187)",
+    async () => {
+      // Same failure, but the consumer has already seen the response's text: a
+      // replay would duplicate it, so the failure is surfaced instead.
+      const mock = await startMockCc({
+        stream: [textDelta("half an ans"), finishEvent({ finishReason: "connection error" })],
+      })
+      try {
+        const provider = createCommandCode({
+          apiKey: "test_key",
+          baseURL: mock.url,
+          maxRetries: 2,
+          maxRetryDelayMs: 0,
+        })
+        const parts = await collect(
+          provider.languageModel("gpt-5.6-terra"),
+          [{ role: "user", content: "hi" }],
+          { commandcode: { plan: "go" } },
+        )
+        assertEqual(mock.hits.generate, 1, "no replay after visible content")
+        assertEqual(
+          parts.map((p) => p.type),
+          ["text-delta", "error"],
+        )
+        const failure = parts[1]!.error as Error
+        assert(failure.message.includes("upstream connection failed mid-stream"), failure.message)
+      } finally {
+        await mock.close()
+      }
+    },
+  ],
+  [
     "transport: a stream that ends without a finish event is truncated, and closes open parts first (issues #72, #170)",
     async () => {
       // A dropped connection is the other half of "failed mid-generation": the

@@ -60,6 +60,8 @@ import {
   delay,
   NETWORK_FAILURE,
   TRUNCATION_FAILURE,
+  TRUNCATION_MESSAGE,
+  TransportFailureError,
   UPGRADE_REQUIRED_FAILURE,
   VERSION_GATE_FAILURE,
   PAUSE_TURN_LIMIT_FAILURE,
@@ -218,21 +220,6 @@ function classifyCaught(error: unknown, fallback?: Failure): Failure | undefined
 }
 
 /**
- * A failure the transport itself classified (issue #171). The `Failure` rides
- * on the error so the retry loop reads the cause instead of the catch site;
- * the message is the transport's own, already redacted where it is built.
- */
-class TransportFailureError extends Error implements ClassifiedTransportError {
-  readonly transportError = true as const
-  readonly failure: Failure
-  constructor(message: string, failure: Failure) {
-    super(message)
-    this.name = "TransportFailureError"
-    this.failure = failure
-  }
-}
-
-/**
  * The response body ended cleanly without a terminal event — a proxy/CDN
  * truncation, or a server that flushed partial work and ended the body. It is
  * raised instead of fabricating a `finish(stop)` with zeroed usage, which
@@ -247,11 +234,7 @@ class TruncatedStreamError extends Error implements ClassifiedTransportError {
   constructor() {
     // Redacted where it is built, so `fail` may surface the instance as-is even
     // if the wording ever grows a provider-supplied part.
-    super(
-      redactCommandCodeErrorText(
-        "Stream ended unexpectedly before completion (no finish event) — response was truncated",
-      ),
-    )
+    super(redactCommandCodeErrorText(TRUNCATION_MESSAGE))
     this.name = "TruncatedStreamError"
   }
 }

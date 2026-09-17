@@ -29,7 +29,13 @@ import type {
 } from "@ai-sdk/provider"
 import { isRecord, stringValue, numberValue, recordOrEmpty } from "./converters.js"
 import { commandCodeErrorMessage, redactCommandCodeErrorText } from "./redact.js"
-import type { StreamErrorFacts } from "./retry.js"
+import {
+  NETWORK_FAILURE,
+  TRUNCATION_FAILURE,
+  TRUNCATION_MESSAGE,
+  TransportFailureError,
+  type StreamErrorFacts,
+} from "./retry.js"
 
 type FinishPart = Extract<LanguageModelV3StreamPart, { type: "finish" }>
 
@@ -230,6 +236,52 @@ function toolCallIdOf(event: Record<string, unknown>): string {
   return stringValue(event.toolCallId) ?? stringValue(event.id) ?? ""
 }
 
+/**
+ * Upstream's `isNetworkFailureFinish` (`command-code@1.54.1`): a finish reason
+ * naming a failure of the connection that carried the stream — `network`,
+ * `connection` or `upstream` + `error`, with any separator and in any case.
+ * Such a turn died mid-stream; it never ended.
+ */
+export function isNetworkFailureFinishReason(reason: string): boolean {
+  return /^(?:network|connection|upstream)[-_\s]?error$/i.test(reason.trim())
+}
+
+/**
+ * The two guards upstream's legacy consume loop carries on its finish event and
+ * this codec did not (issue #187). Both are raised instead of mapped, because
+ * neither is an ending: the vocabulary mapper completes every reason it does
+ * not recognise (issue #186), so without these a truncated or connection-failed
+ * turn would be reported to the Host as a finished one — and OpenCode v2 would
+ * fail it anyway as an unknown finish reason.
+ *
+ * - A finish reporting the AI SDK's `other` **with no raw reason** never ended a
+ *   turn: upstream's condition is `stopReason === "other" && rawFinishReason ===
+ *   undefined`, and it raises its own truncation error for it (retryable while
+ *   the consumer has seen nothing — the body may simply have been cut).
+ * - A reason naming a network/connection/upstream error is a transport failure
+ *   that died mid-stream, retryable the same way.
+ *
+ * The two fields are read the way the finish mapping below reads them: the
+ * unified reason off `finishReason`, the effective raw reason off
+ * `rawFinishReason ?? finishReason`.
+ */
+function assertLegacyFinishEndedTurn(event: Record<string, unknown>): void {
+  const rawReason = stringValue(event.rawFinishReason)
+  if (rawReason === undefined && stringValue(event.finishReason)?.toLowerCase() === "other") {
+    throw new TransportFailureError(TRUNCATION_MESSAGE, TRUNCATION_FAILURE, 502)
+  }
+  const reason = rawReason ?? stringValue(event.finishReason)
+  if (reason !== undefined && isNetworkFailureFinishReason(reason)) {
+    throw new TransportFailureError(
+      redactCommandCodeErrorText(
+        `Provider finished with reason "${reason}" — upstream connection failed mid-stream`,
+      ),
+      NETWORK_FAILURE,
+      502,
+    )
+  }
+}
+
 export function ccEventToStreamPart(event: unknown): LanguageModelV3StreamPart[] {
   if (!isRecord(event)) return []
   switch (event.type) {
@@ -277,7 +329,9 @@ export function ccEventToStreamPart(event: unknown): LanguageModelV3StreamPart[]
       // own consumer reads the terminal's two reason fields apart — the
       // unified reason off `finishReason`, the raw one off `rawFinishReason ??
       // finishReason` — and the transport loops on the raw one, where
-      // `pause_turn` is reported (issue #172).
+      // `pause_turn` is reported (issue #172). Two of those readings are not
+      // endings at all and are refused before any part exists (issue #187).
+      assertLegacyFinishEndedTurn(event)
       const reason = mapFinishReason(event.finishReason)
       const rawReason = stringValue(event.rawFinishReason)
       return [
