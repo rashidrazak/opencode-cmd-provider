@@ -2109,6 +2109,204 @@ run([
     },
   ],
   [
+    "transport: a Provider API pause resumes with the paused assistant turn appended (issue #188)",
+    async () => {
+      // The Provider API continues a paused turn by re-sending the request with
+      // the paused assistant turn appended — upstream's AI-SDK path does
+      // exactly that. The OpenAI dialect appends the text as the message's
+      // content, and the turn still ends with a single finish reporting the
+      // summed usage of its continuations.
+      const bodies: Array<Record<string, unknown>> = []
+      let requests = 0
+      const options: MockCcOptions = {
+        chatCompletionsStream: [
+          openAIChunk("first ", { id: "chatcmpl-1" }),
+          { id: "chatcmpl-1", choices: [{ delta: {}, finish_reason: "pause_turn" }] },
+          { id: "chatcmpl-1", choices: [], usage: { prompt_tokens: 10, completion_tokens: 4 } },
+        ],
+      }
+      options.onChatCompletions = (body) => {
+        bodies.push(body)
+        requests++
+        if (requests === 2) {
+          options.chatCompletionsStream = [
+            openAIChunk("second", { id: "chatcmpl-2" }),
+            {
+              id: "chatcmpl-2",
+              choices: [{ delta: {}, finish_reason: "end_turn" }],
+              usage: { prompt_tokens: 3, completion_tokens: 5 },
+            },
+          ]
+        }
+      }
+      const mock = await startMockCc(options)
+      try {
+        const provider = createCommandCode({ apiKey: "test_key", baseURL: mock.url })
+        const parts = await collect(provider.languageModel("gpt-5.6-terra"), [
+          { role: "user", content: "hi" },
+        ])
+        assertEqual(mock.hits.chatCompletions, 2, "the pause is continued once")
+        assertEqual(bodies[0]!.messages, [{ role: "user", content: "hi" }])
+        assertEqual(bodies[1]!.messages, [
+          { role: "user", content: "hi" },
+          { role: "assistant", content: "first " },
+        ])
+        const finish = parts[parts.length - 1] as {
+          type: string
+          usage: { inputTokens: { total: number }; outputTokens: { total: number } }
+        }
+        assertEqual(finish.type, "finish")
+        assertEqual(finish.usage.inputTokens.total, 13)
+        assertEqual(finish.usage.outputTokens.total, 9)
+      } finally {
+        await mock.close()
+      }
+    },
+  ],
+  [
+    "transport: an Anthropic pause resumes with the paused assistant text block (issue #188)",
+    async () => {
+      // The Anthropic dialect appends the paused turn as an assistant message
+      // whose content is the text block the paused response streamed. Nothing
+      // else about the request moves: the conversation it re-sends is the one
+      // the provider paused.
+      const bodies: Array<Record<string, unknown>> = []
+      const block = (text: string, stopReason: string, usage: Record<string, unknown>) => [
+        { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+        anthropicContentBlockDelta(text),
+        { type: "content_block_stop", index: 0 },
+        anthropicMessageDelta(usage, stopReason),
+      ]
+      let requests = 0
+      const options: MockCcOptions = {
+        messagesStream: block("first ", "pause_turn", { input_tokens: 10, output_tokens: 4 }),
+      }
+      options.onMessages = (body) => {
+        bodies.push(body)
+        requests++
+        if (requests === 2) {
+          options.messagesStream = block("second", "end_turn", {
+            input_tokens: 3,
+            output_tokens: 5,
+          })
+        }
+      }
+      const mock = await startMockCc(options)
+      try {
+        const provider = createCommandCode({ apiKey: "test_key", baseURL: mock.url })
+        const parts = await collect(provider.languageModel("claude-sonnet-5"), [
+          { role: "user", content: "hi" },
+        ])
+        assertEqual(mock.hits.messages, 2, "the pause is continued once")
+        assertEqual(bodies[0]!.messages, [{ role: "user", content: "hi" }])
+        assertEqual(bodies[1]!.messages, [
+          { role: "user", content: "hi" },
+          { role: "assistant", content: [{ type: "text", text: "first " }] },
+        ])
+        const finish = parts[parts.length - 1] as {
+          type: string
+          usage: { inputTokens: { total: number }; outputTokens: { total: number } }
+        }
+        assertEqual(finish.type, "finish")
+        assertEqual(finish.usage.inputTokens.total, 13)
+        assertEqual(finish.usage.outputTokens.total, 9)
+      } finally {
+        await mock.close()
+      }
+    },
+  ],
+  [
+    "transport: a paused turn carrying a shape the resume cannot represent fails loudly (issue #188)",
+    async () => {
+      // A resume must never silently drop part of the turn it continues. The
+      // paused response called a tool here, so the continuation cannot be
+      // built from text alone: the turn fails, naming what was not carried,
+      // and no continuation request is ever sent.
+      const options: MockCcOptions = {
+        chatCompletionsStream: [
+          openAIChunk("let me look", { id: "chatcmpl-1" }),
+          {
+            id: "chatcmpl-1",
+            choices: [
+              {
+                delta: {
+                  tool_calls: [
+                    {
+                      index: 0,
+                      id: "call_1",
+                      function: { name: "read", arguments: '{"path":"a.ts"}' },
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+          { id: "chatcmpl-1", choices: [{ delta: {}, finish_reason: "pause_turn" }] },
+          { id: "chatcmpl-1", choices: [], usage: { prompt_tokens: 10, completion_tokens: 4 } },
+        ],
+      }
+      const mock = await startMockCc(options)
+      try {
+        const provider = createCommandCode({ apiKey: "test_key", baseURL: mock.url })
+        const parts = await collect(provider.languageModel("gpt-5.6-terra"), [
+          { role: "user", content: "hi" },
+        ])
+        assertEqual(mock.hits.chatCompletions, 1, "no continuation is attempted")
+        assertEqual(
+          parts.filter((p) => p.type === "finish"),
+          [],
+          "no finish is reported",
+        )
+        const failure = parts[parts.length - 1]!.error as Error
+        assert(failure.message.includes("tool calls"), failure.message)
+        assert(failure.message.includes("cannot be carried"), failure.message)
+      } finally {
+        await mock.close()
+      }
+    },
+  ],
+  [
+    "transport: a paused turn carrying reasoning blocks fails loudly until the resume can carry them (issue #188)",
+    async () => {
+      // The Anthropic dialect's reasoning arrives as a thinking block. Same
+      // rule as the tool call above: the continuation says what it could not
+      // represent instead of resuming a turn that never happened.
+      const options: MockCcOptions = {
+        messagesStream: [
+          {
+            type: "content_block_start",
+            index: 0,
+            content_block: { type: "thinking", thinking: "" },
+          },
+          {
+            type: "content_block_delta",
+            index: 0,
+            delta: { type: "thinking_delta", thinking: "hmm" },
+          },
+          { type: "content_block_stop", index: 0 },
+          anthropicMessageDelta({ input_tokens: 10, output_tokens: 4 }, "pause_turn"),
+        ],
+      }
+      const mock = await startMockCc(options)
+      try {
+        const provider = createCommandCode({ apiKey: "test_key", baseURL: mock.url })
+        const parts = await collect(provider.languageModel("claude-sonnet-5"), [
+          { role: "user", content: "hi" },
+        ])
+        assertEqual(mock.hits.messages, 1, "no continuation is attempted")
+        assertEqual(
+          parts.filter((p) => p.type === "finish"),
+          [],
+          "no finish is reported",
+        )
+        const failure = parts[parts.length - 1]!.error as Error
+        assert(failure.message.includes("reasoning blocks"), failure.message)
+      } finally {
+        await mock.close()
+      }
+    },
+  ],
+  [
     "transport: an OpenAI pause_turn chunk continues the turn on the same stream (issue #172)",
     async () => {
       // The Provider API's OpenAI shape reports the pause as a `finish_reason`

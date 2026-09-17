@@ -43,6 +43,7 @@ import {
 import { getApiBase, getCmdZdr } from "../env.js"
 import { normalizePlan } from "../catalog/plans.js"
 import { redactCommandCodeErrorText, commandCodeErrorMessage, readGate } from "./redact.js"
+import { resumedAssistantMessage } from "./resume.js"
 import {
   mappedReasoningEffort,
   resolveProviderReasoning,
@@ -597,36 +598,52 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
     }
   }
 
-  private providerBodyFor(options: ModelCallOptions, isClaude: boolean): unknown {
+  private providerBodyFor(
+    options: ModelCallOptions,
+    isClaude: boolean,
+    pausedTurn: readonly LanguageModelV3StreamPart[] = [],
+  ): unknown {
     const allowImages = modelSupportsImageInput(this.modelId)
-    if (isClaude) {
-      return (messagesToAnthropic as unknown as (prompt: unknown, opts: unknown) => unknown)(
-        options.prompt as unknown,
-        {
-          model: this.modelId,
-          maxOutputTokens: options.maxOutputTokens,
-          // Forwarded only when the host set one (issue #173): upstream's own
-          // request builders omit the field when it has no value, and Anthropic
-          // rejects a temperature alongside extended thinking — an invented
-          // 0.3 here would break reasoning models.
-          temperature: options.temperature,
-          providerOptions: options.providerOptions,
-          tools: options.tools as unknown,
-          allowImages,
-        },
-      )
+    const body = isClaude
+      ? (messagesToAnthropic as unknown as (prompt: unknown, opts: unknown) => unknown)(
+          options.prompt as unknown,
+          {
+            model: this.modelId,
+            maxOutputTokens: options.maxOutputTokens,
+            // Forwarded only when the host set one (issue #173): upstream's own
+            // request builders omit the field when it has no value, and Anthropic
+            // rejects a temperature alongside extended thinking — an invented
+            // 0.3 here would break reasoning models.
+            temperature: options.temperature,
+            providerOptions: options.providerOptions,
+            tools: options.tools as unknown,
+            allowImages,
+          },
+        )
+      : (messagesToOpenAI as unknown as (prompt: unknown, opts: unknown) => unknown)(
+          options.prompt as unknown,
+          {
+            model: this.modelId,
+            maxOutputTokens: options.maxOutputTokens,
+            temperature: options.temperature,
+            providerOptions: options.providerOptions,
+            tools: options.tools as unknown,
+            allowImages,
+          },
+        )
+    // A continuation re-sends the request with the paused assistant turn
+    // appended — upstream's AI-SDK path resumes a pause exactly this way
+    // (issue #188). Nothing is appended for a first request or a replay: the
+    // paused turn is empty there. A turn the append cannot represent throws
+    // out of here, which the transport surfaces instead of sending a request
+    // that would resume a *different* turn than the one the provider paused.
+    const resumed = resumedAssistantMessage(pausedTurn, isClaude ? "anthropic" : "openai")
+    if (resumed !== undefined) {
+      const record = body as Record<string, unknown>
+      const messages = Array.isArray(record.messages) ? record.messages : []
+      record.messages = [...messages, resumed]
     }
-    return (messagesToOpenAI as unknown as (prompt: unknown, opts: unknown) => unknown)(
-      options.prompt as unknown,
-      {
-        model: this.modelId,
-        maxOutputTokens: options.maxOutputTokens,
-        temperature: options.temperature,
-        providerOptions: options.providerOptions,
-        tools: options.tools as unknown,
-        allowImages,
-      },
-    )
+    return body
   }
 
   private providerHeadersFor(options: ModelCallOptions): Record<string, string> {
@@ -683,10 +700,11 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
     return this.transportStream(
       {
         url,
-        // Rebuilt per pass, so a continuation lands in the same request shape
-        // the first attempt sent (issue #185).
-        requestFor: () => ({
-          bodyStr: JSON.stringify(this.providerBodyFor(options, isClaude)),
+        // Rebuilt per pass, so a continuation re-sends the request the paused
+        // turn was sent with, carrying the paused assistant turn (issues #185,
+        // #188).
+        requestFor: (pausedTurn) => ({
+          bodyStr: JSON.stringify(this.providerBodyFor(options, isClaude, pausedTurn)),
           headers: this.providerHeadersFor(options),
         }),
         // Per-stream stateful parsers complete tool calls whose arguments

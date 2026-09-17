@@ -255,18 +255,25 @@ wording, `status` 502, `name` on the Error). Both failures surface as the `error
 part; `doGenerate` fails the same way, off the same transport.
 
 A `pause_turn` is not an ending either. The provider stopped mid-turn and
-expects the same request to continue it — Anthropic reports it as a
+expects the request to continue it — Anthropic reports it as a
 `message_delta` stop_reason, the legacy codec in its `finish` event (upstream
 reads `rawFinishReason ?? finishReason` there), the OpenAI shape as a
 `finish_reason` — and upstream `command-code@1.54.0` loops on it in both of its
-paths (`Ph = 5`). This transport re-POSTs the same body, appends the
-continuation's parts to the same stream, and folds each continuation's usage
-into the turn's single `finish` (upstream's `addUsage2`, the only place the CLI
-sums usage — the usage of a retry that _replaced_ an attempt is not part of the
-sum). The bound is five continuations: a turn still paused there fails with
-`PauseTurnLimitError` instead of emitting `finish{pause_turn}`, which v1 reads as
-a completed turn and v2 rejects as a retryable incomplete stream. Whatever the
-paused response left open is closed before its continuation opens its own parts.
+paths (`Ph = 5`). This transport appends the continuation's parts to the same
+stream and folds each continuation's usage into the turn's single `finish`
+(upstream's `addUsage2`, the only place the CLI sums usage — the usage of a
+retry that _replaced_ an attempt is not part of the sum). What the continuation
+_asks for_ differs by transport: the legacy `/alpha/generate` transport re-POSTs
+the same body, byte for byte, while the Provider API re-sends the request with
+the paused assistant turn appended (upstream's AI-SDK path resumes it exactly
+that way) — the text the paused response streamed, carried into the dialect's own
+assistant-message shape. A paused turn carrying a shape the continuation cannot
+represent faithfully is failed loudly, naming what could not be carried, rather
+than resumed as a turn the model never made. The bound is five continuations: a
+turn still paused there fails with `PauseTurnLimitError` instead of emitting
+`finish{pause_turn}`, which v1 reads as a completed turn and v2 rejects as a
+retryable incomplete stream. Whatever the paused response left open is closed
+before its continuation opens its own parts.
 
 ### Finish reasons
 
@@ -316,17 +323,18 @@ own shape says "transient" are replayed. The vocabulary and the rules are ported
 from upstream `command-code@1.54.0` (`isModelCallRetryable`,
 `isStreamErrorRetryable`, `parseWindowLimitError`):
 
-| failure                                                                                                                                                                                           | kind             | replayed                      |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- | ----------------------------- |
-| fetch rejection, read failure, per-attempt timeout, or a legacy `finish` naming a network/connection/upstream error                                                                               | network          | yes                           |
-| HTTP 408 / 429 / 5xx                                                                                                                                                                              | retryable status | yes                           |
-| HTTP 400 / 401 / 403 / 404 / 422, and every other status                                                                                                                                          | fatal status     | no                            |
-| 429 (or a `RATE_LIMITED` code) naming a usage window                                                                                                                                              | window limit     | no                            |
-| `Retry-After` beyond `maxRetryDelayMs`                                                                                                                                                            | retry-after cap  | no                            |
-| the plan-gate 403: `upgrade_required`, `upgrade to GOAT/provider`, or "without / doesn't include API access"                                                                                      | transport flip   | flipped once, never replayed  |
-| body ended with no terminal, with only a synthesized finish, or with a legacy `finish` reporting `other` and no raw reason                                                                        | truncation       | yes, while nothing is visible |
-| server `error` event: `isRetryable: true`, else a reported 408/429/5xx, else retryable unless it says `false` or names `premium_credits_exhausted` / `model_not_in_plan` / `insufficient credits` | stream error     | per that rule                 |
-| a turn still paused after five `pause_turn` continuations                                                                                                                                         | pause-turn limit | no                            |
+| failure                                                                                                                                                                                           | kind               | replayed                      |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ | ----------------------------- |
+| fetch rejection, read failure, per-attempt timeout, or a legacy `finish` naming a network/connection/upstream error                                                                               | network            | yes                           |
+| HTTP 408 / 429 / 5xx                                                                                                                                                                              | retryable status   | yes                           |
+| HTTP 400 / 401 / 403 / 404 / 422, and every other status                                                                                                                                          | fatal status       | no                            |
+| 429 (or a `RATE_LIMITED` code) naming a usage window                                                                                                                                              | window limit       | no                            |
+| `Retry-After` beyond `maxRetryDelayMs`                                                                                                                                                            | retry-after cap    | no                            |
+| the plan-gate 403: `upgrade_required`, `upgrade to GOAT/provider`, or "without / doesn't include API access"                                                                                      | transport flip     | flipped once, never replayed  |
+| body ended with no terminal, with only a synthesized finish, or with a legacy `finish` reporting `other` and no raw reason                                                                        | truncation         | yes, while nothing is visible |
+| server `error` event: `isRetryable: true`, else a reported 408/429/5xx, else retryable unless it says `false` or names `premium_credits_exhausted` / `model_not_in_plan` / `insufficient credits` | stream error       | per that rule                 |
+| a turn still paused after five `pause_turn` continuations                                                                                                                                         | pause-turn limit   | no                            |
+| a paused turn whose continuation cannot represent its content faithfully                                                                                                                          | resume-unsupported | no                            |
 
 `maxRetries` defaults to **2**: the hosts already run their own slower ladders
 outside the plugin (v1 1.18.30: 5 retries; v2 2.0.3: 4, behind a hard

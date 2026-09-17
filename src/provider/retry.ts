@@ -76,6 +76,7 @@ export type FailureKind =
   | "truncation" // the body ended without a complete turn
   | "stream-error" // the server's own error event mid-stream
   | "pause-turn-limit" // the provider kept pausing the turn past the continuation bound
+  | "resume-unsupported" // a paused turn the continuation cannot represent faithfully
 
 export interface Failure {
   kind: FailureKind
@@ -141,6 +142,14 @@ export const TRUNCATION_FAILURE: Failure = failure("truncation", true, { status:
  * turn and the ladder never replays it.
  */
 export const PAUSE_TURN_LIMIT_FAILURE: Failure = failure("pause-turn-limit", false)
+
+/**
+ * The Provider API paused a turn and the continuation cannot represent what the
+ * paused response produced (issue #188). Permanent for the turn: the ladder
+ * re-sends the same request, which could only pause it again — and resuming
+ * with a partial turn would hand the model a turn it never made.
+ */
+export const RESUME_UNSUPPORTED_FAILURE: Failure = failure("resume-unsupported", false)
 
 /**
  * Upstream's terminal error markers (`hasTerminalMarker`): an error event
