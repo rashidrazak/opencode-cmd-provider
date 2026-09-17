@@ -66,6 +66,7 @@ import {
   UPGRADE_REQUIRED_FAILURE,
   VERSION_GATE_FAILURE,
   PAUSE_TURN_LIMIT_FAILURE,
+  RESUME_UNSUPPORTED_FAILURE,
   type Failure,
 } from "./retry.js"
 import { projectSlugFromPath } from "./project-slug.js"
@@ -280,6 +281,29 @@ class PauseTurnLimitError extends Error implements ClassifiedTransportError {
       ),
     )
     this.name = "PauseTurnLimitError"
+  }
+}
+
+/**
+ * The provider paused a turn whose response carried content this build never
+ * turned into a stream part (issue #192). The continuation is rebuilt from those
+ * parts, so continuing would resume a turn that never contained the block — the
+ * silent partial resume the resume work forbids. Permanent for the turn: the
+ * same request would hand back the same block. Redacted where it is built, like
+ * every transport-raised error.
+ */
+class UnmodelledBlockPauseError extends Error implements ClassifiedTransportError {
+  readonly transportError = true as const
+  readonly failure = RESUME_UNSUPPORTED_FAILURE
+  constructor(types: readonly string[]) {
+    super(
+      redactCommandCodeErrorText(
+        `Command Code paused this turn with a content block this build does not model (${types.join(
+          ", ",
+        )}) — the continuation cannot carry it, so the turn did not finish`,
+      ),
+    )
+    this.name = "UnmodelledBlockPauseError"
   }
 }
 
@@ -1180,6 +1204,13 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
               if (continuations >= MAX_PAUSE_CONTINUATIONS) {
                 throw new PauseTurnLimitError(MAX_PAUSE_CONTINUATIONS)
               }
+              // A continuation is built from the parts this turn produced. When
+              // the parser dropped a block it does not model, that block is not
+              // among them, and continuing would resume a turn the model never
+              // made — so the pause is failed instead, naming what could not be
+              // carried (issue #192).
+              const unmodelled = parser?.unmodelledBlocks?.() ?? []
+              if (unmodelled.length > 0) throw new UnmodelledBlockPauseError(unmodelled)
               // The continuation is a new response: close whatever the paused one
               // left open before its successor opens its own parts.
               closeOpenParts()

@@ -11,11 +11,10 @@
 // The turn is read off the stream parts the paused response emitted, so a shape
 // this module cannot put back on the wire faithfully fails the turn rather than
 // being silently dropped: a resume that loses part of the model's turn is worse
-// than a visible failure. What the stream does not carry, this module cannot see
-// either: an Anthropic block the parser does not model (`redacted_thinking`, a
-// server tool block) emits no part today (#72), so it cannot appear in a
-// continuation — closing that gap means modelling those blocks in the stream
-// first.
+// than a visible failure. Content the stream never turned into a part is
+// invisible here — an Anthropic block the parser does not model emits none
+// (#72) — which is why the transport refuses a pause that carried one before
+// ever asking this module to rebuild it (issue #192).
 import type { LanguageModelV3StreamPart } from "@ai-sdk/provider"
 import { isRecord, stringValue } from "./converters.js"
 import { redactCommandCodeErrorText } from "./redact.js"

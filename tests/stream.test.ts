@@ -841,23 +841,54 @@ run([
   [
     "createAnthropicStreamParser never closes a block it did not open (issue #72)",
     () => {
-      // A block type this parser does not model — Anthropic's redacted_thinking,
-      // a server tool block, a future addition — is still a block. Its stop must
-      // not fall through to `text-end` for a part that was never opened: the
-      // consumer rejects an end for an unknown id ("text part text-N not found",
-      // #69).
+      // A block type this parser does not model — a server tool block, a future
+      // addition — is still a block. Its stop must not fall through to
+      // `text-end` for a part that was never opened: the consumer rejects an end
+      // for an unknown id ("text part text-N not found", #69).
       const parser = createAnthropicStreamParser()
       assertEqual(
         parser({
           type: "content_block_start",
           index: 0,
-          content_block: { type: "redacted_thinking", data: "..." },
+          content_block: { type: "server_tool_use", id: "srv_1", name: "web_search" },
         }),
         [],
       )
       assertEqual(parser({ type: "content_block_stop", index: 0 }), [])
       // A stop whose start never arrived is the same shape of nothing-to-close.
       assertEqual(createAnthropicStreamParser()({ type: "content_block_stop", index: 3 }), [])
+    },
+  ],
+
+  [
+    "createAnthropicStreamParser reports the block types it does not model (issue #192)",
+    () => {
+      // The block emits no part (#72), which is invisible for a turn that ends
+      // and a lie for a paused turn whose continuation is rebuilt from those
+      // parts — so the parser names what it dropped and the transport decides.
+      const parser = createAnthropicStreamParser()
+      assertEqual(parser.unmodelledBlocks?.(), [])
+      parser({
+        type: "content_block_start",
+        index: 0,
+        content_block: { type: "server_tool_use", id: "srv_1", name: "web_search" },
+      })
+      parser({ type: "content_block_stop", index: 0 })
+      // Modelled blocks are not reported, and neither is a start with no type.
+      parser({ type: "content_block_start", index: 1, content_block: { type: "text", text: "" } })
+      parser({ type: "content_block_stop", index: 1 })
+      parser({ type: "content_block_start", index: 2, content_block: {} })
+      // The same type twice is one entry; a nameless block is still named.
+      parser({
+        type: "content_block_start",
+        index: 3,
+        content_block: { type: "server_tool_use", id: "srv_2", name: "web_search" },
+      })
+      parser({ type: "content_block_stop", index: 3 })
+      assertEqual(parser.unmodelledBlocks?.(), ["server_tool_use", "unknown"])
+
+      // The OpenAI-shaped parser has no content blocks at all: it reports none.
+      assertEqual(createOpenAIStreamParser().unmodelledBlocks, undefined)
     },
   ],
 

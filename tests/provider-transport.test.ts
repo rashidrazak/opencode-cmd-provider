@@ -2466,6 +2466,101 @@ run([
     },
   ],
   [
+    "transport: a pause whose response held a block the parser does not model is refused, not resumed partially (issue #192)",
+    async () => {
+      // The block emitted no part, so the continuation would be rebuilt without
+      // it — a silent partial resume. The turn fails instead, naming what could
+      // not be carried, and no continuation is requested.
+      const options: MockCcOptions = {
+        messagesStream: [
+          anthropicContentBlockDelta("first "),
+          {
+            type: "content_block_start",
+            index: 1,
+            content_block: { type: "server_tool_use", id: "srv_1", name: "web_search" },
+          },
+          { type: "content_block_stop", index: 1 },
+          anthropicMessageDelta({ input_tokens: 10, output_tokens: 4 }, "pause_turn"),
+        ],
+      }
+      const mock = await startMockCc(options)
+      try {
+        const provider = createCommandCode({ apiKey: "test_key", baseURL: mock.url })
+        const parts = await collect(provider.languageModel("claude-sonnet-5"), [
+          { role: "user", content: "hi" },
+        ])
+        assertEqual(mock.hits.messages, 1, "no continuation is attempted")
+        assertEqual(
+          parts.filter((p) => p.type === "finish"),
+          [],
+          "no finish is reported",
+        )
+        const failure = parts[parts.length - 1]!.error as Error
+        assertEqual(failure.name, "UnmodelledBlockPauseError")
+        assert(failure.message.includes("server_tool_use"), failure.message)
+        assert(failure.message.includes("does not model"), failure.message)
+      } finally {
+        await mock.close()
+      }
+    },
+  ],
+  [
+    "transport: the same unmodelled block on a turn that ends streams exactly as before (issue #192)",
+    async () => {
+      // #72's contract is unchanged for a turn that ends: the block emits no
+      // part, the turn completes on its own terminal, and no failure is
+      // invented for it. Only a continuation — which cannot see the block —
+      // is refused.
+      const options: MockCcOptions = {
+        messagesStream: [
+          { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+          anthropicContentBlockDelta("first "),
+          { type: "content_block_stop", index: 0 },
+          {
+            type: "content_block_start",
+            index: 1,
+            content_block: { type: "server_tool_use", id: "srv_1", name: "web_search" },
+          },
+          { type: "content_block_stop", index: 1 },
+          {
+            type: "content_block_start",
+            index: 2,
+            content_block: { type: "text", text: "" },
+          },
+          anthropicContentBlockDelta("second", 2),
+          { type: "content_block_stop", index: 2 },
+          anthropicMessageDelta({ input_tokens: 10, output_tokens: 4 }),
+        ],
+      }
+      const mock = await startMockCc(options)
+      try {
+        const provider = createCommandCode({ apiKey: "test_key", baseURL: mock.url })
+        const parts = await collect(provider.languageModel("claude-sonnet-5"), [
+          { role: "user", content: "hi" },
+        ])
+        assertEqual(mock.hits.messages, 1)
+        assertEqual(
+          parts.map((p) => p.type),
+          [
+            "text-start",
+            "text-delta",
+            "text-end",
+            "text-start",
+            "text-delta",
+            "text-end",
+            "finish",
+          ],
+        )
+        assertEqual(
+          parts.filter((p) => p.type === "text-delta").map((p) => (p as { delta: string }).delta),
+          ["first ", "second"],
+        )
+      } finally {
+        await mock.close()
+      }
+    },
+  ],
+  [
     "transport: an OpenAI pause_turn chunk continues the turn on the same stream (issue #172)",
     async () => {
       // The Provider API's OpenAI shape reports the pause as a `finish_reason`

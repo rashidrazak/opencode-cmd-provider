@@ -284,10 +284,12 @@ carrying a shape the continuation cannot represent faithfully is failed loudly,
 naming what could not be carried, rather than resumed as a turn the model never
 made: unsigned thinking (Anthropic requires a signature and the plugin cannot
 derive one), a tool call with no id or name, arguments that are not JSON, and any
-part the builder does not model. One gap is the stream's, not the resume's: an
-Anthropic block the parser does not model (`redacted_thinking`, a server tool
-block) emits no part today (#72), so it cannot appear in a continuation either —
-closing that means modelling those blocks in the stream first. The bound is five
+part the builder does not model. Content the stream never turned into a part is
+invisible to that builder, so it is refused a step earlier: the Anthropic parser
+reports the content-block types it does not model, and the transport refuses to
+continue a pause whose response held one, naming the type — the alternative is a
+continuation that silently drops it. A turn that _ends_ with such a block is
+unaffected: #72 still emits no part for it. The bound is five
 continuations: a turn still paused there fails with `PauseTurnLimitError` instead
 of emitting `finish{pause_turn}`, which v1 reads as a completed turn and v2
 rejects as a retryable incomplete stream. Whatever the paused response left open

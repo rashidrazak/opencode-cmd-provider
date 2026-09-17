@@ -750,10 +750,20 @@ interface ToolCallBuffer {
  * closes every part the stream still has open when the transport ends it
  * without a terminal event — a mid-stream error, an abort, or a body that stops
  * early (issue #72). It is idempotent.
+ *
+ * `unmodelledBlocks` reports the content-block types the stream carried that
+ * this parser does not model — content it deliberately emits no part for, so
+ * nothing downstream can see it (issue #72). A turn that *ends* is unaffected by
+ * that: the block is simply not among the parts. A turn the provider **paused**
+ * is a different matter, because its continuation is rebuilt from those parts
+ * and would silently resume a turn that never contained the block — so the
+ * transport asks here before continuing (issue #192). A parser whose dialect has
+ * no such concept omits the method.
  */
 export interface StreamEventParser {
   (event: unknown): LanguageModelV3StreamPart[]
   closeStream(): LanguageModelV3StreamPart[]
+  unmodelledBlocks?(): readonly string[]
 }
 
 export function createOpenAIStreamParser(): StreamEventParser {
@@ -957,6 +967,11 @@ export function createAnthropicStreamParser(): StreamEventParser {
     number,
     { type: "text" | "tool_use" | "thinking" | "other"; id: string; signature?: string }
   >()
+  // The content-block types this stream carried that the parser does not model.
+  // They emit no part (#72), which is invisible for a turn that ends and a lie
+  // for a paused turn whose continuation is rebuilt from the parts — the
+  // transport reads this before continuing one (issue #192).
+  const unmodelled = new Set<string>()
   // True once a `message_delta` finished this stream. Anthropic reports usage
   // (and the real stop_reason) on `message_delta` and then closes with a bare
   // `message_stop`; mapping that terminal too would hand the transport a
@@ -1016,8 +1031,11 @@ export function createAnthropicStreamParser(): StreamEventParser {
       }
       // redacted_thinking, server tool blocks, a future addition: recorded as
       // unmodelled so its stop does not fall through to a text-end for a part
-      // that was never opened (issue #72).
+      // that was never opened (issue #72). The type is remembered, not just
+      // discarded: a paused turn is continued from the parts, so the transport
+      // has to know a block it cannot see was there (issue #192).
       blocks.set(index, { type: "other", id: stringValue(block?.id) ?? `block-${index}` })
+      unmodelled.add(blockType ?? "unknown")
       return []
     }
     if (type === "content_block_delta") {
@@ -1151,6 +1169,7 @@ export function createAnthropicStreamParser(): StreamEventParser {
     blocks.clear()
     return parts
   }
+  parse.unmodelledBlocks = () => [...unmodelled]
   return parse
 }
 
