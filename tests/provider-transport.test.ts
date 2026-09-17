@@ -2423,6 +2423,89 @@ run([
     },
   ],
   [
+    "transport: an Anthropic pause carrying redacted thinking resumes it verbatim (issue #194)",
+    async () => {
+      // The provider withheld part of its reasoning as an encrypted block. The
+      // block streams as an (empty-text) reasoning part carrying the payload,
+      // and the continuation puts that payload back exactly as it arrived —
+      // alongside the text the turn also produced, in stream order.
+      const bodies: Array<Record<string, unknown>> = []
+      const paused = [
+        {
+          type: "content_block_start",
+          index: 0,
+          content_block: { type: "thinking", thinking: "" },
+        },
+        {
+          type: "content_block_delta",
+          index: 0,
+          delta: { type: "thinking_delta", thinking: "hmm" },
+        },
+        {
+          type: "content_block_delta",
+          index: 0,
+          delta: { type: "signature_delta", signature: "sig-1" },
+        },
+        { type: "content_block_stop", index: 0 },
+        {
+          type: "content_block_start",
+          index: 1,
+          content_block: { type: "redacted_thinking", data: "EncryptedThought==" },
+        },
+        { type: "content_block_stop", index: 1 },
+        { type: "content_block_start", index: 2, content_block: { type: "text", text: "" } },
+        anthropicContentBlockDelta("so far", 2),
+        { type: "content_block_stop", index: 2 },
+        anthropicMessageDelta({ input_tokens: 10, output_tokens: 4 }, "pause_turn"),
+      ]
+      let requests = 0
+      const options: MockCcOptions = { messagesStream: paused }
+      options.onMessages = (body) => {
+        bodies.push(body)
+        requests++
+        if (requests === 2) {
+          options.messagesStream = [
+            { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+            anthropicContentBlockDelta("done"),
+            { type: "content_block_stop", index: 0 },
+            anthropicMessageDelta({ input_tokens: 3, output_tokens: 5 }),
+          ]
+        }
+      }
+      const mock = await startMockCc(options)
+      try {
+        const provider = createCommandCode({ apiKey: "test_key", baseURL: mock.url })
+        const parts = await collect(provider.languageModel("claude-sonnet-5"), [
+          { role: "user", content: "hi" },
+        ])
+        assertEqual(mock.hits.messages, 2, "the pause is continued once")
+        assertEqual(bodies[1]!.messages, [
+          { role: "user", content: "hi" },
+          {
+            role: "assistant",
+            content: [
+              { type: "thinking", thinking: "hmm", signature: "sig-1" },
+              { type: "redacted_thinking", data: "EncryptedThought==" },
+              { type: "text", text: "so far" },
+            ],
+          },
+        ])
+        // The payload reached the consumer on the block's reasoning-start, and
+        // the block is modelled — so the #192 safety net has nothing to refuse.
+        const reasoningStart = parts.find(
+          (p) =>
+            p.type === "reasoning-start" && (p as { providerMetadata?: unknown }).providerMetadata,
+        ) as { providerMetadata?: unknown } | undefined
+        assertEqual(reasoningStart?.providerMetadata, {
+          anthropic: { redactedData: "EncryptedThought==" },
+        })
+        assertEqual(parts[parts.length - 1]!.type, "finish")
+      } finally {
+        await mock.close()
+      }
+    },
+  ],
+  [
     "transport: a paused turn carrying unsigned reasoning still fails loudly (issue #189)",
     async () => {
       // Anthropic requires a signature on a replayed thinking block and this

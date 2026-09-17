@@ -27,7 +27,7 @@ export type ResumeDialect = "anthropic" | "openai"
  * streamed it. */
 type ResumedBlock =
   | { kind: "text"; text: string }
-  | { kind: "reasoning"; text: string; signature?: string }
+  | { kind: "reasoning"; text: string; signature?: string; redactedData?: string }
   | { kind: "tool-call"; id: string; name: string; input: string }
 
 /** A tool call's arguments, parsed and checked, in the two encodings the wires
@@ -97,6 +97,17 @@ function collectBlocks(parts: readonly LanguageModelV3StreamPart[]): ResumedBloc
     return created
   }
 
+  /** Records whatever the reasoning part carries for its block — Anthropic's
+   * signature, or the encrypted payload of a redacted block. Both may ride on
+   * the block's start or its end, so either part is read. */
+  const recordReasoningMetadata = (id: string, part: LanguageModelV3StreamPart): void => {
+    const { signature, redactedData } = reasoningMetadataOf(part)
+    if (signature === undefined && redactedData === undefined) return
+    const block = reasoningFor(id)
+    if (signature !== undefined) block.signature = signature
+    if (redactedData !== undefined) block.redactedData = redactedData
+  }
+
   for (const part of parts) {
     switch (part.type) {
       case "text-start":
@@ -116,16 +127,14 @@ function collectBlocks(parts: readonly LanguageModelV3StreamPart[]): ResumedBloc
         break
       }
       case "reasoning-start":
-        reasoningFor(part.id)
+        recordReasoningMetadata(part.id, part)
         break
       case "reasoning-delta":
         reasoningFor(part.id).text += part.delta
         break
-      case "reasoning-end": {
-        const signature = signatureOf(part)
-        if (signature !== undefined) reasoningFor(part.id).signature = signature
+      case "reasoning-end":
+        recordReasoningMetadata(part.id, part)
         break
-      }
       case "tool-call":
         blocks.push({
           kind: "tool-call",
@@ -144,18 +153,34 @@ function collectBlocks(parts: readonly LanguageModelV3StreamPart[]): ResumedBloc
   return blocks.filter((block) => block.kind !== "text" || block.text.length > 0)
 }
 
-/** The signature Anthropic put on a thinking block, if this part carries one. */
-function signatureOf(part: LanguageModelV3StreamPart): string | undefined {
+/**
+ * The provider metadata a reasoning part may carry: Anthropic's `signature` on
+ * a thinking block, or the encrypted `redactedData` of a block the provider's
+ * safety system withheld. Both are read wherever they appear — the AI SDK's
+ * Anthropic provider puts the payload on the block's start, this transport puts
+ * a signature on its end, and a gateway may do either (issues #189, #194).
+ */
+function reasoningMetadataOf(part: LanguageModelV3StreamPart): {
+  signature?: string
+  redactedData?: string
+} {
   const metadata = (part as { providerMetadata?: unknown }).providerMetadata
-  if (!isRecord(metadata)) return undefined
-  return isRecord(metadata.anthropic) ? stringValue(metadata.anthropic.signature) : undefined
+  if (!isRecord(metadata) || !isRecord(metadata.anthropic)) return {}
+  const anthropic = metadata.anthropic
+  const signature = stringValue(anthropic.signature)
+  const redactedData = stringValue(anthropic.redactedData)
+  return {
+    ...(signature !== undefined ? { signature } : {}),
+    ...(redactedData !== undefined ? { redactedData } : {}),
+  }
 }
 
 /**
  * The Anthropic assistant message: an ordered content array, exactly the shape
  * the provider streamed. A thinking block is replayed with the signature it was
- * given — the API requires one, and this plugin cannot derive it — and tool call
- * arguments are the JSON object the wire expects.
+ * given — the API requires one, and this plugin cannot derive it — a redacted
+ * block with the payload it was given, verbatim, and tool call arguments are the
+ * JSON object the wire expects.
  */
 function anthropicMessage(blocks: readonly ResumedBlock[]): Record<string, unknown> {
   const content: unknown[] = []
@@ -163,13 +188,18 @@ function anthropicMessage(blocks: readonly ResumedBlock[]): Record<string, unkno
     if (block.kind === "text") {
       content.push({ type: "text", text: block.text })
     } else if (block.kind === "reasoning") {
-      if (block.signature === undefined) {
+      if (block.redactedData !== undefined) {
+        // Encrypted reasoning: the payload *is* the block — it has no text, and
+        // the API validates it on replay, so it goes back byte for byte (#194).
+        content.push({ type: "redacted_thinking", data: block.redactedData })
+      } else if (block.signature === undefined) {
         // No signature means the provider never signed the block (or the
         // gateway dropped the delta), so the API would reject the replay. A
         // resume that silently loses the model's reasoning is not a resume.
         throw unrepresentable("unsigned reasoning")
+      } else {
+        content.push({ type: "thinking", thinking: block.text, signature: block.signature })
       }
-      content.push({ type: "thinking", thinking: block.text, signature: block.signature })
     } else {
       const call = encodedToolCall(block)
       if (!isRecord(call.input)) {
@@ -184,8 +214,10 @@ function anthropicMessage(blocks: readonly ResumedBlock[]): Record<string, unkno
 /**
  * The OpenAI assistant message: text as `content`, tool calls as `tool_calls`,
  * reasoning as `reasoning_content` — the field this transport's OpenAI codec
- * reads a reasoning delta back from. The dialect has no signature field, and
- * none of its streams carry one (signatures are Anthropic's).
+ * reads a reasoning delta back from. The dialect has no signature field and no
+ * field for an encrypted payload either, and none of its streams carry one
+ * (both are Anthropic's) — so a redacted block on this wire is refused rather
+ * than dropped.
  */
 function openAIMessage(blocks: readonly ResumedBlock[]): Record<string, unknown> {
   const text: string[] = []
@@ -193,8 +225,12 @@ function openAIMessage(blocks: readonly ResumedBlock[]): Record<string, unknown>
   const toolCalls: unknown[] = []
   for (const block of blocks) {
     if (block.kind === "text") text.push(block.text)
-    else if (block.kind === "reasoning") reasoning.push(block.text)
-    else {
+    else if (block.kind === "reasoning") {
+      if (block.redactedData !== undefined) {
+        throw unrepresentable("encrypted reasoning this dialect cannot carry")
+      }
+      reasoning.push(block.text)
+    } else {
       const call = encodedToolCall(block)
       toolCalls.push({
         id: call.id,

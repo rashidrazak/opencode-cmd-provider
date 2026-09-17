@@ -287,8 +287,9 @@ the paused assistant turn appended (upstream's AI-SDK path resumes it exactly
 that way). That appended turn is everything the turn has produced so far —
 every continuation included, so a turn the provider paused twice carries both
 segments — in the dialect's shape: text as content, tool calls with their ids,
-names and arguments verbatim, and signed thinking blocks with the signature they
-arrived with. That is what keeps a resumed turn the turn the model was making. A paused turn
+names and arguments verbatim, and thinking blocks with whatever the provider gave
+them — a signature, or the encrypted payload of a redacted block — because
+neither can be re-derived. That is what keeps a resumed turn the turn the model was making. A paused turn
 carrying a shape the continuation cannot represent faithfully is failed loudly,
 naming what could not be carried, rather than resumed as a turn the model never
 made: unsigned thinking (Anthropic requires a signature and the plugin cannot

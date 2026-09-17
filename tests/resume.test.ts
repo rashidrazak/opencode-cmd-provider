@@ -160,6 +160,46 @@ run([
   ],
 
   [
+    "redacted thinking resumes verbatim, in order, and is never dropped (issue #194)",
+    () => {
+      // Anthropic's encrypted reasoning block has no text — the payload is the
+      // block — and the API validates it on replay, so it goes back untouched,
+      // in the position it streamed in.
+      const streamed = parts(
+        { type: "reasoning-start", id: "thinking-0" },
+        { type: "reasoning-delta", id: "thinking-0", delta: "thinking" },
+        {
+          type: "reasoning-end",
+          id: "thinking-0",
+          providerMetadata: { anthropic: { signature: "sig-1" } },
+        },
+        {
+          type: "reasoning-start",
+          id: "redacted-1",
+          providerMetadata: { anthropic: { redactedData: "EncryptedThought==" } },
+        },
+        { type: "reasoning-end", id: "redacted-1" },
+        ...text("text-2", "an answer"),
+      )
+      assertEqual(resumedAssistantMessage(streamed, "anthropic"), {
+        role: "assistant",
+        content: [
+          { type: "thinking", thinking: "thinking", signature: "sig-1" },
+          { type: "redacted_thinking", data: "EncryptedThought==" },
+          { type: "text", text: "an answer" },
+        ],
+      })
+      // Nothing on the OpenAI wire carries an encrypted payload: refusing beats
+      // resuming a turn whose reasoning silently vanished. (Unreachable today —
+      // redaction only comes from the Anthropic codec.)
+      throws(
+        () => resumedAssistantMessage(streamed, "openai"),
+        /encrypted reasoning.*cannot be carried/,
+      )
+    },
+  ],
+
+  [
     "a tool call the wire cannot take fails loudly (issue #189)",
     () => {
       const call = (toolCallId: string, toolName: string, input: string): unknown[] => [
