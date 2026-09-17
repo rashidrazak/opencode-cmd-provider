@@ -152,9 +152,10 @@ ends the turn as an error.
 
 ### Model catalog
 
-- **FACTS_PACKAGE_VERSION**: `1.54.1` → `1.54.2` — the bundled `models.md` table
-  is unchanged, so the Snapshot is identical; the source URLs now point at the
-  new package and the refresh dates move.
+- **FACTS_PACKAGE_VERSION**: `1.54.1` → `1.55.0` — upstream shipped `1.54.2` and
+  `1.55.0` after 2.1.0, and both carry an unchanged `models.md` table and
+  modality table, so the Snapshot is identical: 70 models, 44 efforts, 70 costs,
+  50 modalities. Only the pinned package and its source URLs move.
 
 ## 2.1.0 - 2026-09-16
 
