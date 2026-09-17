@@ -1,3 +1,161 @@
+## 2.1.1 - 2026-09-17
+
+**Highlight — v2 installs load again.** OpenCode 2.0.4 replaced the v2 plugin
+context's `catalog` transform with the separate `provider` and `model`
+transforms, so the plugin died at load on 2.0.4 with
+`TypeError: undefined is not an object (evaluating 'ctx.catalog.transform')`:
+no provider, no models, no `/connect`. Reported in
+[#181](https://github.com/rashidrazak/opencode-cmd-provider/issues/181) by
+[@gmag11](https://github.com/gmag11) and fixed in
+[#182](https://github.com/rashidrazak/opencode-cmd-provider/pull/182) by
+[@thecountrox](https://github.com/thecountrox), who re-derived the context from
+`@opencode/plugin@2.0.5` and moved auto-registration onto
+`ctx.provider.transform` and `ctx.model.transform`. Thanks to both.
+
+The rest of the release completes the pause-resume parity sweep in
+[#184](https://github.com/rashidrazak/opencode-cmd-provider/issues/184) and
+[#191](https://github.com/rashidrazak/opencode-cmd-provider/issues/191): a
+paused Provider API turn now resumes with the whole assistant turn the provider
+paused on — text, tool calls and reasoning — instead of re-sending the prompt
+without it, a pause carrying a block this build cannot represent fails loudly
+rather than continuing a turn that never contained the block, and the finish
+vocabulary is complete, so a stop reason the wire can actually send no longer
+ends the turn as an error.
+
+### Compatibility
+
+- **OpenCode 2.0.4 or newer is required on the v2 host.** The v2 half
+  registers through the `provider` and `model` transforms introduced in 2.0.4
+  (see the highlight above); 2.0.3 and below expose the older `catalog`
+  transform instead, so the v2 half cannot load there and neither can the fixes
+  in this release that ride on it. OpenCode v1 (1.18.x) is unaffected.
+
+### Features
+
+- **Anthropic redacted thinking streams as a reasoning part**
+  ([#193](https://github.com/rashidrazak/opencode-cmd-provider/issues/193)):
+  the parser dropped `redacted_thinking` as an unmodelled block, so a paused
+  turn's continuation could not see it. It now streams as a reasoning part
+  carrying no text, with its encrypted payload on the start part in
+  `providerMetadata.anthropic.redactedData` — the shape the AI SDK's own
+  Anthropic provider emits — and closes with a matching end on the stop event
+  and on `closeStream()`.
+
+### Fixes
+
+- **v2 auto-registration runs the transforms the 2.0.4 host exposes**
+  ([#182](https://github.com/rashidrazak/opencode-cmd-provider/pull/182) by
+  [@thecountrox](https://github.com/thecountrox), reported in
+  [#181](https://github.com/rashidrazak/opencode-cmd-provider/issues/181)):
+  `setup()` called `ctx.catalog.transform`, which OpenCode 2.0.4 no longer
+  exposes, so the plugin died at load before registering anything — no
+  provider, no models, no `/connect`. Registration now runs as a
+  `ctx.provider.transform` pass (provider gap-fill, Snapshot source models,
+  deals enrichment), with the first-run default in a `ctx.model.transform`
+  pass: the same three capabilities, carried by the API the host actually has.
+  The integration, tool and `aisdk` hook paths are unchanged, as is the v1
+  `server()` half.
+- **v2 Deals enrichment gap-fills the vendor family for every model**
+  ([#182](https://github.com/rashidrazak/opencode-cmd-provider/pull/182)): the
+  `family` fill had landed inside the branch that only runs for models with a
+  Deals entry, so v2 would have dropped the vendor family on a model with no
+  Deals record (the [#132](https://github.com/rashidrazak/opencode-cmd-provider/issues/132)
+  pending state, or an empty catalog) while v1 kept it. The fill now decides
+  before the branch and applies in whichever update runs; a declared `family`
+  is still never overwritten.
+- **A paused turn is continued with the paused assistant turn**
+  ([#188](https://github.com/rashidrazak/opencode-cmd-provider/issues/188)):
+  the Provider API resumes a pause by re-sending the request with the paused
+  assistant turn appended, and the transport now does that. The parts the
+  paused response emitted become the dialect's assistant message (text content
+  for OpenAI, a text block for Anthropic) rather than the turn being replayed
+  from the prompt alone. The legacy transport is untouched and still re-POSTs
+  the same body byte for byte.
+- **The continuation carries tool calls and reasoning, not just text**
+  ([#189](https://github.com/rashidrazak/opencode-cmd-provider/issues/189)):
+  tool calls resume with their ids, names and arguments, so the tool results
+  the host sends next line up with the ids the resumed request carried, and
+  Anthropic thinking blocks resume with the signature they were streamed with
+  — captured from the `signature_delta` event and carried on the block's
+  `reasoning-end` part in `providerMetadata.anthropic.signature`. The shapes
+  that still cannot be represented are refused by name: unsigned thinking, a
+  tool call with no id or name, arguments that are not JSON, and any part the
+  builder does not model.
+- **A pause that reported no usage is continued, not failed**
+  ([#190](https://github.com/rashidrazak/opencode-cmd-provider/issues/190)):
+  a paused response whose finish never carried usage was killed as a truncated
+  stream before the pause rule ran. The [#171](https://github.com/rashidrazak/opencode-cmd-provider/issues/171)
+  truncation rule is about a turn that _ended_, and a pause has not ended, so
+  it is continued; the unpriced segment contributes nothing to the reported sum
+  rather than counting as zero. A non-pause finish with no usage still fails and
+  replays as before.
+- **A turn paused twice carries every segment**
+  ([#191](https://github.com/rashidrazak/opencode-cmd-provider/issues/191)):
+  the continuation request is rebuilt from the prompt, so a second continuation
+  dropped the first segment the consumer had already read. The transport now
+  accumulates every part the turn has emitted and hands the whole turn to the
+  request builder, so a twice-paused turn continues as one assistant message. A
+  replay still cannot double-count: it only follows an attempt that emitted
+  nothing.
+- **A pause carrying a block this build cannot carry is refused**
+  ([#192](https://github.com/rashidrazak/opencode-cmd-provider/issues/192)):
+  the continuation is rebuilt from the parts the response emitted, so a block
+  the parser never modelled was invisible to it and continuing resumed a turn
+  that never contained the block. The Anthropic parser now reports the
+  content-block types it does not model, and such a pause fails with a
+  `resume-unsupported` error naming the type before any continuation request is
+  sent. A turn that merely _ends_ with the same block is untouched.
+- **A paused turn's redacted thinking is resumed verbatim**
+  ([#194](https://github.com/rashidrazak/opencode-cmd-provider/issues/194)): the
+  resume builder reads `anthropic.signature` and `anthropic.redactedData` off
+  the reasoning parts — both are read wherever they appear, since the AI SDK's
+  Anthropic provider puts the payload on the block's start while this transport
+  puts a signature on its end — and a redacted block goes back as
+  `{ type: "redacted_thinking", data }`, in stream order. The OpenAI dialect has
+  no field for an encrypted payload, so it refuses one instead of resuming
+  without it.
+- **Every paused segment's reasoning blocks stay apart**: blocks were keyed by
+  part id and every response names its blocks from the same counters, so a turn
+  paused twice collided on `redacted-0` / `thinking-0` and the later payload or
+  signature overwrote the earlier one. Blocks are now delimited by their start
+  and end parts, so a reused id opens a new block — both payloads, both
+  signatures and the stream order survive. Text blocks close the same way,
+  which also stops text merging across whatever streamed between two of them.
+  A redacted block with no payload is no longer marked as modelled (it has
+  nothing to replay, so it falls through to the refusal above), and a block
+  whose start carried no type is reported as `untyped` rather than inventing
+  the name `unknown`.
+- **Every stop reason the wire can send is mapped**
+  ([#186](https://github.com/rashidrazak/opencode-cmd-provider/issues/186)): a
+  turn ending with a reason the mapper did not know was reported to the host as
+  `unified: "other"`, which v2 coerces to `unknown` and fails as a retryable
+  incomplete stream. The mapper now knows the vocabulary the wire produces,
+  matched case-insensitively the way upstream's normaliser matches: the OpenAI
+  spellings (`tool_calls`, `content_filter`), the length family (including
+  `model_context_window_exceeded`), Anthropic's `refusal`, and `function_call` /
+  `max_turn_requests` / `cancelled`. Anything unrecognised completes the turn,
+  as upstream does, so `other` is no longer reachable for a turn that ended.
+  `refusal` and `content_filter` complete the turn too rather than mapping to
+  the AI SDK's `content-filter`: the model's refusal is the answer the user is
+  meant to read (ADR-0013).
+- **The legacy finish-event guards are mirrored**
+  ([#187](https://github.com/rashidrazak/opencode-cmd-provider/issues/187)): two
+  guards upstream's legacy consume loop carries were missing here, both about
+  the terminal's two reason fields. A finish reporting `other` with no raw
+  reason is upstream's truncation condition, so it is raised as a classified,
+  retryable truncation instead of being completed, and a reason matching
+  `network` / `connection` / `upstream` + `error` (any separator or case) is a
+  connection that died mid-stream, so it surfaces as a retryable transport
+  failure naming the reason. `other` **with** a raw reason is still an ending.
+  Both replay only while the consumer has seen nothing, and surface as the error
+  part after the budget instead of failing v2 as an unknown finish reason.
+
+### Model catalog
+
+- **FACTS_PACKAGE_VERSION**: `1.54.1` → `1.54.2` — the bundled `models.md` table
+  is unchanged, so the Snapshot is identical; the source URLs now point at the
+  new package and the refresh dates move.
+
 ## 2.1.0 - 2026-09-16
 
 Feature: Claude turns through the Provider API reuse a cached system prefix, and
