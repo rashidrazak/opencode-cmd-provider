@@ -965,7 +965,11 @@ export function createAnthropicStreamParser(): StreamEventParser {
   // does not model is recorded as "other" so its stop closes nothing (#72).
   const blocks = new Map<
     number,
-    { type: "text" | "tool_use" | "thinking" | "other"; id: string; signature?: string }
+    {
+      type: "text" | "tool_use" | "thinking" | "redacted_thinking" | "other"
+      id: string
+      signature?: string
+    }
   >()
   // The content-block types this stream carried that the parser does not model.
   // They emit no part (#72), which is invisible for a turn that ends and a lie
@@ -1029,7 +1033,25 @@ export function createAnthropicStreamParser(): StreamEventParser {
         blocks.set(index, { type: "text", id })
         return [{ type: "text-start", id }]
       }
-      // redacted_thinking, server tool blocks, a future addition: recorded as
+      if (blockType === "redacted_thinking") {
+        // Anthropic's encrypted thinking block: it carries no deltas — the
+        // whole block is the `data` payload — and it streams as a reasoning
+        // block whose start carries the payload in the provider metadata the AI
+        // SDK's own Anthropic provider uses (`anthropic.redactedData`). It has
+        // to be visible on the stream, or a paused turn's continuation cannot
+        // put it back (issues #192, #193).
+        const id = stringValue(block?.id) ?? `redacted-${index}`
+        const data = stringValue(block?.data) ?? ""
+        blocks.set(index, { type: "redacted_thinking", id })
+        return [
+          {
+            type: "reasoning-start",
+            id,
+            providerMetadata: { anthropic: { redactedData: data } },
+          },
+        ]
+      }
+      // server tool blocks, a future addition: recorded as
       // unmodelled so its stop does not fall through to a text-end for a part
       // that was never opened (issue #72). The type is remembered, not just
       // discarded: a paused turn is continued from the parts, so the transport
@@ -1119,6 +1141,10 @@ export function createAnthropicStreamParser(): StreamEventParser {
         }
       } else if (entry?.type === "thinking") {
         return [reasoningEndPart(entry)]
+      } else if (entry?.type === "redacted_thinking") {
+        // The payload rode on the start part; the block closes with a bare end,
+        // like every reasoning block.
+        return [{ type: "reasoning-end", id: entry.id }]
       } else if (entry?.type === "text") {
         return [{ type: "text-end", id: entry.id }]
       } else if (entry) {
@@ -1164,6 +1190,8 @@ export function createAnthropicStreamParser(): StreamEventParser {
     const parts: LanguageModelV3StreamPart[] = []
     for (const entry of blocks.values()) {
       if (entry.type === "thinking") parts.push(reasoningEndPart(entry))
+      else if (entry.type === "redacted_thinking")
+        parts.push({ type: "reasoning-end", id: entry.id })
       else if (entry.type === "text") parts.push({ type: "text-end", id: entry.id })
     }
     blocks.clear()

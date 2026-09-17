@@ -1091,13 +1091,13 @@ run([
       ])
       assertEqual(anthropic.closeStream(), [])
 
-      // Unmodelled (redacted) and tool blocks have no close part: a tool call is
+      // Tool and still-unmodelled blocks have no close part: a tool call is
       // settled by its own tool-call part, never by a bare end.
       const unmodelled = createAnthropicStreamParser()
       unmodelled({
         type: "content_block_start",
         index: 0,
-        content_block: { type: "redacted_thinking" },
+        content_block: { type: "server_tool_use", id: "srv_1", name: "web_search" },
       })
       unmodelled({
         type: "content_block_start",
@@ -1105,6 +1105,63 @@ run([
         content_block: { type: "tool_use", id: "call_1", name: "read" },
       })
       assertEqual(unmodelled.closeStream(), [])
+
+      // A redacted thinking block *is* modelled: it opens a reasoning part, so
+      // a stream that ends mid-block closes it (issue #193).
+      const redacted = createAnthropicStreamParser()
+      redacted({
+        type: "content_block_start",
+        index: 0,
+        content_block: { type: "redacted_thinking", data: "..." },
+      })
+      assertEqual(redacted.closeStream(), [{ type: "reasoning-end", id: "redacted-0" }])
+    },
+  ],
+
+  [
+    "createAnthropicStreamParser streams a redacted thinking block as reasoning (issue #193)",
+    () => {
+      // The block is encrypted reasoning: no deltas, the whole block is its
+      // `data`, and it surfaces as a reasoning part whose start carries that
+      // payload in `providerMetadata.anthropic.redactedData` — the shape the AI
+      // SDK's own Anthropic provider emits, and the one a continuation reads to
+      // replay the block verbatim.
+      const parser = createAnthropicStreamParser()
+      assertEqual(
+        parser({
+          type: "content_block_start",
+          index: 0,
+          content_block: { type: "redacted_thinking", data: "EncryptedThought==" },
+        }),
+        [
+          {
+            type: "reasoning-start",
+            id: "redacted-0",
+            providerMetadata: { anthropic: { redactedData: "EncryptedThought==" } },
+          },
+        ],
+      )
+      assertEqual(parser({ type: "content_block_stop", index: 0 }), [
+        { type: "reasoning-end", id: "redacted-0" },
+      ])
+      // It is modelled, so the #192 safety net has nothing to refuse.
+      assertEqual(parser.unmodelledBlocks?.(), [])
+
+      // An id the gateway supplies is the one the end closes, like every block.
+      const labelled = createAnthropicStreamParser()
+      assertEqual(
+        (
+          labelled({
+            type: "content_block_start",
+            index: 0,
+            content_block: { type: "redacted_thinking", id: "red_7", data: "x" },
+          })[0] as { id: string }
+        ).id,
+        "red_7",
+      )
+      assertEqual(labelled({ type: "content_block_stop", index: 0 }), [
+        { type: "reasoning-end", id: "red_7" },
+      ])
     },
   ],
 

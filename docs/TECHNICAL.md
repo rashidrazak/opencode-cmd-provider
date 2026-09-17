@@ -190,6 +190,15 @@ Anthropic requires the signature on a replayed thinking block, and the parser
 carries it on the block's `reasoning-end` part in
 `providerMetadata.anthropic.signature` for exactly that replay.
 
+Anthropic's `redacted_thinking` block — reasoning the provider's safety system
+encrypted — surfaces as a reasoning part too: no text, and its payload in
+`providerMetadata.anthropic.redactedData` on the `reasoning-start` part (issue
+#193). That is the shape the AI SDK's own Anthropic provider emits, and it is
+what makes the block replayable — a continuation puts it back verbatim, because
+the payload cannot be re-derived. A block type the parser does _not_ model emits
+no part at all (#72): harmless for a turn that ends, refused for a pause whose
+continuation would otherwise drop it (issue #192).
+
 ## Image input
 
 Image input is advertised only for models marked with the `image` input modality
