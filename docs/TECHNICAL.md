@@ -183,7 +183,12 @@ request field; `off`, unsupported levels, and models with no metadata add no
 reasoning fields. No prompt instructions are injected. Reasoning blocks from
 completed assistant turns are not replayed upstream in later requests; only
 user-visible text and completed tool calls are sent back as history, so private
-reasoning traces cannot interfere with later turns.
+reasoning traces cannot interfere with later turns. The one exception is a
+paused turn's continuation, which replays the portion of the turn the provider
+paused — its signed thinking blocks included, signature and all (issue #189):
+Anthropic requires the signature on a replayed thinking block, and the parser
+carries it on the block's `reasoning-end` part in
+`providerMetadata.anthropic.signature` for exactly that replay.
 
 ## Image input
 
@@ -266,14 +271,22 @@ retry that _replaced_ an attempt is not part of the sum). What the continuation
 _asks for_ differs by transport: the legacy `/alpha/generate` transport re-POSTs
 the same body, byte for byte, while the Provider API re-sends the request with
 the paused assistant turn appended (upstream's AI-SDK path resumes it exactly
-that way) — the text the paused response streamed, carried into the dialect's own
-assistant-message shape. A paused turn carrying a shape the continuation cannot
-represent faithfully is failed loudly, naming what could not be carried, rather
-than resumed as a turn the model never made. The bound is five continuations: a
-turn still paused there fails with `PauseTurnLimitError` instead of emitting
-`finish{pause_turn}`, which v1 reads as a completed turn and v2 rejects as a
-retryable incomplete stream. Whatever the paused response left open is closed
-before its continuation opens its own parts.
+that way). That appended turn is the paused response's own content in the
+dialect's shape: text as content, tool calls with their ids, names and arguments
+verbatim, and signed thinking blocks with the signature they arrived with —
+which is what keeps a resumed turn the turn the model was making. A paused turn
+carrying a shape the continuation cannot represent faithfully is failed loudly,
+naming what could not be carried, rather than resumed as a turn the model never
+made: unsigned thinking (Anthropic requires a signature and the plugin cannot
+derive one), a tool call with no id or name, arguments that are not JSON, and any
+part the builder does not model. One gap is the stream's, not the resume's: an
+Anthropic block the parser does not model (`redacted_thinking`, a server tool
+block) emits no part today (#72), so it cannot appear in a continuation either —
+closing that means modelling those blocks in the stream first. The bound is five
+continuations: a turn still paused there fails with `PauseTurnLimitError` instead
+of emitting `finish{pause_turn}`, which v1 reads as a completed turn and v2
+rejects as a retryable incomplete stream. Whatever the paused response left open
+is closed before its continuation opens its own parts.
 
 ### Finish reasons
 

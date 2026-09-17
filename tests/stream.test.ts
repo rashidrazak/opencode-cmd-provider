@@ -761,6 +761,84 @@ run([
   ],
 
   [
+    "createAnthropicStreamParser carries a thinking block's signature on its reasoning-end (issue #189)",
+    () => {
+      // Anthropic's `signature_delta` has no part of its own. The signature is
+      // what lets a continuation replay the block, so it rides on the part that
+      // closes the block — and a block that ends without a stop event (the body
+      // died mid-thought) carries it too.
+      const events = [
+        {
+          type: "content_block_start",
+          index: 0,
+          content_block: { type: "thinking", thinking: "" },
+        },
+        {
+          type: "content_block_delta",
+          index: 0,
+          delta: { type: "thinking_delta", thinking: "hmm" },
+        },
+        {
+          type: "content_block_delta",
+          index: 0,
+          delta: { type: "signature_delta", signature: "sig-1" },
+        },
+        { type: "content_block_stop", index: 0 },
+      ]
+      const parser = createAnthropicStreamParser()
+      const parts = events.flatMap((e) => parser(e))
+      assertEqual(
+        parts.map((p) => (p as { type: string }).type),
+        ["reasoning-start", "reasoning-delta", "reasoning-end"],
+      )
+      assertEqual((parts[2] as { providerMetadata?: unknown }).providerMetadata, {
+        anthropic: { signature: "sig-1" },
+      })
+
+      const open = createAnthropicStreamParser()
+      open({
+        type: "content_block_start",
+        index: 0,
+        content_block: { type: "thinking", thinking: "" },
+      })
+      open({
+        type: "content_block_delta",
+        index: 0,
+        delta: { type: "signature_delta", signature: "sig-2" },
+      })
+      assertEqual(open.closeStream(), [
+        {
+          type: "reasoning-end",
+          id: "thinking-0",
+          providerMetadata: { anthropic: { signature: "sig-2" } },
+        },
+      ])
+
+      // A signature for a block this parser does not model is ignored, like the
+      // block itself; an unsigned thinking block keeps the plain end part.
+      const unmodelled = createAnthropicStreamParser()
+      unmodelled({
+        type: "content_block_start",
+        index: 0,
+        content_block: { type: "redacted_thinking", data: "..." },
+      })
+      assertEqual(
+        unmodelled({
+          type: "content_block_delta",
+          index: 0,
+          delta: { type: "signature_delta", signature: "sig-3" },
+        }),
+        [],
+      )
+      const unsigned = createAnthropicStreamParser()
+      unsigned({ type: "content_block_start", index: 0, content_block: { type: "thinking" } })
+      assertEqual(unsigned({ type: "content_block_stop", index: 0 }), [
+        { type: "reasoning-end", id: "thinking-0" },
+      ])
+    },
+  ],
+
+  [
     "createAnthropicStreamParser never closes a block it did not open (issue #72)",
     () => {
       // A block type this parser does not model — Anthropic's redacted_thinking,

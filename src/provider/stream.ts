@@ -546,6 +546,24 @@ function reasoningDeltaPart(id: unknown, delta: string): LanguageModelV3StreamPa
   return { type: "reasoning-delta", id: stringValue(id) ?? "reasoning", delta }
 }
 
+/**
+ * The end of a thinking block. Anthropic signs such a block with a
+ * `signature_delta`, an event with no part of its own; the signature rides here
+ * instead, in the provider metadata the AI SDK reserves for provider-specific
+ * data (the Anthropic convention is `providerMetadata.anthropic.signature`), so
+ * a request that continues a paused turn can replay the block verbatim rather
+ * than re-derive a signature it cannot (issue #189).
+ */
+function reasoningEndPart(entry: { id: string; signature?: string }): LanguageModelV3StreamPart {
+  return entry.signature === undefined
+    ? { type: "reasoning-end", id: entry.id }
+    : {
+        type: "reasoning-end",
+        id: entry.id,
+        providerMetadata: { anthropic: { signature: entry.signature } },
+      }
+}
+
 // --- OpenAI Chat Completions streaming ---
 export function openAIEventToStreamPart(event: unknown): LanguageModelV3StreamPart[] {
   if (!isRecord(event)) return []
@@ -930,9 +948,15 @@ export function createAnthropicStreamParser(): StreamEventParser {
   // delta and stop events so they close the part the consumer saw opened.
   // Anthropic's thinking blocks carry no `id` today, but a gateway may add one,
   // and re-deriving the id from the index at every event would then orphan the
-  // open reasoning part (issue #71). A block type this parser does not model is
-  // recorded as "other" so its stop closes nothing (issue #72).
-  const blocks = new Map<number, { type: "text" | "tool_use" | "thinking" | "other"; id: string }>()
+  // open reasoning part (issue #71). `signature` is the thinking block's
+  // cryptographic signature, which arrives in a `signature_delta` after the
+  // thinking deltas: it is what lets a resumed request replay the block, so it
+  // rides on the block's `reasoning-end` (issue #189). A block type this parser
+  // does not model is recorded as "other" so its stop closes nothing (#72).
+  const blocks = new Map<
+    number,
+    { type: "text" | "tool_use" | "thinking" | "other"; id: string; signature?: string }
+  >()
   // True once a `message_delta` finished this stream. Anthropic reports usage
   // (and the real stop_reason) on `message_delta` and then closes with a bare
   // `message_stop`; mapping that terminal too would hand the transport a
@@ -979,7 +1003,10 @@ export function createAnthropicStreamParser(): StreamEventParser {
       }
       if (blockType === "thinking") {
         const id = stringValue(block?.id) ?? `thinking-${index}`
-        blocks.set(index, { type: "thinking", id })
+        // A gateway may put the signature on the block start instead of
+        // streaming it as a delta; either way it belongs to this block.
+        const signature = stringValue(block?.signature)
+        blocks.set(index, { type: "thinking", id, ...(signature ? { signature } : {}) })
         return [{ type: "reasoning-start", id }]
       }
       if (blockType === "text") {
@@ -1039,6 +1066,18 @@ export function createAnthropicStreamParser(): StreamEventParser {
         }
         return out
       }
+      const signature = stringValue(delta?.signature)
+      if (typeof signature === "string" && signature.length > 0) {
+        // Anthropic signs a thinking block with a `signature_delta` between its
+        // thinking deltas and `content_block_stop`. The signature has no part
+        // of its own — it is remembered for the block's `reasoning-end`, which
+        // is where the transport reads it back for a continuation (issue #189).
+        // A signature for a block this parser does not model is ignored, like
+        // the block itself.
+        const entry = blocks.get(index)
+        if (entry?.type === "thinking") entry.signature = signature
+        return []
+      }
       return []
     }
     if (type === "content_block_stop") {
@@ -1061,7 +1100,7 @@ export function createAnthropicStreamParser(): StreamEventParser {
           ]
         }
       } else if (entry?.type === "thinking") {
-        return [{ type: "reasoning-end", id: entry.id }]
+        return [reasoningEndPart(entry)]
       } else if (entry?.type === "text") {
         return [{ type: "text-end", id: entry.id }]
       } else if (entry) {
@@ -1106,7 +1145,7 @@ export function createAnthropicStreamParser(): StreamEventParser {
   parse.closeStream = () => {
     const parts: LanguageModelV3StreamPart[] = []
     for (const entry of blocks.values()) {
-      if (entry.type === "thinking") parts.push({ type: "reasoning-end", id: entry.id })
+      if (entry.type === "thinking") parts.push(reasoningEndPart(entry))
       else if (entry.type === "text") parts.push({ type: "text-end", id: entry.id })
     }
     blocks.clear()

@@ -2216,12 +2216,14 @@ run([
     },
   ],
   [
-    "transport: a paused turn carrying a shape the resume cannot represent fails loudly (issue #188)",
+    "transport: a pause that called tools resumes with those calls, ids included (issue #189)",
     async () => {
-      // A resume must never silently drop part of the turn it continues. The
-      // paused response called a tool here, so the continuation cannot be
-      // built from text alone: the turn fails, naming what was not carried,
-      // and no continuation request is ever sent.
+      // The paused turn called a tool. The continuation carries the call — id,
+      // name and the arguments exactly as they streamed — even though the
+      // prompt holds no tool result for it yet, which is the point: the results
+      // the host sends next name the ids this request carried.
+      const bodies: Array<Record<string, unknown>> = []
+      let requests = 0
       const options: MockCcOptions = {
         chatCompletionsStream: [
           openAIChunk("let me look", { id: "chatcmpl-1" }),
@@ -2245,32 +2247,129 @@ run([
           { id: "chatcmpl-1", choices: [], usage: { prompt_tokens: 10, completion_tokens: 4 } },
         ],
       }
+      options.onChatCompletions = (body) => {
+        bodies.push(body)
+        requests++
+        if (requests === 2) {
+          options.chatCompletionsStream = [
+            openAIChunk("done", { id: "chatcmpl-2" }),
+            {
+              id: "chatcmpl-2",
+              choices: [{ delta: {}, finish_reason: "end_turn" }],
+              usage: { prompt_tokens: 3, completion_tokens: 5 },
+            },
+          ]
+        }
+      }
       const mock = await startMockCc(options)
       try {
         const provider = createCommandCode({ apiKey: "test_key", baseURL: mock.url })
         const parts = await collect(provider.languageModel("gpt-5.6-terra"), [
           { role: "user", content: "hi" },
         ])
-        assertEqual(mock.hits.chatCompletions, 1, "no continuation is attempted")
-        assertEqual(
-          parts.filter((p) => p.type === "finish"),
-          [],
-          "no finish is reported",
-        )
-        const failure = parts[parts.length - 1]!.error as Error
-        assert(failure.message.includes("tool calls"), failure.message)
-        assert(failure.message.includes("cannot be carried"), failure.message)
+        assertEqual(mock.hits.chatCompletions, 2, "the pause is continued once")
+        assertEqual(bodies[1]!.messages, [
+          { role: "user", content: "hi" },
+          {
+            role: "assistant",
+            content: "let me look",
+            tool_calls: [
+              {
+                id: "call_1",
+                type: "function",
+                function: { name: "read", arguments: '{"path":"a.ts"}' },
+              },
+            ],
+          },
+        ])
+        // The id the continuation carried is the id the paused response put on
+        // the stream — and so the id a tool result may name.
+        const streamedCall = parts.find((p) => p.type === "tool-call") as
+          { toolCallId: string } | undefined
+        assertEqual(streamedCall?.toolCallId, "call_1")
+        const carried = bodies[1]!.messages as Array<{
+          tool_calls?: Array<{ id: string }>
+        }>
+        assertEqual(carried[1]!.tool_calls![0]!.id, streamedCall!.toolCallId)
+        assertEqual(parts[parts.length - 1]!.type, "finish")
       } finally {
         await mock.close()
       }
     },
   ],
   [
-    "transport: a paused turn carrying reasoning blocks fails loudly until the resume can carry them (issue #188)",
+    "transport: an Anthropic pause carrying signed reasoning resumes it intact (issue #189)",
     async () => {
-      // The Anthropic dialect's reasoning arrives as a thinking block. Same
-      // rule as the tool call above: the continuation says what it could not
-      // represent instead of resuming a turn that never happened.
+      // Anthropic signs a thinking block with a `signature_delta`, which has no
+      // stream part of its own: it rides on the block's `reasoning-end`
+      // provider metadata, and the continuation replays it unchanged — a
+      // re-derived signature is not a signature.
+      const bodies: Array<Record<string, unknown>> = []
+      const think = (stopReason: string) => [
+        {
+          type: "content_block_start",
+          index: 0,
+          content_block: { type: "thinking", thinking: "" },
+        },
+        {
+          type: "content_block_delta",
+          index: 0,
+          delta: { type: "thinking_delta", thinking: "hmm" },
+        },
+        {
+          type: "content_block_delta",
+          index: 0,
+          delta: { type: "signature_delta", signature: "sig-1" },
+        },
+        { type: "content_block_stop", index: 0 },
+        anthropicMessageDelta({ input_tokens: 10, output_tokens: 4 }, stopReason),
+      ]
+      let requests = 0
+      const options: MockCcOptions = { messagesStream: think("pause_turn") }
+      options.onMessages = (body) => {
+        bodies.push(body)
+        requests++
+        if (requests === 2) {
+          options.messagesStream = [
+            { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+            anthropicContentBlockDelta("done"),
+            { type: "content_block_stop", index: 0 },
+            anthropicMessageDelta({ input_tokens: 3, output_tokens: 5 }),
+          ]
+        }
+      }
+      const mock = await startMockCc(options)
+      try {
+        const provider = createCommandCode({ apiKey: "test_key", baseURL: mock.url })
+        const parts = await collect(provider.languageModel("claude-sonnet-5"), [
+          { role: "user", content: "hi" },
+        ])
+        assertEqual(mock.hits.messages, 2, "the pause is continued once")
+        assertEqual(bodies[1]!.messages, [
+          { role: "user", content: "hi" },
+          {
+            role: "assistant",
+            content: [{ type: "thinking", thinking: "hmm", signature: "sig-1" }],
+          },
+        ])
+        // The signature reached the consumer on the reasoning-end part, which
+        // is where the continuation read it from.
+        const reasoningEnd = parts.find((p) => p.type === "reasoning-end") as
+          { providerMetadata?: unknown } | undefined
+        assertEqual(reasoningEnd?.providerMetadata, { anthropic: { signature: "sig-1" } })
+        assertEqual(parts[parts.length - 1]!.type, "finish")
+      } finally {
+        await mock.close()
+      }
+    },
+  ],
+  [
+    "transport: a paused turn carrying unsigned reasoning still fails loudly (issue #189)",
+    async () => {
+      // Anthropic requires a signature on a replayed thinking block and this
+      // plugin cannot derive one, so the shape that remains unrepresentable
+      // keeps failing loudly rather than resuming a turn that loses the
+      // model's reasoning.
       const options: MockCcOptions = {
         messagesStream: [
           {
@@ -2300,7 +2399,8 @@ run([
           "no finish is reported",
         )
         const failure = parts[parts.length - 1]!.error as Error
-        assert(failure.message.includes("reasoning blocks"), failure.message)
+        assert(failure.message.includes("unsigned reasoning"), failure.message)
+        assert(failure.message.includes("cannot be carried"), failure.message)
       } finally {
         await mock.close()
       }

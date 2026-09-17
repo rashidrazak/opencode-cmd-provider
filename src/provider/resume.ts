@@ -3,70 +3,211 @@
 //
 // On the Provider API a paused turn is continued by re-sending the request with
 // the paused assistant turn appended: that is how upstream `command-code@1.54.x`
-// resumes it (`withResumedAssistantTurn`, its AI-SDK path appends
+// resumes it (`withResumedAssistantTurn`, whose AI-SDK path appends
 // `{ role: "assistant", content: assistantParts(partial) }` to the messages).
 // The legacy `/alpha/generate` transport never asks here — upstream re-POSTs the
 // same body there, and so does this plugin (issue #172).
 //
 // The turn is read off the stream parts the paused response emitted, so a shape
-// this module cannot put back on the wire faithfully must fail the turn rather
-// than be silently dropped: a resume that loses part of the model's turn is
-// worse than a visible failure.
+// this module cannot put back on the wire faithfully fails the turn rather than
+// being silently dropped: a resume that loses part of the model's turn is worse
+// than a visible failure. What the stream does not carry, this module cannot see
+// either: an Anthropic block the parser does not model (`redacted_thinking`, a
+// server tool block) emits no part today (#72), so it cannot appear in a
+// continuation — closing that gap means modelling those blocks in the stream
+// first.
 import type { LanguageModelV3StreamPart } from "@ai-sdk/provider"
+import { isRecord, stringValue } from "./converters.js"
 import { redactCommandCodeErrorText } from "./redact.js"
 import { RESUME_UNSUPPORTED_FAILURE, TransportFailureError } from "./retry.js"
 
 /** The wire dialect the continuation request is built for. */
 export type ResumeDialect = "anthropic" | "openai"
 
-/** The assistant message a continuation appends, or undefined when the paused
- * response produced no content at all (nothing to append — the request is
- * re-sent as it was). Throws when the turn carries a shape this module cannot
- * represent. */
+/** One content block of the paused assistant turn, in the order the response
+ * streamed it. */
+type ResumedBlock =
+  | { kind: "text"; text: string }
+  | { kind: "reasoning"; text: string; signature?: string }
+  | { kind: "tool-call"; id: string; name: string; input: string }
+
+/** A tool call's arguments, parsed and checked, in the two encodings the wires
+ * need: the JSON object Anthropic takes and the JSON text OpenAI takes. */
+interface ResumedToolCall {
+  id: string
+  name: string
+  input: unknown
+  argumentsJson: string
+}
+
+/**
+ * The assistant message a continuation appends to the request the paused turn
+ * was sent with. Returns undefined when the paused response produced no content
+ * at all — there is nothing to append, and the request is re-sent as it was.
+ * Throws when the turn carries a shape this module cannot represent.
+ */
 export function resumedAssistantMessage(
   parts: readonly LanguageModelV3StreamPart[],
   dialect: ResumeDialect,
 ): Record<string, unknown> | undefined {
-  const text = resumedText(parts)
-  if (text === undefined) return undefined
-  return dialect === "anthropic"
-    ? { role: "assistant", content: [{ type: "text", text }] }
-    : { role: "assistant", content: text }
+  const blocks = collectBlocks(parts)
+  if (blocks.length === 0) return undefined
+  return dialect === "anthropic" ? anthropicMessage(blocks) : openAIMessage(blocks)
 }
 
 /**
- * The text the paused response produced: every `text-delta` it emitted, in
- * order. A paused turn's text blocks are one continuous answer to the same
- * turn, so they are joined rather than kept apart.
- *
- * Tool calls and reasoning blocks are refused for now (issue #188): the
- * continuation cannot carry them yet, and resuming with only the text would
- * hand the model a turn it never made.
+ * Reads the paused response's content blocks off the parts it emitted, in
+ * order. The lifecycles (`text-start`/`text-end`, `tool-input-*`) are
+ * scaffolding: the content is in the deltas and the completed `tool-call`.
  */
-function resumedText(parts: readonly LanguageModelV3StreamPart[]): string | undefined {
-  let text = ""
+function collectBlocks(parts: readonly LanguageModelV3StreamPart[]): ResumedBlock[] {
+  const blocks: ResumedBlock[] = []
+  const openById = new Map<string, ResumedBlock>()
+
+  const reasoningFor = (id: string): Extract<ResumedBlock, { kind: "reasoning" }> => {
+    const open = openById.get(id)
+    if (open?.kind === "reasoning") return open
+    const created: ResumedBlock = { kind: "reasoning", text: "" }
+    blocks.push(created)
+    openById.set(id, created)
+    return created
+  }
+
   for (const part of parts) {
     switch (part.type) {
-      case "text-delta":
-        text += part.delta
-        break
       case "text-start":
       case "text-end":
-        break
       case "tool-input-start":
       case "tool-input-delta":
       case "tool-input-end":
-      case "tool-call":
-        throw unrepresentable("tool calls")
+        break
+      case "text-delta": {
+        const open = openById.get(part.id)
+        if (open?.kind === "text") open.text += part.delta
+        else {
+          const created: ResumedBlock = { kind: "text", text: part.delta }
+          blocks.push(created)
+          openById.set(part.id, created)
+        }
+        break
+      }
       case "reasoning-start":
+        reasoningFor(part.id)
+        break
       case "reasoning-delta":
-      case "reasoning-end":
-        throw unrepresentable("reasoning blocks")
+        reasoningFor(part.id).text += part.delta
+        break
+      case "reasoning-end": {
+        const signature = signatureOf(part)
+        if (signature !== undefined) reasoningFor(part.id).signature = signature
+        break
+      }
+      case "tool-call":
+        blocks.push({
+          kind: "tool-call",
+          id: part.toolCallId,
+          name: part.toolName,
+          input: part.input,
+        })
+        break
       default:
         throw unrepresentable(`a ${String((part as { type?: unknown }).type)} block`)
     }
   }
-  return text.length > 0 ? text : undefined
+
+  // An empty text block carries nothing to replay; an empty *thinking* block
+  // does (its signature), so only text is dropped here.
+  return blocks.filter((block) => block.kind !== "text" || block.text.length > 0)
+}
+
+/** The signature Anthropic put on a thinking block, if this part carries one. */
+function signatureOf(part: LanguageModelV3StreamPart): string | undefined {
+  const metadata = (part as { providerMetadata?: unknown }).providerMetadata
+  if (!isRecord(metadata)) return undefined
+  return isRecord(metadata.anthropic) ? stringValue(metadata.anthropic.signature) : undefined
+}
+
+/**
+ * The Anthropic assistant message: an ordered content array, exactly the shape
+ * the provider streamed. A thinking block is replayed with the signature it was
+ * given — the API requires one, and this plugin cannot derive it — and tool call
+ * arguments are the JSON object the wire expects.
+ */
+function anthropicMessage(blocks: readonly ResumedBlock[]): Record<string, unknown> {
+  const content: unknown[] = []
+  for (const block of blocks) {
+    if (block.kind === "text") {
+      content.push({ type: "text", text: block.text })
+    } else if (block.kind === "reasoning") {
+      if (block.signature === undefined) {
+        // No signature means the provider never signed the block (or the
+        // gateway dropped the delta), so the API would reject the replay. A
+        // resume that silently loses the model's reasoning is not a resume.
+        throw unrepresentable("unsigned reasoning")
+      }
+      content.push({ type: "thinking", thinking: block.text, signature: block.signature })
+    } else {
+      const call = encodedToolCall(block)
+      if (!isRecord(call.input)) {
+        throw unrepresentable("a tool call whose arguments are not a JSON object")
+      }
+      content.push({ type: "tool_use", id: call.id, name: call.name, input: call.input })
+    }
+  }
+  return { role: "assistant", content }
+}
+
+/**
+ * The OpenAI assistant message: text as `content`, tool calls as `tool_calls`,
+ * reasoning as `reasoning_content` — the field this transport's OpenAI codec
+ * reads a reasoning delta back from. The dialect has no signature field, and
+ * none of its streams carry one (signatures are Anthropic's).
+ */
+function openAIMessage(blocks: readonly ResumedBlock[]): Record<string, unknown> {
+  const text: string[] = []
+  const reasoning: string[] = []
+  const toolCalls: unknown[] = []
+  for (const block of blocks) {
+    if (block.kind === "text") text.push(block.text)
+    else if (block.kind === "reasoning") reasoning.push(block.text)
+    else {
+      const call = encodedToolCall(block)
+      toolCalls.push({
+        id: call.id,
+        type: "function",
+        function: { name: call.name, arguments: call.argumentsJson },
+      })
+    }
+  }
+  const message: Record<string, unknown> = {
+    role: "assistant",
+    // OpenAI wants null content on a message that is nothing but tool calls.
+    content: text.length > 0 ? text.join("") : null,
+  }
+  if (reasoning.length > 0) message.reasoning_content = reasoning.join("")
+  if (toolCalls.length > 0) message.tool_calls = toolCalls
+  return message
+}
+
+/**
+ * A tool call's arguments, checked once: a call with no id or name cannot be
+ * replayed (the results that follow would have nothing to line up with), and
+ * arguments that are not JSON text are not a call this transport streamed.
+ */
+function encodedToolCall(block: Extract<ResumedBlock, { kind: "tool-call" }>): ResumedToolCall {
+  if (block.id.length === 0 || block.name.length === 0) {
+    throw unrepresentable("a tool call without an id or name")
+  }
+  let input: unknown
+  try {
+    input = JSON.parse(block.input)
+  } catch {
+    throw unrepresentable("a tool call whose arguments are not JSON")
+  }
+  // The raw argument text is what the OpenAI wire takes, verbatim: the codec
+  // streamed a fragment string, and re-serialising it would rewrite the call's
+  // own bytes.
+  return { id: block.id, name: block.name, input, argumentsJson: block.input }
 }
 
 /**
