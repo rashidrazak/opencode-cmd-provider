@@ -324,7 +324,16 @@ class VersionGateError extends Error implements ClassifiedTransportError {
   }
 }
 
-/** One transport pass: endpoint, body, headers, event mapper, and whether the
+/** One request the transport will POST: the serialized body and the headers to
+ * send it with. Built by the descriptor, never held on it, so a paused turn's
+ * continuation can ask for a different body than the request it continues
+ * (issue #185). */
+interface TransportRequest {
+  bodyStr: string
+  headers: Record<string, string>
+}
+
+/** One transport pass: endpoint, request builder, event mapper, and whether the
  * Provider API plan-gate `403` on this endpoint flips the session to the
  * legacy transport. Only the Provider API descriptor flips; the legacy
  * descriptor never does, so a 403 on `/alpha/generate` — a stale-client
@@ -332,11 +341,15 @@ class VersionGateError extends Error implements ClassifiedTransportError {
  * re-entering the fallback (issue #56 "retries once"). */
 interface TransportDescriptor {
   url: string
-  bodyStr: string
-  /** Rebuilt for every attempt, so a credential rotated mid-ladder is picked
-   * up by the next request (issue #171 — the Authorization header is not a
-   * per-stream constant any more). */
-  headersFor: () => Record<string, string>
+  /** Builds the request for one pass. The transport asks here for every request
+   * it sends — the first one, a replay, and a paused turn's continuation —
+   * instead of reusing one frozen body, which is what lets a continuation
+   * carry the paused assistant turn (issues #185, #188). Called once per
+   * attempt, so a credential rotated mid-ladder is picked up by the next
+   * request (issue #171 — the Authorization header is not a per-stream constant
+   * any more). `pausedTurn` is the content the response being continued
+   * emitted, and is empty for a first request and for a replay. */
+  requestFor: (pausedTurn: readonly LanguageModelV3StreamPart[]) => TransportRequest
   /** A parser per attempt: a replay is a new stream, so per-stream state (block
    * lifecycles, tool buffers, the OpenAI last finish reason) must not cross
    * attempts (issue #171 — the ladder can newly replay after a synthesized
@@ -661,16 +674,20 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
     sink?: LanguageModelV3StreamPart[],
   ): ReadableStream<LanguageModelV3StreamPart> {
     const url = this.providerEndpoint()
-    const bodyStr = JSON.stringify(this.providerBodyFor(options, isClaude))
     // Safety net (issue #56): the plan-gate `403` — either envelope, issue
     // #175 — pins this session to the legacy transport and retries the same
     // call once via POST {base}/alpha/generate with the legacy CLI wire
     // format. The legacy descriptor itself never flips, so the retry is
     // bounded to one.
+    const legacyBodyStr = JSON.stringify(this.bodyFor(options))
     const legacyFallback: TransportDescriptor = {
       url: `${this.apiBase()}/alpha/generate`,
-      bodyStr: JSON.stringify(this.bodyFor(options)),
-      headersFor: () => this.headersFor(options),
+      // The legacy transport re-POSTs the same bytes for a continuation
+      // (upstream `command-code@1.54.0` loops on the same request), so the
+      // builder ignores the paused turn and returns the body frozen once for
+      // this call. Rebuilding it per pass would move its `threadId` and
+      // timestamp under the continuation.
+      requestFor: () => ({ bodyStr: legacyBodyStr, headers: this.headersFor(options) }),
       createParser: () => statelessParser(ccEventToStreamPart),
       isTerminalEvent: ccEventIsTerminal,
       flipOnUpgradeRequired: false,
@@ -678,8 +695,12 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
     return this.transportStream(
       {
         url,
-        bodyStr,
-        headersFor: () => this.providerHeadersFor(options),
+        // Rebuilt per pass, so a continuation lands in the same request shape
+        // the first attempt sent (issue #185).
+        requestFor: () => ({
+          bodyStr: JSON.stringify(this.providerBodyFor(options, isClaude)),
+          headers: this.providerHeadersFor(options),
+        }),
         // Per-stream stateful parsers complete tool calls whose arguments
         // arrive across multiple SSE events (issue #55 tool-call parity); the
         // stateless mappers are kept for direct codec use.
@@ -696,11 +717,14 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
     options: ModelCallOptions,
     sink?: LanguageModelV3StreamPart[],
   ): ReadableStream<LanguageModelV3StreamPart> {
+    // Frozen once per call: a continuation re-POSTs these exact bytes, which
+    // is upstream `command-code@1.54.0`'s own behaviour on this endpoint
+    // (issue #172).
+    const bodyStr = JSON.stringify(this.bodyFor(options))
     return this.transportStream(
       {
         url: `${this.apiBase()}/alpha/generate`,
-        bodyStr: JSON.stringify(this.bodyFor(options)),
-        headersFor: () => this.headersFor(options),
+        requestFor: () => ({ bodyStr, headers: this.headersFor(options) }),
         createParser: () => statelessParser(ccEventToStreamPart),
         isTerminalEvent: ccEventIsTerminal,
         flipOnUpgradeRequired: false,
@@ -750,10 +774,17 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
         // only the parts *it* emitted make its replay unsafe; the continuations
         // before it are never re-requested (issue #172). Reset per request.
         let attemptEmitted = false
+        // The content the response being continued emitted. A continuation
+        // carries it back into its own request (issue #188), so it is reset at
+        // every request and read only by the builder of the next one — never
+        // replayed, since a replay only follows an attempt that emitted
+        // nothing (issue #185).
+        let responseParts: LanguageModelV3StreamPart[] = []
         const emit = (part: LanguageModelV3StreamPart) => {
           if (part.type !== "finish") {
             visibleEmitted = true
             attemptEmitted = true
+            responseParts.push(part)
           }
           sink?.push(part)
           streamController.enqueue(part)
@@ -903,6 +934,11 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
             requestLoop: for (let continuations = 0; ; continuations++) {
               clearTerminalState()
               attemptEmitted = false
+              // The paused turn this request continues: the parts the previous
+              // response emitted, closed parts included. Empty for the first
+              // request, whose builder sees no continuation.
+              const pausedTurn = responseParts
+              responseParts = []
               retryLoop: for (let attempt = 0; ; attempt++) {
                 // A fresh parser: a replay is a new stream, and the previous
                 // attempt's per-stream state (open blocks, tool buffers, the
@@ -934,14 +970,21 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
                     throw error
                   })
 
+                // Asked for before the attempt is classified: a builder that
+                // refuses the request (a paused turn this build cannot resume,
+                // issue #188) is a statement about the request, not about a
+                // response — the ladder never replays it, and the turn's
+                // already-settled bookkeeping must not swallow it either.
+                const request = t.requestFor(pausedTurn)
+
                 try {
                   try {
                     response = await fetchImpl(t.url, {
                       method: "POST",
                       // Rebuilt per attempt (issue #171): a credential or header
                       // rotated mid-ladder is picked up by the next request.
-                      headers: t.headersFor(),
-                      body: t.bodyStr,
+                      headers: request.headers,
+                      body: request.bodyStr,
                       signal: attemptController.signal,
                     })
                   } catch (fetchError: unknown) {

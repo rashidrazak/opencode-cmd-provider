@@ -1885,6 +1885,54 @@ run([
     },
   ],
   [
+    "transport: a legacy continuation re-POSTs byte-identical bytes, with headers rebuilt per request (issue #185)",
+    async () => {
+      // The request builder the transport asks for every pass is what lets a
+      // continuation vary its body — and the legacy transport uses that seam to
+      // keep sending exactly what it always sent: the body frozen once for the
+      // call, byte for byte. The headers are the other half: they are built by
+      // the same call, so a credential rotated between the two requests is
+      // still picked up.
+      await withEnvVars({ COMMANDCODE_API_KEY: "credential-one" }, async () => {
+        const rawBodies: string[] = []
+        const authorizations: string[] = []
+        const options = pausedLegacyTurn()
+        const advanceTurn = options.onGenerate!
+        options.onGenerate = (body, headers, rawBody) => {
+          advanceTurn(body, headers, rawBody)
+          rawBodies.push(rawBody)
+          authorizations.push(headers.authorization ?? "")
+          if (rawBodies.length === 1) process.env.COMMANDCODE_API_KEY = "credential-two"
+        }
+        const mock = await startMockCc(options)
+        try {
+          // No apiKey option: the credential comes from the environment, which
+          // is exactly what can change under a running session.
+          const provider = createCommandCode({ baseURL: mock.url })
+          const parts = await collect(
+            provider.languageModel("gpt-5.6-terra"),
+            [{ role: "user", content: "hi" }],
+            { commandcode: { plan: "go" } },
+          )
+          assertEqual(mock.hits.generate, 2, "the pause is continued once")
+          assertEqual(rawBodies.length, 2, "one body per request")
+          assertEqual(
+            rawBodies[1],
+            rawBodies[0],
+            "the continuation re-POSTs the first request's bytes",
+          )
+          assertEqual(authorizations, ["Bearer credential-one", "Bearer credential-two"])
+          assertEqual(
+            parts.map((p) => p.type),
+            ["text-delta", "text-delta", "finish"],
+          )
+        } finally {
+          await mock.close()
+        }
+      })
+    },
+  ],
+  [
     "transport: a paused legacy turn re-POSTs the body and sums its continuations' usage (issue #172)",
     async () => {
       // Upstream `command-code@1.54.0` loops on `rawFinishReason === "pause_turn"`
