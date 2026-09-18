@@ -658,6 +658,78 @@ run([
   ],
 
   [
+    "the account label is short, inert, and never an email (issue #205)",
+    async () => {
+      const hostCredential = async () => ({ key: "host_key", source: "host" as const })
+      const labelFor = async (user: Record<string, unknown>): Promise<string | undefined> => {
+        const { fetch } = recordingFetch({
+          "/alpha/whoami": { success: true, user, org: null },
+          "/alpha/billing/subscriptions": SUBSCRIPTION_ACTIVE("individual-goat"),
+        })
+        const out = await planSummaryTool({
+          hostCredential,
+          baseURL: "http://mock",
+          fetch,
+          env: {},
+        }).execute({})
+        return out.split("\n")[1]
+      }
+
+      // An empty userName still falls back to the id — `??` alone would not.
+      assertEqual(
+        await labelFor({ id: "u_42", userName: "" }),
+        "Account: `u_42` — credential: Host connection",
+      )
+      // A userName that is an email is never the label; the id takes over.
+      assertEqual(
+        await labelFor({ id: "u_42", userName: "rashid@example.com" }),
+        "Account: `u_42` — credential: Host connection",
+      )
+      // Neither: no label at all rather than an email.
+      assertEqual(
+        await labelFor({ userName: "rashid@example.com", email: "other@example.com" }),
+        "Credential: Host connection",
+      )
+      // A userName is API data, not markdown: it cannot forge a line or a row.
+      assertEqual(
+        await labelFor({ userName: "rashid\n| fake | row |" }),
+        "Account: `rashid fake row` — credential: Host connection",
+      )
+    },
+  ],
+
+  [
+    "a legacy-file label is inert too (issue #205)",
+    async () => {
+      // Paths are external data as much as account fields are: a store whose
+      // name carries markdown or a line break must not break the line it is
+      // rendered into.
+      const dir = mkdtempSync(join(tmpdir(), "cmd-plan-label-"))
+      const authFile = join(dir, "auth|`file`.json")
+      writeFileSync(authFile, JSON.stringify({ apiKey: "file_key" }))
+      try {
+        const { fetch } = recordingFetch({
+          "/alpha/whoami": { success: true, user: { userName: "rashid" }, org: null },
+          "/alpha/billing/subscriptions": SUBSCRIPTION_ACTIVE("individual-goat"),
+        })
+        const out = await planSummaryTool({
+          env: {},
+          authPaths: [authFile],
+          baseURL: "http://mock",
+          fetch,
+        }).execute({})
+        const line = out.split("\n")[1]!
+        assert(line.includes("credential: legacy file `"), `must name the store, got: ${line}`)
+        assert(line.includes("auth file .json"), `the store name survives flattened, got: ${line}`)
+        assert(!line.includes("|"), `the label cannot forge a table row, got: ${line}`)
+        assertEqual(line.match(/`/g)?.length, 4, `the label stays inside its code span: ${line}`)
+      } finally {
+        rmSync(dir, { recursive: true, force: true })
+      }
+    },
+  ],
+
+  [
     "cmd_plan_summary (v1 + v2) renders unknown instead of Go when nothing resolves",
     async () => {
       const notFound = (async () => new Response("not found", { status: 404 })) as typeof fetch

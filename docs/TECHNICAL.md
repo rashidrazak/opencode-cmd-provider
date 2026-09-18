@@ -535,3 +535,4 @@ Both e2e scripts are excluded from `npm test`.
 | [0014](adr/0014-unmodelled-block-refuses-resume.md)            | A resumed turn never silently drops a block the stream did not model      |
 | [0015](adr/0015-host-credential-for-tools.md)                  | The plan summary uses the Host's resolved credential, not a legacy file   |
 | [0016](adr/0016-openai-dialect-reasoning-history.md)           | The OpenAI dialect replays assistant reasoning in history                 |
+| [0017](adr/0017-plan-summary-provenance-line.md)               | The plan summary renders the account and the credential rung              |

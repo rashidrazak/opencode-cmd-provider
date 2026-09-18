@@ -23,6 +23,7 @@ import {
   type ApiKeySource,
   type HostCredential,
   type HostCredentialSource,
+  type ResolvedApiKey,
 } from "../provider/auth-key.js"
 import { isRecord, stringValue } from "../provider/converters.js"
 import type { V2ToolDefinition } from "../plugin/v2-types.js"
@@ -62,6 +63,23 @@ export interface ResolvePlanOptions {
 }
 
 /**
+ * The plan an explicit pin names — the tool argument first, then
+ * `COMMANDCODE_PLAN` — and which pin supplied it. A pin needs no credential, no
+ * network and no Host round-trip, so both resolution paths read it first
+ * (ADR-0011 §2).
+ */
+function pinnedPlan(
+  planArg: string | undefined,
+  env: NodeJS.ProcessEnv,
+): { plan: PlanId; via: "argument" | "environment" } | undefined {
+  const fromArg = normalizePlan(planArg)
+  if (fromArg) return { plan: fromArg, via: "argument" }
+  const fromEnv = normalizePlan(env.COMMANDCODE_PLAN)
+  if (fromEnv) return { plan: fromEnv, via: "environment" }
+  return undefined
+}
+
+/**
  * Resolves the account's plan, or undefined when nothing resolves. Callers
  * must present undefined as unknown — never as a default plan (issue #159).
  */
@@ -70,10 +88,8 @@ export async function resolvePlan(
   env: NodeJS.ProcessEnv = process.env,
   options: ResolvePlanOptions = {},
 ): Promise<PlanId | undefined> {
-  const fromArg = normalizePlan(planArg)
-  if (fromArg) return fromArg
-  const fromEnv = normalizePlan(env.COMMANDCODE_PLAN)
-  if (fromEnv) return fromEnv
+  const pinned = pinnedPlan(planArg, env)
+  if (pinned) return pinned.plan
   return (await fetchBillingPlan(env, options)).plan
 }
 
@@ -81,23 +97,35 @@ export async function resolvePlan(
 const ACCOUNT_LABEL_MAX_CHARS = 32
 
 /**
- * A short, non-sensitive label for the account a lookup answered for: the
- * `userName` handle, else an elided `user.id`. Never the email, never the key
- * (issue #205) — and never anything that could break out of the summary's
- * single line or forge a table row in it.
+ * Markdown- and line-inert display text. Every label the summary renders comes
+ * from outside it — an API field, a path — so neither may forge a table row or
+ * break out of the one line it sits in.
  */
-function accountLabel(whoami: unknown): string | undefined {
-  if (!isRecord(whoami) || !isRecord(whoami.user)) return undefined
-  const raw = stringValue(whoami.user.userName) ?? stringValue(whoami.user.id)
-  if (!raw) return undefined
-  const clean = raw
+function flattenLabel(value: string): string {
+  return value
     .replace(/[`|\r\n\t]/g, " ")
     .replace(/\s+/g, " ")
     .trim()
-  if (!clean) return undefined
-  return clean.length > ACCOUNT_LABEL_MAX_CHARS
-    ? `${clean.slice(0, ACCOUNT_LABEL_MAX_CHARS - 1)}…`
-    : clean
+}
+
+/**
+ * A short, non-sensitive label for the account a lookup answered for: the
+ * `userName` handle, else an elided `user.id`. Never the email — neither
+ * `user.email`, nor a `userName` that is one — never the key, and never
+ * anything that could break out of the summary's single line (issue #205).
+ */
+function accountLabel(whoami: unknown): string | undefined {
+  if (!isRecord(whoami) || !isRecord(whoami.user)) return undefined
+  const user = whoami.user
+  for (const candidate of [stringValue(user.userName), stringValue(user.id)]) {
+    if (!candidate || candidate.includes("@")) continue
+    const label = flattenLabel(candidate)
+    if (!label) continue
+    return label.length > ACCOUNT_LABEL_MAX_CHARS
+      ? `${label.slice(0, ACCOUNT_LABEL_MAX_CHARS - 1)}…`
+      : label
+  }
+  return undefined
 }
 
 /** What a billing lookup resolved: the plan, and the account it answered for. */
@@ -172,9 +200,9 @@ const REQUEST_PROFILE = { input: 800, output: 200, cacheRead: 50_000 }
 
 /**
  * What decided the plan a summary renders (issue #205). Either an explicit pin
- * (ADR-0011 §2 — no lookup happened), a Host-resolved credential, rung of this
- * package's own ladder, or nothing at all. Display provenance only: the rungs
- * carry no key material, and a file rung carries its store's label.
+ * (ADR-0011 §2 — no lookup happened), a Host-resolved credential, a rung of
+ * this package's own ladder, or nothing at all. Display provenance only: the
+ * rungs carry no key material, and a file rung carries its store's label.
  */
 export type PlanSource =
   | { kind: "pin"; via: "argument" | "environment" }
@@ -223,8 +251,12 @@ function credentialLabel(source: PlanSource): string {
           return "the explicit `apiKey` option"
         case "environment":
           return "COMMANDCODE_API_KEY"
-        case "file":
-          return `legacy file \`${source.rung.label}\``
+        case "file": {
+          // The store's label is display text like any other: flattened, so a
+          // path can no more break the line than an account label can.
+          const label = flattenLabel(source.rung.label)
+          return label ? `legacy file \`${label}\`` : "legacy file"
+        }
       }
   }
 }
@@ -406,6 +438,11 @@ interface ToolCredential {
   source: PlanSource
 }
 
+/** A credential this package's own ladder produced, as tool provenance. */
+function ladderCredential(resolved: ResolvedApiKey): ToolCredential {
+  return { key: resolved.key, source: { kind: "ladder", rung: resolved.source } }
+}
+
 /**
  * The credential the lookup uses, in the ADR-0015 order: an explicit `apiKey`,
  * then the Host's own credential, then this package's ladder. The rung travels
@@ -415,15 +452,14 @@ async function resolveToolCredential(
   options: PlanSummaryOptions,
 ): Promise<ToolCredential | undefined> {
   if (options.apiKey) {
-    return { key: options.apiKey, source: { kind: "ladder", rung: { kind: "option" } } }
+    return ladderCredential({ key: options.apiKey, source: { kind: "option" } })
   }
   const host = await readHostCredential(options.hostCredential)
   if (host) return { key: host.key, source: { kind: "host", source: host.source } }
 
   const env = options.env ?? process.env
   const ladder = resolveApiKeyWithSource({ env, authPaths: options.authPaths })
-  if (!ladder) return undefined
-  return { key: ladder.key, source: { kind: "ladder", rung: ladder.source } }
+  return ladder ? ladderCredential(ladder) : undefined
 }
 
 async function resolveToolPlan(
@@ -431,14 +467,12 @@ async function resolveToolPlan(
   options: PlanSummaryOptions,
 ): Promise<PlanResolution> {
   const env = options.env ?? process.env
-  // A pin needs no credential: resolving it first keeps a pinned summary free
+  // A pin short-circuits before any credential: it keeps a pinned summary free
   // of both the network and the Host round-trip (ADR-0011 §2), and the pin is
   // then the provenance it renders — no identity is worth a request (issue #205).
-  const fromArg = normalizePlan(planArg)
-  if (fromArg) return { plan: fromArg, provenance: { source: { kind: "pin", via: "argument" } } }
-  const fromEnv = normalizePlan(env.COMMANDCODE_PLAN)
-  if (fromEnv) {
-    return { plan: fromEnv, provenance: { source: { kind: "pin", via: "environment" } } }
+  const pinned = pinnedPlan(planArg, env)
+  if (pinned) {
+    return { plan: pinned.plan, provenance: { source: { kind: "pin", via: pinned.via } } }
   }
 
   const credential = await resolveToolCredential(options)
