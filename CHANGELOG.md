@@ -1,3 +1,90 @@
+## 2.1.3 - 2026-09-18
+
+**Highlight — `cmd_plan_summary` answers for the account you actually stream
+with, and says which one that was.** The tool resolved its credential with
+`COMMANDCODE_API_KEY` and the legacy Command Code auth files, which know nothing
+about either Host's credential store: on a machine with more than one Command
+Code account it answered for whichever account a legacy file happened to hold —
+a different plan, a different subscription, and no sign that anything was wrong
+([#201](https://github.com/rashidrazak/opencode-cmd-provider/issues/201)). It now
+asks the Host first — v2's active connection, v1's provider record — and prints
+one provenance line under the plan header naming the account it answered for and
+the rung that supplied the credential, so a wrong-account answer is visible
+instead of silent (ADR-0015, ADR-0017). The rest of the release replays assistant
+reasoning on the OpenAI dialect: a tool-use continuation no longer shows
+DeepSeek V4.x, GLM-5.3 or Qwen 3.8 Max their own previous turn with the thinking
+erased.
+
+### Features
+
+- **The plan summary renders account identity and credential source**
+  ([#205](https://github.com/rashidrazak/opencode-cmd-provider/issues/205),
+  ADR-0017): a provenance line now sits under the plan header, naming the
+  account and the rung — _Account: `handle` — credential: Host connection_, or
+  `COMMANDCODE_API_KEY`, or the legacy file it fell back to
+  (`legacy file ~/.commandcode/auth.json`), or the pin that skipped the lookup
+  entirely. The account comes from the `whoami` response the plan lookup already makes: the `userName` handle, else a length-capped
+  `user.id`, never an email address and never the key. A `whoami` that names no
+  account renders the credential alone rather than inventing one, and a pinned
+  plan still short-circuits before the credential ladder — no network, no
+  identity lookup.
+
+### Fixes
+
+- **`cmd_plan_summary` asks the Host for the credential the session streams
+  with**
+  ([#201](https://github.com/rashidrazak/opencode-cmd-provider/issues/201),
+  [#202](https://github.com/rashidrazak/opencode-cmd-provider/issues/202),
+  [#203](https://github.com/rashidrazak/opencode-cmd-provider/issues/203),
+  [#204](https://github.com/rashidrazak/opencode-cmd-provider/issues/204); fixed
+  in [#206](https://github.com/rashidrazak/opencode-cmd-provider/pull/206)):
+  both tool builders take an optional async `hostCredential` getter, consulted
+  after an explicit `apiKey` and before `COMMANDCODE_API_KEY` and the legacy
+  files. On v2 the getter reads `connection.active("commandcode")` then
+  `connection.resolve()` — the value the resolver injects into the provider SDK —
+  so the summary follows a `/connect` mid-session; on v1 it reads the provider
+  record's resolved credential (`options.apiKey ?? key`) and derives provenance
+  by matching the key against the provider's own `env` names. A Host that
+  declines or throws falls through to the unchanged ladder, so a session with no
+  Host credential still agrees with the transport, and the key itself is never
+  rendered.
+- **The provenance line resists the data it describes**
+  ([#205](https://github.com/rashidrazak/opencode-cmd-provider/issues/205)): the
+  legacy-file label is markdown-flattened like the account label, so a store's
+  name cannot forge a table row or a line break; an empty `userName` falls back
+  to `user.id` instead of starving the label; and an email-shaped `userName` is
+  skipped rather than printed.
+- **Assistant reasoning is replayed on the OpenAI dialect**
+  ([#207](https://github.com/rashidrazak/opencode-cmd-provider/pull/207) by
+  [@unsnow-iac](https://github.com/unsnow-iac), ADR-0016): the request codec
+  dropped every reasoning part from assistant history, so a tool-use
+  continuation showed the model its own previous turn with the thinking erased.
+  DeepSeek V4.x requires the full prior `reasoning_content` on a tool-calling
+  continuation (HTTP 400 without it), and GLM-5.3 and Qwen 3.8 preserve prior
+  thinking for accuracy and cache hits. It now goes back as `reasoning_content`
+  on the turn's assistant message — the field the stream parser reads and the
+  pause-resume path already sends — gated on `isReasoningModel`, so
+  non-reasoning models keep byte-identical requests. The Anthropic dialect is
+  unchanged: a replayed thinking block would need a provider signature that
+  history parts never carry (ADR-0014).
+- **A reasoning turn without tool calls stays schema-valid**
+  ([#207](https://github.com/rashidrazak/opencode-cmd-provider/pull/207)): a turn
+  whose only tool call was unpaired and filtered out still emitted
+  `{ reasoning_content, content: null }` with no `tool_calls`, and
+  `content: null` is only valid alongside `tool_calls` — so an interrupted turn
+  could 400 a request that previously omitted it. The turn is dropped whole
+  again unless it has text to carry; reasoning plus text replays both on a
+  string-content message.
+
+### Documentation
+
+- **ADR-0015** records where each Host keeps the credential it streams with, why
+  the legacy-file ladder answered for another account, and the four rules that
+  travel with the new first rung; **ADR-0017** records the provenance line and
+  its email guard; **ADR-0016** records the OpenAI dialect's reasoning replay and
+  states why the Anthropic dialect stays out of it. `README.md` says what the
+  summary now prints, and `docs/TECHNICAL.md` carries both changes.
+
 ## 2.1.2 - 2026-09-18
 
 ### Model catalog
