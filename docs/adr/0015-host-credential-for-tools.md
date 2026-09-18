@@ -35,7 +35,7 @@ wrong (issue #201).
 after an explicit `apiKey` and before the environment and the legacy files.**
 
 ```ts
-planSummaryTool({ hostCredential }) // v1 — wired in a follow-up ticket
+planSummaryTool({ hostCredential }) // v1 — `hostCredentialFromV1(input.client, …)`
 planSummaryV2Tool({ hostCredential }) // v2 — `hostCredentialFromV2(ctx)`
 ```
 
@@ -45,8 +45,9 @@ returns, `HostCredential { key, source }`, lives in Core
 slice (ADR-0004). The v2 producer is `hostCredentialFromV2` in
 `src/plugin/v2.ts`: `connection.active(PROVIDER_ID)` → `connection.resolve()`,
 per call rather than at registration, so a `/connect` mid-session is picked up.
-The v1 producer will read `client.provider.list()` and take
-`options.apiKey ?? key`, the same order the v1 Host applies at model init.
+The v1 producer is `hostCredentialFromV1` in `src/deals/host-credential.ts`: it
+reads `client.provider.list()` and takes `options.apiKey ?? key`, the same order
+the v1 Host applies at model init.
 
 Four rules travel with the seam:
 
@@ -73,6 +74,15 @@ Four rules travel with the seam:
 - The v1 seam is a public-but-untyped field: the SDK's generated `/provider`
   response type omits `key` and `options` even though the runtime payload
   carries them, so the read is structural and must degrade if upstream ever
-  tightens it — to the documented ladder, not to a crash.
+  tightens it — to the documented ladder, not to a crash. The payload's own
+  `source` cannot stand in for provenance (the final config re-apply stamps
+  `"config"` on every config-declared provider), so `hostCredentialFromV1`
+  reports `"environment"` by matching the key against the provider's `env`
+  names and `"host"` otherwise.
+- The v1 client is an _in-process_ app fetch, so it cannot be called while the
+  instance is still booting the plugin that asks (the call deadlocks — observed
+  against 1.18.30). That is one more reason both getters run per tool call
+  rather than at registration, where the v2 host's asynchronous transform replay
+  already forces the same choice.
 - Rendering the account identity and the credential source is a separate
   decision (ticket #205); this ADR only fixes which credential is asked.
