@@ -6,9 +6,9 @@
 // parse from the CLI bundle (dist/cli.mjs). Regenerate with
 // `npm run refresh:snapshot`.
 
-export const FACTS_SOURCE_URL = "https://unpkg.com/command-code@1.56.0/dist/bundled/command-code-knowledge/reference/models.md"
-export const MODALITIES_SOURCE_URL = "https://unpkg.com/command-code@1.56.0/dist/cli.mjs"
-export const FACTS_PACKAGE_VERSION = "1.56.0"
+export const FACTS_SOURCE_URL = "https://unpkg.com/command-code@1.56.2/dist/bundled/command-code-knowledge/reference/models.md"
+export const MODALITIES_SOURCE_URL = "https://unpkg.com/command-code@1.56.2/dist/cli.mjs"
+export const FACTS_PACKAGE_VERSION = "1.56.2"
 export const FACTS_LAST_REFRESHED = "2026-09-18"
 
 export const MODEL_EFFORTS: Readonly<Record<string, readonly string[]>> = {
@@ -19,6 +19,7 @@ export const MODEL_EFFORTS: Readonly<Record<string, readonly string[]>> = {
   "deepseek/deepseek-v4.1-flash": ["low","high","max"],
   "moonshotai/Kimi-K3": ["low","high","max"],
   "z-ai/glm-5.3-flash": ["low","high","max"],
+  "z-ai/glm-5.3-flashx": ["low","high","max"],
   "zai-org/GLM-5.3": ["low","high","max"],
   "zai-org/GLM-5.2": ["high","max"],
   "MiniMaxAI/MiniMax-M3": ["low","medium","high"],
@@ -73,6 +74,7 @@ export const MODEL_COSTS: Readonly<
   "moonshotai/Kimi-K2.6": { input: 0.95, output: 4, cacheRead: 0.16, cacheWrite: 0 },
   "moonshotai/Kimi-K2.5": { input: 0.6, output: 3, cacheRead: 0.1, cacheWrite: 0 },
   "z-ai/glm-5.3-flash": { input: 0.15, output: 0.5, cacheRead: 0.03, cacheWrite: 0 },
+  "z-ai/glm-5.3-flashx": { input: 0.37, output: 1.25, cacheRead: 0.075, cacheWrite: 0 },
   "zai-org/GLM-5.3": { input: 1.4, output: 4.4, cacheRead: 0.26, cacheWrite: 0 },
   "zai-org/GLM-5.2": { input: 1.4, output: 4.4, cacheRead: 0.26, cacheWrite: 0 },
   "zai-org/GLM-5.2-Fast": { input: 3, output: 10.25, cacheRead: 0.5, cacheWrite: 0 },
@@ -189,4 +191,5 @@ export const MODEL_INPUT_MODALITIES: Readonly<
   "xai/grok-4.6": ["text","image"],
   "xiaomi/mimo-v2.5": ["text","image"],
   "z-ai/glm-5.3-flash": ["text","image"],
+  "z-ai/glm-5.3-flashx": ["text","image"],
 }

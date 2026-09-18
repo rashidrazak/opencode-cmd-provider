@@ -85,6 +85,38 @@ erased.
   states why the Anthropic dialect stays out of it. `README.md` says what the
   summary now prints, and `docs/TECHNICAL.md` carries both changes.
 
+### Model catalog
+
+## Model catalog
+
+- **FACTS_PACKAGE_VERSION**: `1.56.0` → `1.56.2` — the refresh reads the newer
+  CLI bundle's `models.md`; the table below carries what moved.
+- **FACTS_LAST_REFRESHED**: `2026-09-18` → `2026-09-18`
+
+| Model                 | Change | Before | After                        |
+| --------------------- | ------ | ------ | ---------------------------- |
+| `z-ai/glm-5.3-flashx` | added  | —      | GLM-5.3 FlashX · 1000000 ctx |
+
+### Reasoning classification
+
+## Reasoning classification
+
+- **CLASSIFICATION_LAST_REFRESHED**: `2026-09-18` → `2026-09-18`
+
+| Model                 | Change | Before | After                          |
+| --------------------- | ------ | ------ | ------------------------------ |
+| `z-ai/glm-5.3-flashx` | new    | —      | efforts model (low, high, max) |
+
+### Deals intelligence
+
+## Deals intelligence
+
+- **DEAL_LAST_REFRESHED**: `2026-09-18` → `2026-09-18`
+
+| Model                 | Change | Before | After      |
+| --------------------- | ------ | ------ | ---------- |
+| `z-ai/glm-5.3-flashx` | added  | —      | opensource |
+
 ## 2.1.2 - 2026-09-18
 
 ### Model catalog

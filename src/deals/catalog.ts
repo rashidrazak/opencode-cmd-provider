@@ -112,6 +112,7 @@ export const MODEL_DEALS: Readonly<Record<string, ModelDeals>> = {
   "xiaomi/mimo-v2.5": { tier: "opensource", discount: {"pct":98}, was: {"input":0.8,"output":4,"cacheRead":0.16}, now: {"input":0.14,"output":0.28,"cacheRead":0.0028}, benchmark: {"intelligence":22.3,"tokPerSec":46.2}, free: false, allowance: {"goat":30,"pro":40} },
   "xiaomi/mimo-v2.5-pro": { tier: "opensource", discount: {"pct":99}, was: {"input":2,"output":6,"cacheRead":0.4}, now: {"input":0.435,"output":0.87,"cacheRead":0.0036}, benchmark: {"intelligence":26.4,"tokPerSec":43.4}, free: false, allowance: {"goat":20,"pro":30} },
   "z-ai/glm-5.3-flash": { tier: "opensource", benchmark: {"intelligence":41.9,"tokPerSec":113.9}, free: false, allowance: {"goat":40,"pro":50} },
+  "z-ai/glm-5.3-flashx": { tier: "opensource", free: false, allowance: {"goat":20,"pro":30} },
   "zai-org/GLM-5": { tier: "opensource", benchmark: {"intelligence":27.9}, free: false, allowance: {"goat":20,"pro":30} },
   "zai-org/GLM-5.1": { tier: "opensource", benchmark: {"intelligence":26.4}, free: false, allowance: {"goat":20,"pro":30} },
   "zai-org/GLM-5.2": { tier: "opensource", benchmark: {"intelligence":34,"tokPerSec":72.3}, free: false, allowance: {"goat":70,"pro":80} },
