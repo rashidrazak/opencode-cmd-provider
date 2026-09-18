@@ -19,6 +19,7 @@
 import { MODEL_SNAPSHOT, type CatalogModel } from "../catalog/snapshot.js"
 import { getApiBase } from "../env.js"
 import { createCommandCode } from "../provider/index.js"
+import type { HostCredential } from "../provider/auth-key.js"
 import { catalogModelForV2, catalogVariantsForV2, DEFAULT_DISPLAY_PREFIX } from "./models.js"
 import { resolveProviderNpm } from "./version.js"
 import type {
@@ -169,6 +170,34 @@ export function registerIntegration(integrations: V2IntegrationEditor): void {
 export function provideSdk(event: V2SDKEvent): void {
   if (event.model.providerID !== PROVIDER_ID) return
   event.sdk = createCommandCode({ ...event.options, name: PROVIDER_ID })
+}
+
+/**
+ * The credential the Host resolved for this provider (ADR-0015).
+ *
+ * `connection.active` is the same lookup `ModelResolver` performs for the
+ * runtime model — stored credentials first, the env method only when no
+ * credential row exists — and `resolve` turns the connection into its value,
+ * reading the named environment variable itself for an `env` connection. A
+ * tool that asks here therefore sees what the provider SDK sees, instead of
+ * guessing from this machine's legacy auth files (issue #201).
+ *
+ * The getter runs per call, never at registration: a `/connect` mid-session
+ * has to be picked up.
+ */
+export function hostCredentialFromV2(
+  ctx: V2SetupContext,
+): () => Promise<HostCredential | undefined> {
+  return async () => {
+    const connection = await ctx.integration.connection.active(PROVIDER_ID)
+    if (!connection) return undefined
+    const credential = await ctx.integration.connection.resolve(connection)
+    if (!credential) return undefined
+    if (credential.type === "key") {
+      return { key: credential.key, source: connection.type === "env" ? "environment" : "host" }
+    }
+    return { key: credential.access, source: "host" }
+  }
 }
 
 /**

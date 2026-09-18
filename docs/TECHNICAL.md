@@ -155,8 +155,11 @@ surfaces in two places:
 - **`cmd_plan_summary` tool**: plan-aware allowances and deal rates for
   estimating monthly request counts. It resolves the plan from
   `GET /alpha/billing/subscriptions`, org-scoped through `/alpha/whoami`, using
-  the credential OpenCode already holds; pass the `plan` argument or set
-  `COMMANDCODE_PLAN` (`go|goat|pro|max|max20|teampro|provider`) to skip the
+  the credential the Host resolved for the provider — v2's active connection,
+  v1's provider record — and only falls back to `COMMANDCODE_API_KEY` and the
+  legacy auth files when the Host resolves none
+  ([ADR-0015](adr/0015-host-credential-for-tools.md)); pass the `plan` argument
+  or set `COMMANDCODE_PLAN` (`go|goat|pro|max|max20|teampro|provider`) to skip the
   lookup. An unresolvable plan reports "plan unknown" — never a guessed default
   ([ADR-0011](adr/0011-billing-derived-plan-identity.md)). Plan detection does
   not choose a transport: requests start on the Provider API unless `plan=go` is
@@ -508,3 +511,4 @@ Both e2e scripts are excluded from `npm test`.
 | [0012](adr/0012-connect-callback-budget-and-api-key-method.md) | Human-scale connect callback budget, `api` method without `authorize`     |
 | [0013](adr/0013-finish-reason-vocabulary.md)                   | A turn that ended is never reported with `unified: "other"`               |
 | [0014](adr/0014-unmodelled-block-refuses-resume.md)            | A resumed turn never silently drops a block the stream did not model      |
+| [0015](adr/0015-host-credential-for-tools.md)                  | The plan summary uses the Host's resolved credential, not a legacy file   |
