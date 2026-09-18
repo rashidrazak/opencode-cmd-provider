@@ -582,7 +582,7 @@ function promptToOpenAIMessages(
           },
         }))
         out.push(message)
-      } else if (preserveReasoning && reasoning && texts.length > 0) {
+      } else if (reasoning && texts.length > 0) {
         out.push({ role: "assistant", reasoning_content: reasoning, content: texts.join("\n") })
       } else if (texts.length > 0) {
         out.push({ role: "assistant", content: texts.join("\n") })

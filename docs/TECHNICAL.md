@@ -187,7 +187,9 @@ reasoning fields. No prompt instructions are injected. On the Anthropic dialect
 (claude models), reasoning blocks from completed assistant turns are not
 replayed upstream in later requests — only user-visible text and completed tool
 calls go back as history — because a replayed Anthropic thinking block must
-carry the provider's signature, which history parts do not carry. The one
+carry the provider's signature, which a history part never does: signatures are
+attached only to the parts of the turn being streamed, and no history codec
+reads `providerMetadata` when building a request. The one
 exception there is a paused turn's continuation, which replays the portion of
 the turn the provider paused — its signed thinking blocks included, signature
 and all (issue #189): the parser carries the signature on the block's

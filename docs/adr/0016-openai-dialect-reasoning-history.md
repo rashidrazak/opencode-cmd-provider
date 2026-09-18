@@ -32,9 +32,11 @@ Upstream contracts run the other way:
 
 The drop predated these models and matched the Anthropic dialect, where the
 rule is real: a replayed `thinking` block must carry the provider's
-cryptographic signature, which ordinary history parts do not carry — only the
-pause-resume path has signatures (issues #189, #193, #194, ADR-0014). The same
-documented rule was extended to a wire where it has no basis.
+cryptographic signature, which a history part never carries — signatures are
+attached only to the parts of the turn being streamed, and no history codec
+reads `providerMetadata` — so only the pause-resume path has them (issues #189,
+#193, #194, ADR-0014). The same documented rule was extended to a wire where it
+has no basis.
 
 ## The decision
 
@@ -49,9 +51,11 @@ model being reasoning-capable.**
   (`resume.ts` `openAIMessage`): one `reasoning_content` string, segments
   joined in stream order. The wire dialect has no signature and no encrypted
   payload; nothing else is replayed.
-- A reasoning-only assistant turn (think → tool call, no prose) now produces an
-  assistant message with `content: null` plus its tool calls, instead of
-  vanishing with its reasoning.
+- A reasoning-only assistant turn (think → tool call, no prose) keeps the
+  assistant message it already had — `content: null` plus its tool calls — and
+  now carries its `reasoning_content` too. Only the reasoning used to vanish
+  from that turn; the turn itself was emitted. A turn whose _only_ tool call was
+  unpaired still vanishes whole, as it did before this change.
 - The Anthropic dialect is unchanged: history still carries no thinking block,
   for the signature reason above.
 
