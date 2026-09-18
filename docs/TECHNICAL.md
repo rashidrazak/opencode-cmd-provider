@@ -508,3 +508,4 @@ Both e2e scripts are excluded from `npm test`.
 | [0012](adr/0012-connect-callback-budget-and-api-key-method.md) | Human-scale connect callback budget, `api` method without `authorize`     |
 | [0013](adr/0013-finish-reason-vocabulary.md)                   | A turn that ended is never reported with `unified: "other"`               |
 | [0014](adr/0014-unmodelled-block-refuses-resume.md)            | A resumed turn never silently drops a block the stream did not model      |
+| [0015](adr/0015-host-credential-for-tools.md)                  | The plan summary uses the Host's resolved credential, not a legacy file   |
