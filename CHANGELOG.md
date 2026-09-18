@@ -1,3 +1,39 @@
+## 2.1.2 - 2026-09-18
+
+### Model catalog
+
+## Model catalog
+
+- **FACTS_LAST_REFRESHED**: `2026-09-17` → `2026-09-18`
+
+| Model                     | Change | Before | After                             |
+| ------------------------- | ------ | ------ | --------------------------------- |
+| `Qwen/Qwen3.8-Omni-Flash` | added  | —      | Qwen 3.8 Omni Flash · 1000000 ctx |
+
+### API divergence
+
+- `gpt-6-astra`: in package membership but not served by the listing API
+
+### Reasoning classification
+
+## Reasoning classification
+
+- **CLASSIFICATION_LAST_REFRESHED**: `2026-09-17` → `2026-09-18`
+
+| Model                     | Change | Before | After                              |
+| ------------------------- | ------ | ------ | ---------------------------------- |
+| `Qwen/Qwen3.8-Omni-Flash` | new    | —      | efforts model (low, medium, xhigh) |
+
+### Deals intelligence
+
+## Deals intelligence
+
+- **DEAL_LAST_REFRESHED**: `2026-09-17` → `2026-09-18`
+
+| Model                     | Change | Before | After      |
+| ------------------------- | ------ | ------ | ---------- |
+| `Qwen/Qwen3.8-Omni-Flash` | added  | —      | opensource |
+
 ## 2.1.1 - 2026-09-17
 
 **Highlight — v2 installs load again.** OpenCode 2.0.4 replaced the v2 plugin
