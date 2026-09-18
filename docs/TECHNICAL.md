@@ -183,15 +183,32 @@ as reasoning-capable advertise `reasoning: true` automatically — with explicit
 effort variants when the generated facts list levels, without variants
 otherwise. Supported levels are sent as the documented `reasoning_effort`
 request field; `off`, unsupported levels, and models with no metadata add no
-reasoning fields. No prompt instructions are injected. Reasoning blocks from
-completed assistant turns are not replayed upstream in later requests; only
-user-visible text and completed tool calls are sent back as history, so private
-reasoning traces cannot interfere with later turns. The one exception is a
-paused turn's continuation, which replays the portion of the turn the provider
-paused — its signed thinking blocks included, signature and all (issue #189):
-Anthropic requires the signature on a replayed thinking block, and the parser
-carries it on the block's `reasoning-end` part in
-`providerMetadata.anthropic.signature` for exactly that replay.
+reasoning fields. No prompt instructions are injected. On the Anthropic dialect
+(claude models), reasoning blocks from completed assistant turns are not
+replayed upstream in later requests — only user-visible text and completed tool
+calls go back as history — because a replayed Anthropic thinking block must
+carry the provider's signature, which a history part never does: signatures are
+attached only to the parts of the turn being streamed, and no history codec
+reads `providerMetadata` when building a request. The one
+exception there is a paused turn's continuation, which replays the portion of
+the turn the provider paused — its signed thinking blocks included, signature
+and all (issue #189): the parser carries the signature on the block's
+`reasoning-end` part in `providerMetadata.anthropic.signature` for exactly that
+replay.
+
+On the OpenAI dialect (`/provider/v1/chat/completions`), reasoning from
+completed assistant turns **is** replayed as `reasoning_content` — but only for
+reasoning-capable models (the same catalog-derived gate as `reasoning_effort`,
+[ADR-0016](adr/0016-openai-dialect-reasoning-history.md)). DeepSeek V4.x
+requires the full prior `reasoning_content` on tool-calling continuations
+(HTTP 400 without it); GLM-5.3 and Qwen 3.8 preserve prior thinking for
+accuracy and cache hits (for GLM, Z.ai documents preservation as default-on on
+its Coding Plan endpoint, `clear_thinking: false` opt-in on the standard one —
+which behavior the Provider API applies is not published, and replaying is
+correct on either). A turn whose only tool call was unpaired (no result) is
+still dropped whole: an assistant message without `tool_calls` cannot carry
+`content: null`. The field matches the one the stream parser reads
+these models' reasoning from, and the pause-resume path already replays it.
 
 Anthropic's `redacted_thinking` block — reasoning the provider's safety system
 encrypted — surfaces as a reasoning part too: no text, and its payload in
@@ -512,3 +529,4 @@ Both e2e scripts are excluded from `npm test`.
 | [0013](adr/0013-finish-reason-vocabulary.md)                   | A turn that ended is never reported with `unified: "other"`               |
 | [0014](adr/0014-unmodelled-block-refuses-resume.md)            | A resumed turn never silently drops a block the stream did not model      |
 | [0015](adr/0015-host-credential-for-tools.md)                  | The plan summary uses the Host's resolved credential, not a legacy file   |
+| [0016](adr/0016-openai-dialect-reasoning-history.md)           | The OpenAI dialect replays assistant reasoning in history                 |

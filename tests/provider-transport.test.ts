@@ -125,6 +125,59 @@ function pausedLegacyTurn(): MockCcOptions {
 
 run([
   [
+    "provider: assistant reasoning replays on the OpenAI wire for reasoning models",
+    async () => {
+      // End-to-end over the transport: the continuation body the mock server
+      // receives carries the prior turn's reasoning_content — the DeepSeek
+      // V4.x tool-use contract (HTTP 400 without it), GLM-5.3 and Qwen3.8
+      // preserved-thinking.
+      await withEnv("goat", async () => {
+        let body: Record<string, unknown> | undefined
+        const mock = await startMockCc({
+          chatCompletionsStream: [openAIChunk("done"), openAIFinishChunk()],
+          onChatCompletions: (b) => {
+            body = b
+          },
+        })
+        try {
+          await collect(
+            createCommandCode({ apiKey: "k", baseURL: mock.url }).languageModel(
+              "deepseek/deepseek-v4.1-flash",
+            ),
+            [
+              { role: "user", content: "read the file" },
+              {
+                role: "assistant",
+                content: [
+                  { type: "reasoning", text: "I should call read first" },
+                  {
+                    type: "tool-call",
+                    toolCallId: "tc1",
+                    toolName: "read",
+                    input: { path: "a.ts" },
+                  },
+                ],
+              },
+              {
+                role: "tool",
+                content: [
+                  { type: "tool-result", toolCallId: "tc1", toolName: "read", result: "ok" },
+                ],
+              },
+            ] as LanguageModelV3Prompt,
+          )
+          const messages = (body as { messages?: unknown[] })?.messages ?? []
+          const assistant = messages.find((m) => (m as { role?: string }).role === "assistant") as
+            Record<string, unknown> | undefined
+          assert(assistant, "assistant message reached the wire")
+          assertEqual(assistant.reasoning_content, "I should call read first")
+        } finally {
+          await mock.close()
+        }
+      })
+    },
+  ],
+  [
     "provider routing: goat plan claude-* hits /provider/v1/messages only",
     async () => {
       await withEnv("goat", async () => {
