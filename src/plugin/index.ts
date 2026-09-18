@@ -18,7 +18,7 @@ import {
 } from "../deals/index.js"
 import { planSummaryV2Tool } from "../deals/plan-summary.js"
 import { runAuthFlow } from "./auth.js"
-import { setupCommandCode } from "./v2.js"
+import { hostCredentialFromV2, setupCommandCode } from "./v2.js"
 import type { Plugin } from "@opencode-ai/plugin"
 import type { Config } from "@opencode-ai/sdk/v2"
 import type { V2SetupContext } from "./v2-types.js"
@@ -69,12 +69,14 @@ const server: Plugin = async () => {
  * v2 host: the same three capabilities through the transform API. The two Deals
  * intelligence seams — the provider enrichment pass and the `cmd_plan_summary`
  * tool — are supplied here, so deleting `src/deals/` plus these two lines still
- * leaves Core green (ADR-0004).
+ * leaves Core green (ADR-0004). The tool is handed the credential getter for the
+ * Host's active connection, which is the only credential the session streams
+ * with (ADR-0015).
  */
 const setup = async (ctx: V2SetupContext): Promise<void> =>
   setupCommandCode(ctx, {
     enrichProvider: enrichCommandCodeModelsV2,
-    tools: [planSummaryV2Tool()],
+    tools: [planSummaryV2Tool({ hostCredential: hostCredentialFromV2(ctx) })],
   })
 
 export default { id: "commandcode", server, setup }

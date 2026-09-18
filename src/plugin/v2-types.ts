@@ -7,10 +7,12 @@
 // never resolves that module at runtime — the same load-time landmine the
 // `@opencode-ai/*` rule exists for (see tests/contract.test.ts). Only the
 // members this plugin touches are declared; the shapes are hand-mirrored from
-// `@opencode/plugin@2.0.5` (`dist/promise/{plugin,provider,model,integration,tool,aisdk}.d.ts`)
-// and `@opencode/schema@2.0.5` (`Provider.Info`, `Model.Info`, `Tool.Info`).
-// Bumping the supported v2 line means re-deriving these from the published
-// package — tests/plugin-v2.test.ts pins the parts we depend on.
+// `@opencode/plugin@2.0.8` (`dist/promise/{plugin,provider,model,integration,tool,aisdk}.d.ts`)
+// and `@opencode/schema@2.0.8` (`Provider.Info`, `Model.Info`, `Tool.Info`,
+// `Connection.Info`, `Credential.Value`). The `connection` surface has been
+// byte-identical from 2.0.0 through 2.0.8. Bumping the supported v2 line means
+// re-deriving these from the published package — tests/plugin-v2.test.ts pins
+// the parts we depend on.
 
 /** Provider record draft: `Provider.Info` with `DeepMutable` applied. */
 export interface V2ProviderInfo {
@@ -139,6 +141,33 @@ export interface V2IntegrationEditor {
   }
 }
 
+/** `Connection.Info`'s credential arm: a row in the Host's credential store. */
+export interface V2ConnectionCredentialInfo {
+  type: "credential"
+  id: string
+  label: string
+}
+
+/** `Connection.Info`'s env arm: a named environment variable the Host reads. */
+export interface V2ConnectionEnvInfo {
+  type: "env"
+  name: string
+}
+
+/**
+ * `Connection.Info` — where the active credential lives. `active()` picks one
+ * of these (a stored credential, or an env var when no credential row exists)
+ * and `resolve()` turns it into a `Credential.Value`.
+ */
+export type V2ConnectionInfo = V2ConnectionCredentialInfo | V2ConnectionEnvInfo
+
+/**
+ * The `Credential.Value` slice the plan summary reads: an API key credential,
+ * or an OAuth one whose `access` token stands in for the key. The other OAuth
+ * fields are deliberately not mirrored — nothing here touches them.
+ */
+export type V2CredentialValue = { type: "key"; key: string } | { type: "oauth"; access: string }
+
 export interface V2ToolResult {
   content?: string | ReadonlyArray<{ type: "text"; text: string }>
   metadata?: Readonly<Record<string, unknown>>
@@ -186,6 +215,16 @@ export interface V2SetupContext {
   }
   readonly integration: {
     transform(callback: (editor: V2IntegrationEditor) => void): Promise<unknown>
+    /**
+     * The credential surface the model resolver uses for a provider's
+     * `integrationID` — the only way a tool can learn which credential the Host
+     * actually streams with (ADR-0015). `resolve` reads the named environment
+     * variable itself for an `env` connection.
+     */
+    readonly connection: {
+      active(integrationID: string): Promise<V2ConnectionInfo | undefined>
+      resolve(connection: V2ConnectionInfo): Promise<V2CredentialValue | undefined>
+    }
   }
   readonly tool: {
     transform(callback: (editor: V2ToolEditor) => void): Promise<unknown>
