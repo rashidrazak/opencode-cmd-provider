@@ -40,3 +40,4 @@ export {
   renderPlanSummary,
   resolvePlan,
 } from "./plan-summary.js"
+export type { PlanProvenance, PlanResolution, PlanSource } from "./plan-summary.js"

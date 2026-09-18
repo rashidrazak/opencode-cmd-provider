@@ -82,7 +82,10 @@ vocabulary and alias table live in Core (`src/catalog/plans.ts`); transport
 selection reads only the explicit pin, so a Go account reaches the legacy
 endpoint through the plan-gate `403` fallback — the documented
 `upgrade_required` envelope or the live `/messages` plan phrasing without a
-code — and a stale-client version gate never counts as one (ADR-0011).
+code — and a stale-client version gate never counts as one (ADR-0011). A plan
+summary also renders its **provenance**: the account the lookup answered for and
+the credential rung behind it (Host connection, `COMMANDCODE_API_KEY`, legacy
+file, or the pin), so a wrong-account answer is visible (ADR-0017).
 _Avoid_: plan detection default, detected-guess plan
 
 **Classification**:

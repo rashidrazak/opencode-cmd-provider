@@ -85,4 +85,5 @@ Four rules travel with the seam:
   rather than at registration, where the v2 host's asynchronous transform replay
   already forces the same choice.
 - Rendering the account identity and the credential source is a separate
-  decision (ticket #205); this ADR only fixes which credential is asked.
+  decision, taken in [ADR-0017](0017-plan-summary-provenance-line.md); this ADR
+  only fixes which credential is asked.

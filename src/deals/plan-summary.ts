@@ -4,6 +4,12 @@
 // "detected Go" and "could not tell" stay distinguishable, and an unresolved
 // plan renders as unknown rather than silently asserting Go's numbers.
 //
+// The summary also renders its own provenance (issue #205): the account the
+// lookup answered for and the rung that supplied the credential. On a machine
+// with several Command Code accounts a plan read with a legacy file of another
+// account is exactly the wrong answer that used to be invisible; the line makes
+// it legible, and it stays key-free (ADR-0015 rule 4).
+//
 // Transport selection never calls this lookup: the provider transport honours
 // only an explicitly written plan pin, so no request is made merely to route
 // (see src/provider/command-code-model.ts). Rendering is a pure function so
@@ -12,7 +18,13 @@ import { z } from "zod"
 import { MODEL_COSTS } from "../catalog/facts.js"
 import { normalizePlan, type PlanId } from "../catalog/plans.js"
 import { getApiBase } from "../env.js"
-import { resolveApiKey, type HostCredential } from "../provider/auth-key.js"
+import {
+  resolveApiKeyWithSource,
+  type ApiKeySource,
+  type HostCredential,
+  type HostCredentialSource,
+  type ResolvedApiKey,
+} from "../provider/auth-key.js"
 import { isRecord, stringValue } from "../provider/converters.js"
 import type { V2ToolDefinition } from "../plugin/v2-types.js"
 import { MODEL_DEALS, PLAN_CATALOG, type ModelDeals, type PlanInfo } from "./catalog.js"
@@ -40,13 +52,31 @@ const LOOKUP_TIMEOUT_MS = 5000
 
 export interface ResolvePlanOptions {
   /** Resolved API key for the billing lookup (defaults to the
-   * COMMANDCODE_API_KEY env var). The tool path passes `resolveApiKey()`, so
-   * an opencode /connect credential resolves without an exported env var. */
+   * COMMANDCODE_API_KEY env var). The tool path passes the credential it
+   * resolved through the ADR-0015 ladder, so an opencode /connect credential
+   * resolves without an exported env var. */
   apiKey?: string
   /** Base URL for the lookup (defaults to getApiBase(env)). */
   baseURL?: string
   /** Fetch implementation for the lookup (defaults to the global fetch). */
   fetch?: typeof fetch
+}
+
+/**
+ * The plan an explicit pin names — the tool argument first, then
+ * `COMMANDCODE_PLAN` — and which pin supplied it. A pin needs no credential, no
+ * network and no Host round-trip, so both resolution paths read it first
+ * (ADR-0011 §2).
+ */
+function pinnedPlan(
+  planArg: string | undefined,
+  env: NodeJS.ProcessEnv,
+): { plan: PlanId; via: "argument" | "environment" } | undefined {
+  const fromArg = normalizePlan(planArg)
+  if (fromArg) return { plan: fromArg, via: "argument" }
+  const fromEnv = normalizePlan(env.COMMANDCODE_PLAN)
+  if (fromEnv) return { plan: fromEnv, via: "environment" }
+  return undefined
 }
 
 /**
@@ -58,11 +88,50 @@ export async function resolvePlan(
   env: NodeJS.ProcessEnv = process.env,
   options: ResolvePlanOptions = {},
 ): Promise<PlanId | undefined> {
-  const fromArg = normalizePlan(planArg)
-  if (fromArg) return fromArg
-  const fromEnv = normalizePlan(env.COMMANDCODE_PLAN)
-  if (fromEnv) return fromEnv
-  return await fetchBillingPlan(env, options)
+  const pinned = pinnedPlan(planArg, env)
+  if (pinned) return pinned.plan
+  return (await fetchBillingPlan(env, options)).plan
+}
+
+/** The account label's ceiling: identity, not a payload. */
+const ACCOUNT_LABEL_MAX_CHARS = 32
+
+/**
+ * Markdown- and line-inert display text. Every label the summary renders comes
+ * from outside it — an API field, a path — so neither may forge a table row or
+ * break out of the one line it sits in.
+ */
+function flattenLabel(value: string): string {
+  return value
+    .replace(/[`|\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+}
+
+/**
+ * A short, non-sensitive label for the account a lookup answered for: the
+ * `userName` handle, else an elided `user.id`. Never the email — neither
+ * `user.email`, nor a `userName` that is one — never the key, and never
+ * anything that could break out of the summary's single line (issue #205).
+ */
+function accountLabel(whoami: unknown): string | undefined {
+  if (!isRecord(whoami) || !isRecord(whoami.user)) return undefined
+  const user = whoami.user
+  for (const candidate of [stringValue(user.userName), stringValue(user.id)]) {
+    if (!candidate || candidate.includes("@")) continue
+    const label = flattenLabel(candidate)
+    if (!label) continue
+    return label.length > ACCOUNT_LABEL_MAX_CHARS
+      ? `${label.slice(0, ACCOUNT_LABEL_MAX_CHARS - 1)}…`
+      : label
+  }
+  return undefined
+}
+
+/** What a billing lookup resolved: the plan, and the account it answered for. */
+interface BillingLookup {
+  plan?: PlanId
+  account?: string
 }
 
 /**
@@ -78,13 +147,17 @@ export async function resolvePlan(
  * on its own — a flaky whoami must not hide a valid personal subscription —
  * and every failure (no credential, offline, timeout, non-2xx, unparseable or
  * unknown plan id) resolves to undefined.
+ *
+ * The `whoami` response is also the summary's only account source (issue #205):
+ * the plan is read with one credential, so the account that credential belongs
+ * to is what makes a mismatch visible.
  */
 async function fetchBillingPlan(
   env: NodeJS.ProcessEnv,
   options: ResolvePlanOptions,
-): Promise<PlanId | undefined> {
+): Promise<BillingLookup> {
   const key = options.apiKey ?? env.COMMANDCODE_API_KEY
-  if (!key) return undefined // no credential → no request and no guessed plan
+  if (!key) return {} // no credential → no request and no guessed plan
   const base = options.baseURL ?? getApiBase(env)
   const fetchImpl = options.fetch ?? fetch
 
@@ -103,6 +176,8 @@ async function fetchBillingPlan(
 
   const whoami = await getJson("/alpha/whoami")
   const orgId = isRecord(whoami) && isRecord(whoami.org) ? stringValue(whoami.org.id) : undefined
+  const account = accountLabel(whoami)
+  const lookup: BillingLookup = account === undefined ? {} : { account }
   const scoped = orgId ? `?orgId=${encodeURIComponent(orgId)}` : ""
 
   const subscriptions = await getJson(`/alpha/billing/subscriptions${scoped}`)
@@ -111,24 +186,104 @@ async function fetchBillingPlan(
   const status = subscription ? stringValue(subscription.status) : undefined
   if (subscription && status && PLAN_BEARING_SUBSCRIPTION_STATUSES.has(status)) {
     const plan = normalizePlan(subscription.planId)
-    if (plan) return plan
+    if (plan) return { ...lookup, plan }
   }
 
   const credits = await getJson(`/alpha/billing/credits${scoped}`)
-  return normalizePlan(
+  const plan = normalizePlan(
     isRecord(credits) && isRecord(credits.credits) ? credits.credits.planId : undefined,
   )
+  return plan ? { ...lookup, plan } : lookup
 }
 
 const REQUEST_PROFILE = { input: 800, output: 200, cacheRead: 50_000 }
+
+/**
+ * What decided the plan a summary renders (issue #205). Either an explicit pin
+ * (ADR-0011 §2 — no lookup happened), a Host-resolved credential, a rung of
+ * this package's own ladder, or nothing at all. Display provenance only: the
+ * rungs carry no key material, and a file rung carries its store's label.
+ */
+export type PlanSource =
+  | { kind: "pin"; via: "argument" | "environment" }
+  | { kind: "host"; source: HostCredentialSource }
+  | { kind: "ladder"; rung: ApiKeySource }
+  | { kind: "none" }
+
+/**
+ * How a summary's plan was resolved, for the one provenance line the renderer
+ * prints. `account` is what `whoami` called the account behind the credential —
+ * absent when it did not answer, and the line then claims no identity rather
+ * than inventing one.
+ */
+export interface PlanProvenance {
+  account?: string
+  source: PlanSource
+}
+
+/** A plan and how it was resolved: what the tool renders. */
+export interface PlanResolution {
+  plan: PlanId | undefined
+  provenance: PlanProvenance
+}
+
+/** The credential text of a provenance line, without the account part. */
+function credentialLabel(source: PlanSource): string {
+  switch (source.kind) {
+    case "pin": {
+      const via = source.via === "argument" ? "the `plan` argument" : "COMMANDCODE_PLAN"
+      return `none — plan pinned by ${via}, so no lookup was made.`
+    }
+    case "none":
+      return "none resolved — no lookup was made."
+    case "host":
+      switch (source.source) {
+        case "host":
+          return "Host connection"
+        case "environment":
+          return "Host connection (COMMANDCODE_API_KEY)"
+        case "config":
+          return "Host configuration"
+      }
+    case "ladder":
+      switch (source.rung.kind) {
+        case "option":
+          return "the explicit `apiKey` option"
+        case "environment":
+          return "COMMANDCODE_API_KEY"
+        case "file": {
+          // The store's label is display text like any other: flattened, so a
+          // path can no more break the line than an account label can.
+          const label = flattenLabel(source.rung.label)
+          return label ? `legacy file \`${label}\`` : "legacy file"
+        }
+      }
+  }
+}
+
+/**
+ * The summary's provenance line: the account the lookup answered for (when
+ * `whoami` named one) plus the rung that supplied the credential. One line, so
+ * a mismatched or legacy-file fallback is visible where the plan is read rather
+ * than silent (issue #205, ADR-0015 rule 4).
+ */
+function renderProvenance(provenance: PlanProvenance | undefined): string | undefined {
+  if (!provenance) return undefined
+  const label = credentialLabel(provenance.source)
+  if (provenance.account === undefined) return `Credential: ${label}`
+  return `Account: \`${provenance.account}\` — credential: ${label}`
+}
 
 export function renderPlanSummary(
   plan: PlanId | undefined,
   deals: Readonly<Record<string, ModelDeals>> = MODEL_DEALS,
   catalog: Readonly<Record<PlanId, PlanInfo>> = PLAN_CATALOG,
+  provenance?: PlanProvenance,
 ): string {
   const lines: string[] = []
   lines.push(`# Command Code plan: ${plan ? PLAN_DISPLAY[plan] : "unknown"}`)
+  const provenanceLine = renderProvenance(provenance)
+  if (provenanceLine) lines.push(provenanceLine)
   if (plan === undefined) {
     lines.push(
       "The plan could not be detected — no `plan` argument or COMMANDCODE_PLAN override, and the Command Code API reported no active subscription (or could not be reached).",
@@ -233,10 +388,12 @@ export const PLAN_SUMMARY_DESCRIPTION =
 export const PLAN_SUMMARY_ARG_DESCRIPTION = "go|goat|pro|max|max20|teampro|provider"
 
 /**
- * Credential seam for the tool path: forwarded to `resolveApiKey`, whose
- * precedence (opencode /connect credential → COMMANDCODE_API_KEY → legacy auth
- * files) is the same one the provider transport uses. Without it the lookup
- * needed an exported env var and skipped the request entirely (issue #159).
+ * Credential seam for the tool path: `apiKey` and the Host getter below feed
+ * the ADR-0015 ladder, then `resolveApiKeyWithSource`, whose precedence
+ * (opencode /connect credential → COMMANDCODE_API_KEY → legacy auth files) is
+ * the same one the provider transport uses. Without the seam the lookup needed
+ * an exported env var and skipped the request entirely (issue #159); which rung
+ * answered is rendered back (issue #205).
  */
 export interface PlanSummaryOptions {
   apiKey?: string
@@ -263,36 +420,81 @@ export interface PlanSummaryOptions {
  * A Host that cannot produce a credential must not fail the lookup: its
  * refusal — `undefined` or a rejection — is just the next rung of the ladder.
  */
-async function hostCredentialKey(
+async function readHostCredential(
   getter: (() => Promise<HostCredential | undefined>) | undefined,
-): Promise<string | undefined> {
+): Promise<HostCredential | undefined> {
   if (!getter) return undefined
   try {
     const credential = await getter()
-    return credential?.key ? credential.key : undefined
+    return credential?.key ? credential : undefined
   } catch {
     return undefined
   }
 }
 
+/** A key the summary will look up with, plus the rung it came from. */
+interface ToolCredential {
+  key: string
+  source: PlanSource
+}
+
+/** A credential this package's own ladder produced, as tool provenance. */
+function ladderCredential(resolved: ResolvedApiKey): ToolCredential {
+  return { key: resolved.key, source: { kind: "ladder", rung: resolved.source } }
+}
+
+/**
+ * The credential the lookup uses, in the ADR-0015 order: an explicit `apiKey`,
+ * then the Host's own credential, then this package's ladder. The rung travels
+ * with the key so the rendered line can name it (issue #205).
+ */
+async function resolveToolCredential(
+  options: PlanSummaryOptions,
+): Promise<ToolCredential | undefined> {
+  if (options.apiKey) {
+    return ladderCredential({ key: options.apiKey, source: { kind: "option" } })
+  }
+  const host = await readHostCredential(options.hostCredential)
+  if (host) return { key: host.key, source: { kind: "host", source: host.source } }
+
+  const env = options.env ?? process.env
+  const ladder = resolveApiKeyWithSource({ env, authPaths: options.authPaths })
+  return ladder ? ladderCredential(ladder) : undefined
+}
+
 async function resolveToolPlan(
   planArg: string | undefined,
   options: PlanSummaryOptions,
-): Promise<PlanId | undefined> {
+): Promise<PlanResolution> {
   const env = options.env ?? process.env
-  // A pin needs no credential: resolving it first keeps a pinned summary free
-  // of both the network and the Host round-trip (ADR-0011 §2).
-  const pinned = normalizePlan(planArg) ?? normalizePlan(env.COMMANDCODE_PLAN)
-  if (pinned) return pinned
-  return await resolvePlan(undefined, env, {
-    apiKey: resolveApiKey({
-      apiKey: options.apiKey || (await hostCredentialKey(options.hostCredential)),
-      env,
-      authPaths: options.authPaths,
-    }),
+  // A pin short-circuits before any credential: it keeps a pinned summary free
+  // of both the network and the Host round-trip (ADR-0011 §2), and the pin is
+  // then the provenance it renders — no identity is worth a request (issue #205).
+  const pinned = pinnedPlan(planArg, env)
+  if (pinned) {
+    return { plan: pinned.plan, provenance: { source: { kind: "pin", via: pinned.via } } }
+  }
+
+  const credential = await resolveToolCredential(options)
+  if (!credential) return { plan: undefined, provenance: { source: { kind: "none" } } }
+
+  const lookup = await fetchBillingPlan(env, {
+    apiKey: credential.key,
     baseURL: options.baseURL,
     fetch: options.fetch,
   })
+  return {
+    plan: lookup.plan,
+    provenance: {
+      ...(lookup.account === undefined ? {} : { account: lookup.account }),
+      source: credential.source,
+    },
+  }
+}
+
+/** One rendering for both hosts: the plan's summary plus its provenance. */
+function renderResolution(resolution: PlanResolution): string {
+  return renderPlanSummary(resolution.plan, MODEL_DEALS, PLAN_CATALOG, resolution.provenance)
 }
 
 export function planSummaryTool(options: PlanSummaryOptions = {}) {
@@ -302,7 +504,7 @@ export function planSummaryTool(options: PlanSummaryOptions = {}) {
       plan: z.string().optional().describe(PLAN_SUMMARY_ARG_DESCRIPTION),
     },
     execute: async (args: { plan?: string }) =>
-      renderPlanSummary(await resolveToolPlan(args.plan, options)),
+      renderResolution(await resolveToolPlan(args.plan, options)),
   }
 }
 
@@ -330,7 +532,7 @@ export function planSummaryV2Tool(
       additionalProperties: false,
     },
     execute: async (input) => ({
-      content: renderPlanSummary(await resolveToolPlan(input?.plan, options)),
+      content: renderResolution(await resolveToolPlan(input?.plan, options)),
     }),
   }
 }

@@ -160,7 +160,12 @@ surfaces in two places:
   legacy auth files when the Host resolves none
   ([ADR-0015](adr/0015-host-credential-for-tools.md)); pass the `plan` argument
   or set `COMMANDCODE_PLAN` (`go|goat|pro|max|max20|teampro|provider`) to skip the
-  lookup. An unresolvable plan reports "plan unknown" — never a guessed default
+  lookup. It renders one provenance line under the plan header — the account the
+  lookup answered for plus the credential rung (`Host connection`,
+  `COMMANDCODE_API_KEY`, `legacy file ~/.commandcode/auth.json`, the pin) — so a
+  lookup that fell through to another account's file is visible; the line carries
+  no key material ([ADR-0017](adr/0017-plan-summary-provenance-line.md)). An
+  unresolvable plan reports "plan unknown" — never a guessed default
   ([ADR-0011](adr/0011-billing-derived-plan-identity.md)). Plan detection does
   not choose a transport: requests start on the Provider API unless `plan=go` is
   pinned, and a Go account switches to the legacy endpoint automatically when the
@@ -530,3 +535,4 @@ Both e2e scripts are excluded from `npm test`.
 | [0014](adr/0014-unmodelled-block-refuses-resume.md)            | A resumed turn never silently drops a block the stream did not model      |
 | [0015](adr/0015-host-credential-for-tools.md)                  | The plan summary uses the Host's resolved credential, not a legacy file   |
 | [0016](adr/0016-openai-dialect-reasoning-history.md)           | The OpenAI dialect replays assistant reasoning in history                 |
+| [0017](adr/0017-plan-summary-provenance-line.md)               | The plan summary renders the account and the credential rung              |
