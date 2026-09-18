@@ -6,10 +6,10 @@
 // parse from the CLI bundle (dist/cli.mjs). Regenerate with
 // `npm run refresh:snapshot`.
 
-export const FACTS_SOURCE_URL = "https://unpkg.com/command-code@1.55.0/dist/bundled/command-code-knowledge/reference/models.md"
-export const MODALITIES_SOURCE_URL = "https://unpkg.com/command-code@1.55.0/dist/cli.mjs"
-export const FACTS_PACKAGE_VERSION = "1.55.0"
-export const FACTS_LAST_REFRESHED = "2026-09-17"
+export const FACTS_SOURCE_URL = "https://unpkg.com/command-code@1.56.0/dist/bundled/command-code-knowledge/reference/models.md"
+export const MODALITIES_SOURCE_URL = "https://unpkg.com/command-code@1.56.0/dist/cli.mjs"
+export const FACTS_PACKAGE_VERSION = "1.56.0"
+export const FACTS_LAST_REFRESHED = "2026-09-18"
 
 export const MODEL_EFFORTS: Readonly<Record<string, readonly string[]>> = {
   "deepseek/deepseek-v4-pro": ["high","max"],
@@ -22,6 +22,7 @@ export const MODEL_EFFORTS: Readonly<Record<string, readonly string[]>> = {
   "zai-org/GLM-5.3": ["low","high","max"],
   "zai-org/GLM-5.2": ["high","max"],
   "MiniMaxAI/MiniMax-M3": ["low","medium","high"],
+  "Qwen/Qwen3.8-Omni-Flash": ["low","medium","xhigh"],
   "Qwen/Qwen3.8-Max-0902": ["low","medium","xhigh"],
   "Qwen/Qwen3.8-Max": ["low","medium","xhigh"],
   "Qwen/Qwen3.8-27B": ["low","medium","xhigh"],
@@ -82,6 +83,7 @@ export const MODEL_COSTS: Readonly<
   "MiniMaxAI/MiniMax-M2.5": { input: 0.3, output: 1.2, cacheRead: 0.03, cacheWrite: 0 },
   "xiaomi/mimo-v2.5-pro": { input: 0.435, output: 0.87, cacheRead: 0.0036, cacheWrite: 0 },
   "xiaomi/mimo-v2.5": { input: 0.14, output: 0.28, cacheRead: 0.0028, cacheWrite: 0 },
+  "Qwen/Qwen3.8-Omni-Flash": { input: 0.15, output: 0.47, cacheRead: 0.016, cacheWrite: 0 },
   "Qwen/Qwen3.8-Max-0902": { input: 2, output: 6, cacheRead: 0.25, cacheWrite: 0 },
   "Qwen/Qwen3.8-Max": { input: 2, output: 6, cacheRead: 0.25, cacheWrite: 2.5 },
   "Qwen/Qwen3.8-27B": { input: 0.4, output: 3, cacheRead: 0.04, cacheWrite: 0 },
@@ -144,6 +146,7 @@ export const MODEL_INPUT_MODALITIES: Readonly<
   "Qwen/Qwen3.8-Flash": ["text","image"],
   "Qwen/Qwen3.8-Max": ["text","image"],
   "Qwen/Qwen3.8-Max-0902": ["text","image"],
+  "Qwen/Qwen3.8-Omni-Flash": ["text","image"],
   "claude-fable-5": ["text","image"],
   "claude-fable-5-1": ["text","image"],
   "claude-haiku-4-5-20251001": ["text","image"],

@@ -99,6 +99,7 @@ export const MODEL_DEALS: Readonly<Record<string, ModelDeals>> = {
   "Qwen/Qwen3.8-Flash": { tier: "opensource", free: false, allowance: {"goat":20,"pro":30} },
   "Qwen/Qwen3.8-Max": { tier: "opensource", benchmark: {"intelligence":40.3,"tokPerSec":41.6}, free: false, allowance: {"goat":20,"pro":30} },
   "Qwen/Qwen3.8-Max-0902": { tier: "opensource", free: false, allowance: {"goat":20,"pro":30} },
+  "Qwen/Qwen3.8-Omni-Flash": { tier: "opensource", free: false, allowance: {"goat":20,"pro":30} },
   "sakana/fugu-ultra": { tier: "premium", free: false, allowance: {"goat":20,"pro":20} },
   "stepfun/Step-3.5-Flash": { tier: "opensource", benchmark: {"intelligence":17}, free: false, allowance: {"goat":20,"pro":30} },
   "stepfun/Step-3.7-Flash": { tier: "opensource", benchmark: {"intelligence":19.5,"tokPerSec":125.7}, free: false, allowance: {"goat":20,"pro":30} },
@@ -129,5 +130,5 @@ export const PLAN_CATALOG: Readonly<Record<PlanId, PlanInfo>> = {
 }
 
 export const DEAL_SOURCE_URL = "https://commandcode.ai/docs/resources/pricing-limits"
-export const DEAL_LAST_REFRESHED = "2026-09-17"
+export const DEAL_LAST_REFRESHED = "2026-09-18"
 export const DEAL_PACKAGE_VERSION = "docs"
