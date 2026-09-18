@@ -102,6 +102,7 @@ export const MODEL_REASONING_CAPABILITY: Readonly<Record<string, boolean>> = {
   "xiaomi/mimo-v2.5": false,
   "xiaomi/mimo-v2.5-pro": false,
   "z-ai/glm-5.3-flash": true,
+  "z-ai/glm-5.3-flashx": true,
   "zai-org/GLM-5": false,
   "zai-org/GLM-5.1": false,
   "zai-org/GLM-5.2": true,
