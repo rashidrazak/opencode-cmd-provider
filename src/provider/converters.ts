@@ -525,7 +525,11 @@ function anthropicTools(tools: unknown): unknown[] | undefined {
   })
 }
 
-function promptToOpenAIMessages(prompt: PromptLike, allowImages: boolean): unknown[] {
+function promptToOpenAIMessages(
+  prompt: PromptLike,
+  allowImages: boolean,
+  preserveReasoning: boolean,
+): unknown[] {
   const out: unknown[] = []
   const system = promptSystemText(prompt)
   if (system) out.push({ role: "system", content: system })
@@ -548,20 +552,34 @@ function promptToOpenAIMessages(prompt: PromptLike, allowImages: boolean): unkno
         .filter((p) => p.type === "text")
         .map(textFromPart)
         .filter(Boolean)
-      if (toolCalls.length > 0) {
-        const content = texts.length > 0 ? texts.join("\n") : null
-        out.push({
-          role: "assistant",
-          content,
-          tool_calls: toolCalls.map((p) => ({
+      // Reasoning from completed turns: DeepSeek V4.x requires the full prior
+      // reasoning_content on tool-calling continuations (their docs: HTTP 400
+      // without it), GLM-5.3 and Qwen3.8 preserve thinking for accuracy and
+      // cache hits. Emit it the way the resume path already does. A turn that
+      // only thought before calling a tool keeps a message instead of
+      // vanishing.
+      const reasoning = preserveReasoning
+        ? parts
+            .filter((p) => p.type === "reasoning")
+            .map((p) => textFromPart(p))
+            .filter(Boolean)
+            .join("")
+        : undefined
+      if (toolCalls.length > 0 || (preserveReasoning && reasoning)) {
+        const message: Record<string, unknown> = { role: "assistant" }
+        if (reasoning) message.reasoning_content = reasoning
+        message.content = texts.length > 0 ? texts.join("\n") : null
+        if (toolCalls.length > 0) {
+          message.tool_calls = toolCalls.map((p) => ({
             id: stringValue(p.toolCallId) ?? "",
             type: "function",
             function: {
               name: stringValue(p.toolName) ?? "",
               arguments: JSON.stringify(recordOrEmpty(p.input ?? p.args ?? p.arguments)),
             },
-          })),
-        })
+          }))
+        }
+        out.push(message)
       } else if (texts.length > 0) {
         out.push({ role: "assistant", content: texts.join("\n") })
       }
@@ -672,7 +690,12 @@ function buildOpenAIBody(options: ProviderRequestOptions): Record<string, unknow
   const prompt = options.prompt ?? []
   const allowImages = options.allowImages ?? false
   if (!allowImages) assertTextOnlyMessages(prompt)
-  const messages = promptToOpenAIMessages(prompt, allowImages)
+  // Assistant reasoning from completed turns is replayed only for models
+  // upstream treats as reasoning-capable — the same catalog-derived gate the
+  // reasoning_effort field uses. A model that never emits reasoning gets a
+  // request byte-identical to before.
+  const preserveReasoning = isReasoningModel(options.model ?? "")
+  const messages = promptToOpenAIMessages(prompt, allowImages, preserveReasoning)
   const body: Record<string, unknown> = {
     model: options.model ?? "",
     stream: true,

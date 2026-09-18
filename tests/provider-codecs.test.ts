@@ -294,6 +294,91 @@ run([
     },
   ],
   [
+    "OpenAI: assistant reasoning replays as reasoning_content for reasoning models",
+    () => {
+      // DeepSeek V4.x requires the full prior reasoning_content on tool-use
+      // continuations (HTTP 400 without it); GLM-5.3 and Qwen3.8 preserve
+      // thinking for accuracy and cache hits. The reasoning is read back from
+      // the same parts the stream parser emits for these models.
+      const prompt = [
+        { role: "user", content: [{ type: "text", text: "read the file" }] },
+        {
+          role: "assistant",
+          content: [
+            { type: "reasoning", text: "I should call read first" },
+            { type: "tool-call", toolCallId: "tc1", toolName: "read", input: { path: "a.ts" } },
+          ],
+        },
+        {
+          role: "tool",
+          content: [{ type: "tool-result", toolCallId: "tc1", toolName: "read", result: "ok" }],
+        },
+      ] as any
+      const body = messagesToOpenAI(prompt, { model: "deepseek/deepseek-v4.1-flash" }) as any
+      const assistant = body.messages.find((m: any) => m.role === "assistant")
+      assert(assistant, "assistant message kept")
+      assertEqual(assistant.reasoning_content, "I should call read first")
+      assertEqual(assistant.content, null)
+      assert(Array.isArray(assistant.tool_calls), "tool calls kept")
+
+      // A reasoning model with no reasoning in history sends no new field.
+      const plain = messagesToOpenAI(
+        [{ role: "assistant", content: [{ type: "text", text: "hello" }] }] as any,
+        { model: "deepseek/deepseek-v4.1-flash" },
+      ) as any
+      const plainAssistant = plain.messages.find((m: any) => m.role === "assistant")
+      assert(!("reasoning_content" in plainAssistant), "no reasoning_content without reasoning")
+      assertEqual(plainAssistant.content, "hello")
+    },
+  ],
+  [
+    "OpenAI: non-reasoning models keep history unchanged (no reasoning_content)",
+    () => {
+      const prompt = [
+        { role: "user", content: [{ type: "text", text: "hi" }] },
+        {
+          role: "assistant",
+          content: [
+            { type: "reasoning", text: "leftover thought" },
+            { type: "text", text: "answer" },
+          ],
+        },
+      ] as any
+      const body = messagesToOpenAI(prompt, { model: "moonshotai/Kimi-K2.5" }) as any
+      const assistant = body.messages.find((m: any) => m.role === "assistant")
+      assert(!("reasoning_content" in assistant), "no reasoning_content for non-reasoning model")
+      assertEqual(assistant.content, "answer")
+    },
+  ],
+  [
+    "Anthropic: completed-turn reasoning is still not replayed as history",
+    () => {
+      // The Anthropic dialect needs a provider signature on a replayed thinking
+      // block; history parts carry none, so the turn text and tool calls go
+      // back without a thinking block (only the pause-resume path replays one,
+      // with the streamed signature).
+      const prompt = [
+        {
+          role: "assistant",
+          content: [
+            { type: "reasoning", text: "hmm" },
+            { type: "tool-call", toolCallId: "tc1", toolName: "read", input: {} },
+          ],
+        },
+        {
+          role: "tool",
+          content: [{ type: "tool-result", toolCallId: "tc1", toolName: "read", result: "ok" }],
+        },
+      ] as any
+      const body = messagesToAnthropic(prompt, { model: "claude-sonnet-5" }) as any
+      const assistant = body.messages.find((m: any) => m.role === "assistant")
+      assert(
+        assistant.content.every((c: any) => c.type !== "thinking"),
+        "no thinking block in history",
+      )
+    },
+  ],
+  [
     "OpenAI streaming: text-delta and terminal usage → finish",
     () => {
       const c1 = {
