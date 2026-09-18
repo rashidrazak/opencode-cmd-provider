@@ -12,7 +12,7 @@ import { z } from "zod"
 import { MODEL_COSTS } from "../catalog/facts.js"
 import { normalizePlan, type PlanId } from "../catalog/plans.js"
 import { getApiBase } from "../env.js"
-import { resolveApiKey } from "../provider/auth-key.js"
+import { resolveApiKey, type HostCredential } from "../provider/auth-key.js"
 import { isRecord, stringValue } from "../provider/converters.js"
 import type { V2ToolDefinition } from "../plugin/v2-types.js"
 import { MODEL_DEALS, PLAN_CATALOG, type ModelDeals, type PlanInfo } from "./catalog.js"
@@ -244,6 +244,35 @@ export interface PlanSummaryOptions {
   baseURL?: string
   fetch?: typeof fetch
   env?: NodeJS.ProcessEnv
+  /**
+   * The credential the Host resolved for the provider (issue #201). Consulted
+   * after an explicit `apiKey` and before `COMMANDCODE_API_KEY` and the legacy
+   * files, because only the Host knows which credential the session streams
+   * with: v2 keeps it in its own store and injects it into the provider SDK
+   * only, and v1 exposes it through the plugin's SDK client (ADR-0015).
+   *
+   * The remaining ladder is untouched — it mirrors the transport's own
+   * fallback — and a getter that yields `undefined`, or rejects, falls through
+   * to it, so a Host that cannot answer costs the summary nothing (ADR-0011:
+   * unknown, never a guessed account).
+   */
+  hostCredential?: () => Promise<HostCredential | undefined>
+}
+
+/**
+ * A Host that cannot produce a credential must not fail the lookup: its
+ * refusal — `undefined` or a rejection — is just the next rung of the ladder.
+ */
+async function hostCredentialKey(
+  getter: (() => Promise<HostCredential | undefined>) | undefined,
+): Promise<string | undefined> {
+  if (!getter) return undefined
+  try {
+    const credential = await getter()
+    return credential?.key ? credential.key : undefined
+  } catch {
+    return undefined
+  }
 }
 
 async function resolveToolPlan(
@@ -251,8 +280,16 @@ async function resolveToolPlan(
   options: PlanSummaryOptions,
 ): Promise<PlanId | undefined> {
   const env = options.env ?? process.env
-  return await resolvePlan(planArg, env, {
-    apiKey: resolveApiKey({ apiKey: options.apiKey, env, authPaths: options.authPaths }),
+  // A pin needs no credential: resolving it first keeps a pinned summary free
+  // of both the network and the Host round-trip (ADR-0011 §2).
+  const pinned = normalizePlan(planArg) ?? normalizePlan(env.COMMANDCODE_PLAN)
+  if (pinned) return pinned
+  return await resolvePlan(undefined, env, {
+    apiKey: resolveApiKey({
+      apiKey: options.apiKey || (await hostCredentialKey(options.hostCredential)),
+      env,
+      authPaths: options.authPaths,
+    }),
     baseURL: options.baseURL,
     fetch: options.fetch,
   })
