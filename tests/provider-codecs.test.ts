@@ -351,6 +351,49 @@ run([
     },
   ],
   [
+    "OpenAI: unpaired tool call is dropped even when the turn carries reasoning",
+    () => {
+      // completeToolCallIds filters a tool call with no matching result; the
+      // remaining message must stay schema-valid: an assistant message with no
+      // tool_calls cannot carry content:null, and reasoning alone is not a
+      // payload the wire requires — the whole turn is dropped, as before
+      // reasoning replay existed.
+      const prompt = [
+        {
+          role: "assistant",
+          content: [
+            { type: "reasoning", text: "thought" },
+            { type: "tool-call", toolCallId: "tc-unpaired", toolName: "read", input: {} },
+          ],
+        },
+      ] as any
+      const body = messagesToOpenAI(prompt, { model: "Qwen/Qwen3.8-Max-0902" }) as any
+      assertEqual(
+        body.messages.filter((m: any) => m.role === "assistant").length,
+        0,
+        "unpaired-call-only turn is dropped",
+      )
+    },
+  ],
+  [
+    "OpenAI: reasoning plus text replays both on a message with string content",
+    () => {
+      const prompt = [
+        {
+          role: "assistant",
+          content: [
+            { type: "reasoning", text: "why I said it" },
+            { type: "text", text: "answer" },
+          ],
+        },
+      ] as any
+      const body = messagesToOpenAI(prompt, { model: "z-ai/glm-5.3-flash" }) as any
+      const assistant = body.messages.find((m: any) => m.role === "assistant")
+      assertEqual(assistant.reasoning_content, "why I said it")
+      assertEqual(assistant.content, "answer")
+    },
+  ],
+  [
     "Anthropic: completed-turn reasoning is still not replayed as history",
     () => {
       // The Anthropic dialect needs a provider signature on a replayed thinking

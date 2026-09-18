@@ -197,7 +197,12 @@ reasoning-capable models (the same catalog-derived gate as `reasoning_effort`,
 [ADR-0015](adr/0015-openai-dialect-reasoning-history.md)). DeepSeek V4.x
 requires the full prior `reasoning_content` on tool-calling continuations
 (HTTP 400 without it); GLM-5.3 and Qwen 3.8 preserve prior thinking for
-accuracy and cache hits. The field matches the one the stream parser reads
+accuracy and cache hits (for GLM, Z.ai documents preservation as default-on on
+its Coding Plan endpoint, `clear_thinking: false` opt-in on the standard one —
+which behavior the Provider API applies is not published, and replaying is
+correct on either). A turn whose only tool call was unpaired (no result) is
+still dropped whole: an assistant message without `tool_calls` cannot carry
+`content: null`. The field matches the one the stream parser reads
 these models' reasoning from, and the pause-resume path already replays it.
 
 Anthropic's `redacted_thinking` block — reasoning the provider's safety system

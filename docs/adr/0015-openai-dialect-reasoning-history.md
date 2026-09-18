@@ -21,7 +21,11 @@ Upstream contracts run the other way:
   harmless.)
 - **GLM-5.3**: thinking is always on, and "thinking blocks should be explicitly
   preserved and returned together with the tool results"; preserved thinking
-  also improves cache hit rates.
+  also improves cache hit rates. Qualification: Z.ai documents preserved
+  thinking as default-on on its Coding Plan endpoint; the standard API endpoint
+  defaults to stripping it unless the caller passes `clear_thinking: false`.
+  Which behavior Command Code's Provider API applies server-side is not
+  published; replaying the field is the conservative choice on either.
 - **Qwen 3.8 Max**: preserved thinking is on by default; "include the
   assistant's `reasoning_content` when sending tool results back. Omitting it
   degrades accuracy."

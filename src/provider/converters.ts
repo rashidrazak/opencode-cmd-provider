@@ -557,7 +557,11 @@ function promptToOpenAIMessages(
       // without it), GLM-5.3 and Qwen3.8 preserve thinking for accuracy and
       // cache hits. Emit it the way the resume path already does. A turn that
       // only thought before calling a tool keeps a message instead of
-      // vanishing.
+      // vanishing — but only when the message has a payload the wire
+      // requires: an assistant message with no tool_calls must carry string
+      // content (content:null is valid only alongside tool_calls), so a turn
+      // whose only tool call was unpaired and filtered out is dropped, exactly
+      // as before this replay existed.
       const reasoning = preserveReasoning
         ? parts
             .filter((p) => p.type === "reasoning")
@@ -565,21 +569,21 @@ function promptToOpenAIMessages(
             .filter(Boolean)
             .join("")
         : undefined
-      if (toolCalls.length > 0 || (preserveReasoning && reasoning)) {
+      if (toolCalls.length > 0) {
         const message: Record<string, unknown> = { role: "assistant" }
         if (reasoning) message.reasoning_content = reasoning
         message.content = texts.length > 0 ? texts.join("\n") : null
-        if (toolCalls.length > 0) {
-          message.tool_calls = toolCalls.map((p) => ({
-            id: stringValue(p.toolCallId) ?? "",
-            type: "function",
-            function: {
-              name: stringValue(p.toolName) ?? "",
-              arguments: JSON.stringify(recordOrEmpty(p.input ?? p.args ?? p.arguments)),
-            },
-          }))
-        }
+        message.tool_calls = toolCalls.map((p) => ({
+          id: stringValue(p.toolCallId) ?? "",
+          type: "function",
+          function: {
+            name: stringValue(p.toolName) ?? "",
+            arguments: JSON.stringify(recordOrEmpty(p.input ?? p.args ?? p.arguments)),
+          },
+        }))
         out.push(message)
+      } else if (preserveReasoning && reasoning && texts.length > 0) {
+        out.push({ role: "assistant", reasoning_content: reasoning, content: texts.join("\n") })
       } else if (texts.length > 0) {
         out.push({ role: "assistant", content: texts.join("\n") })
       }
