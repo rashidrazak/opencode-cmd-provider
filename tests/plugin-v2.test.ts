@@ -23,6 +23,7 @@ import {
   FIRST_RUN_DEFAULT_MODEL_ID,
   PROVIDER_ID,
   PROVIDER_NAME,
+  hostCredentialFromV2,
   provideSdk,
   registerIntegration,
   registerModels,
@@ -33,7 +34,7 @@ import { resolveProviderNpm } from "../src/plugin/version.js"
 import { MODEL_DEALS } from "../src/deals/catalog.js"
 import { enrichCommandCodeModelsV2 } from "../src/deals/enrichment.js"
 import { planSummaryTool, planSummaryV2Tool } from "../src/deals/plan-summary.js"
-import { assert, assertEqual, run } from "./harness.js"
+import { assert, assertEqual, run, withEnvVars } from "./harness.js"
 import type {
   V2ProviderEditor,
   V2ModelEditor,
@@ -41,6 +42,8 @@ import type {
   V2IntegrationMethodRegistration,
   V2ModelInfo,
   V2ProviderInfo,
+  V2ConnectionInfo,
+  V2CredentialValue,
   V2SDKEvent,
   V2SetupContext,
   V2ToolDefinition,
@@ -197,6 +200,11 @@ interface FakeHost {
   seedCatalog(seed: (draft: Map<string, ProviderRecord>) => void): void
   /** Seeds an already-chosen default model before the first replay. */
   seedDefault(providerID: string, modelID: string): void
+  /**
+   * Sets the Host's active connection + its resolved value, as the credential
+   * store would. `undefined` = no credential and no env method (ADR-0015).
+   */
+  setConnection(connection: V2ConnectionInfo | undefined, credential?: V2CredentialValue): void
 }
 
 function fakeHost(): FakeHost {
@@ -207,7 +215,9 @@ function fakeHost(): FakeHost {
   const sdkHooks: Array<{ callback: (event: V2SDKEvent) => void; providerID?: string }> = []
   const catalogSeeds: Array<(draft: Map<string, ProviderRecord>) => void> = []
   const defaultSeeds: Array<{ providerID: string; modelID: string }> = []
-
+  let active:
+    | { integrationID: string; connection: V2ConnectionInfo; credential?: V2CredentialValue }
+    | undefined
   const build = (): { draft: Map<string, ProviderRecord>; defaultRef: DefaultRef } => {
     const draft = new Map<string, ProviderRecord>()
     for (const seed of catalogSeeds) seed(draft)
@@ -234,6 +244,19 @@ function fakeHost(): FakeHost {
       transform: async (callback) => {
         integrationTransforms.push(callback)
         return {}
+      },
+      // Mirrors the Host service: `active` answers for the integration the
+      // provider points at, `resolve` reads the env var for an env connection.
+      connection: {
+        active: async (integrationID) =>
+          active?.integrationID === integrationID ? active.connection : undefined,
+        resolve: async (connection) => {
+          if (connection.type === "env") {
+            const value = process.env[connection.name]
+            return value ? { type: "key", key: value } : undefined
+          }
+          return active?.credential
+        },
       },
     },
     tool: {
@@ -289,6 +312,11 @@ function fakeHost(): FakeHost {
     },
     seedCatalog: (seed) => void catalogSeeds.push(seed),
     seedDefault: (providerID, modelID) => void defaultSeeds.push({ providerID, modelID }),
+    setConnection: (connection, credential) => {
+      active = connection
+        ? { integrationID: PROVIDER_ID, connection, ...(credential ? { credential } : {}) }
+        : undefined
+    },
   }
 }
 
@@ -320,6 +348,20 @@ async function installed(): Promise<FakeHost> {
     enrichProvider: enrichCommandCodeModelsV2,
     tools: [planSummaryV2Tool()],
   })
+  return host
+}
+
+/**
+ * The package entrypoint's v2 half — the real `setup`, not a rehearsal — so the
+ * Deals tool is exercised with the credential wiring the Host actually gets
+ * (ADR-0015).
+ */
+async function installedFromEntrypoint(): Promise<FakeHost> {
+  const host = fakeHost()
+  const mod = (await import("../src/plugin/index.js")) as {
+    default: { setup?: (ctx: V2SetupContext) => Promise<void> | void }
+  }
+  await mod.default.setup?.(host.ctx)
   return host
 }
 
@@ -513,6 +555,79 @@ run([
       const result = await planSummaryV2Tool().execute({ plan: "go" })
       assert(typeof result.content === "string" && result.content.length > 0)
       assertEqual(result.content, await planSummaryTool().execute({ plan: "go" }))
+    },
+  ],
+  [
+    "hostCredentialFromV2 maps the active connection to a key and its provenance (issue #201)",
+    async () => {
+      const host = fakeHost()
+      const getter = hostCredentialFromV2(host.ctx)
+      assertEqual(await getter(), undefined, "no connection must not invent a credential")
+
+      host.setConnection(
+        { type: "credential", id: "cred_1", label: "Command Code" },
+        { type: "key", key: "host_key" },
+      )
+      assertEqual(await getter(), { key: "host_key", source: "host" })
+
+      // A connection whose value cannot be resolved (deleted credential row)
+      // falls through rather than reporting a key.
+      host.setConnection({ type: "credential", id: "cred_1", label: "Command Code" })
+      assertEqual(await getter(), undefined)
+
+      host.setConnection(
+        { type: "credential", id: "cred_2", label: "Command Code" },
+        { type: "oauth", access: "oauth_key" },
+      )
+      assertEqual(await getter(), { key: "oauth_key", source: "host" })
+
+      await withEnvVars({ [API_KEY_ENV]: "env_key" }, async () => {
+        host.setConnection({ type: "env", name: API_KEY_ENV })
+        assertEqual(await getter(), { key: "env_key", source: "environment" })
+      })
+    },
+  ],
+  [
+    "the v2 Host's active connection credential drives cmd_plan_summary (issue #201)",
+    async () => {
+      const host = await installedFromEntrypoint()
+      host.setConnection(
+        { type: "credential", id: "cred_1", label: "Command Code" },
+        { type: "key", key: "host_key" },
+      )
+      const tool = host.tools().get("cmd_plan_summary") as
+        V2ToolDefinition<{ plan?: string }> | undefined
+      assert(tool, "the Deals tool must be registered")
+      const headers: Array<Record<string, string>> = []
+      const stub = (async (url: string, init: RequestInit) => {
+        headers.push((init.headers ?? {}) as Record<string, string>)
+        return url.includes("subscriptions")
+          ? new Response(
+              JSON.stringify({ data: { status: "active", planId: "individual-goat" } }),
+              { status: 200 },
+            )
+          : new Response(JSON.stringify({ org: null }), { status: 200 })
+      }) as unknown as typeof fetch
+      const previous = globalThis.fetch
+      globalThis.fetch = stub
+      try {
+        const result = await tool.execute({})
+        assert(
+          typeof result.content === "string" && result.content.includes("GOAT"),
+          `the Host credential's plan must be rendered, got: ${String(result.content).slice(0, 60)}`,
+        )
+        assertEqual(headers[0]?.authorization, "Bearer host_key")
+        // Resolved per call, never at registration: a /connect mid-session is
+        // picked up by the next summary.
+        host.setConnection(
+          { type: "credential", id: "cred_2", label: "Command Code" },
+          { type: "key", key: "next_key" },
+        )
+        await tool.execute({})
+        assertEqual(headers[2]?.authorization, "Bearer next_key")
+      } finally {
+        globalThis.fetch = previous
+      }
     },
   ],
   [

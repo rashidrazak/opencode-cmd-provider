@@ -376,6 +376,140 @@ run([
   ],
 
   [
+    "cmd_plan_summary: the Host credential outranks env and the legacy files (issue #201)",
+    async () => {
+      // The bug: the Host resolved this session's credential itself (v2 keeps
+      // it in its store, v1 exposes it through its SDK client) while the tool
+      // fell through to a legacy file of another account.
+      const dir = mkdtempSync(join(tmpdir(), "cmd-plan-host-"))
+      const authFile = join(dir, "auth.json")
+      writeFileSync(authFile, JSON.stringify({ apiKey: "file_key" }))
+      try {
+        const { calls, fetch } = recordingFetch({
+          "/alpha/whoami": { org: null },
+          "/alpha/billing/subscriptions": SUBSCRIPTION_ACTIVE("individual-goat"),
+        })
+        const options = {
+          hostCredential: async () => ({ key: "host_key", source: "host" }) as const,
+          authPaths: [authFile],
+          baseURL: "http://mock",
+          fetch,
+          env: { COMMANDCODE_API_KEY: "env_key" },
+        }
+        const rendered = await planSummaryTool(options).execute({})
+        assert(
+          rendered.includes("GOAT"),
+          `the Host credential must drive the lookup, got: ${rendered}`,
+        )
+        assertEqual(calls[0]!.headers.authorization, "Bearer host_key")
+
+        // The v2 builder takes the same seam (ADR-0010: one tool, both hosts).
+        const v2 = await planSummaryV2Tool(options).execute({})
+        assertEqual(v2.content, rendered)
+      } finally {
+        rmSync(dir, { recursive: true, force: true })
+      }
+    },
+  ],
+
+  [
+    "cmd_plan_summary: an explicit apiKey still outranks the Host credential",
+    async () => {
+      const { calls, fetch } = recordingFetch({
+        "/alpha/whoami": { org: null },
+        "/alpha/billing/subscriptions": SUBSCRIPTION_ACTIVE("individual-pro"),
+      })
+      const tool = planSummaryTool({
+        apiKey: "opt_key",
+        hostCredential: async () => ({ key: "host_key", source: "host" }),
+        baseURL: "http://mock",
+        fetch,
+        env: {},
+      })
+      await tool.execute({})
+      assertEqual(calls[0]!.headers.authorization, "Bearer opt_key")
+    },
+  ],
+
+  [
+    "cmd_plan_summary: a Host that cannot answer falls through to env, then to a file",
+    async () => {
+      const dir = mkdtempSync(join(tmpdir(), "cmd-plan-fallthrough-"))
+      const authFile = join(dir, "auth.json")
+      writeFileSync(authFile, JSON.stringify({ apiKey: "file_key" }))
+      const bodies = {
+        "/alpha/whoami": { org: null },
+        "/alpha/billing/subscriptions": SUBSCRIPTION_ACTIVE("individual-max"),
+      }
+      try {
+        const envCase = recordingFetch(bodies)
+        await planSummaryTool({
+          hostCredential: async () => undefined,
+          baseURL: "http://mock",
+          fetch: envCase.fetch,
+          env: { COMMANDCODE_API_KEY: "env_key" },
+        }).execute({})
+        assertEqual(envCase.calls[0]!.headers.authorization, "Bearer env_key")
+
+        // A Host that throws is the same rung as one that declines: the lookup
+        // the tool already had stays, and no error reaches the caller.
+        const throwCase = recordingFetch(bodies)
+        const rendered = await planSummaryTool({
+          hostCredential: async () => {
+            throw new Error("credential store unavailable")
+          },
+          baseURL: "http://mock",
+          fetch: throwCase.fetch,
+          env: { COMMANDCODE_API_KEY: "env_key" },
+        }).execute({})
+        assert(rendered.includes("Max 10×"), `the fallback must still resolve, got: ${rendered}`)
+        assertEqual(throwCase.calls[0]!.headers.authorization, "Bearer env_key")
+
+        const fileCase = recordingFetch(bodies)
+        await planSummaryTool({
+          hostCredential: async () => undefined,
+          authPaths: [authFile],
+          baseURL: "http://mock",
+          fetch: fileCase.fetch,
+          env: {},
+        }).execute({})
+        assertEqual(fileCase.calls[0]!.headers.authorization, "Bearer file_key")
+      } finally {
+        rmSync(dir, { recursive: true, force: true })
+      }
+    },
+  ],
+
+  [
+    "cmd_plan_summary: a pinned plan never asks the Host for a credential (ADR-0011 §2)",
+    async () => {
+      let asked = 0
+      const neverFetch = (async () => {
+        throw new Error("a pinned summary must not touch the network")
+      }) as unknown as typeof fetch
+      const options = {
+        hostCredential: async () => {
+          asked++
+          return { key: "host_key", source: "host" as const }
+        },
+        fetch: neverFetch,
+        env: {},
+      }
+      assert((await planSummaryTool(options).execute({ plan: "max" })).includes("Max 10×"))
+      const v2 = await planSummaryV2Tool(options).execute({ plan: "goat" })
+      assert(
+        typeof v2.content === "string" && v2.content.includes("GOAT"),
+        "the v2 builder takes the same pin path",
+      )
+      assertEqual(
+        await planSummaryTool({ ...options, env: { COMMANDCODE_PLAN: "goat" } }).execute({}),
+        renderPlanSummary("goat"),
+      )
+      assertEqual(asked, 0, "no pin path may consult the Host credential")
+    },
+  ],
+
+  [
     "cmd_plan_summary (v1 + v2) renders unknown instead of Go when nothing resolves",
     async () => {
       const notFound = (async () => new Response("not found", { status: 404 })) as typeof fetch

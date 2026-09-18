@@ -1,4 +1,4 @@
-# ADR-0015: The OpenAI dialect replays assistant reasoning in history
+# ADR-0016: The OpenAI dialect replays assistant reasoning in history
 
 Status: accepted
 
