@@ -135,6 +135,11 @@ this month?"_ and it uses the built-in `cmd_plan_summary` tool: your plan's
 allowances and the current deals, turned into an estimate. If you want to force
 a plan, add it to the question (for example `plan=pro`).
 
+The summary names the account it answered for and where the credential came from
+— your OpenCode connection, `COMMANDCODE_API_KEY`, or a legacy Command Code auth
+file — so an answer that came from a different account than the one you signed
+in with is visible instead of silent.
+
 ### Everyday details
 
 - **Reasoning models** show their effort levels in OpenCode, so you can pick how

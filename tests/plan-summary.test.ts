@@ -10,6 +10,7 @@ import {
   planSummaryTool,
   planSummaryV2Tool,
   PLAN_SUMMARY_DESCRIPTION,
+  type PlanSummaryOptions,
 } from "../src/deals/plan-summary.js"
 import { normalizePlan } from "../src/catalog/plans.js"
 import { MODEL_DEALS, PLAN_CATALOG } from "../src/deals/catalog.js"
@@ -495,17 +496,164 @@ run([
         fetch: neverFetch,
         env: {},
       }
-      assert((await planSummaryTool(options).execute({ plan: "max" })).includes("Max 10×"))
+      const byArg = await planSummaryTool(options).execute({ plan: "max" })
+      assert(byArg.includes("Max 10×"))
       const v2 = await planSummaryV2Tool(options).execute({ plan: "goat" })
       assert(
         typeof v2.content === "string" && v2.content.includes("GOAT"),
         "the v2 builder takes the same pin path",
       )
+      // The pin is the provenance a pinned summary renders, and no identity is
+      // claimed: renderPlanSummary with a pin source is the whole output (#205).
+      assertEqual(
+        byArg,
+        renderPlanSummary("max", MODEL_DEALS, PLAN_CATALOG, {
+          source: { kind: "pin", via: "argument" },
+        }),
+      )
       assertEqual(
         await planSummaryTool({ ...options, env: { COMMANDCODE_PLAN: "goat" } }).execute({}),
-        renderPlanSummary("goat"),
+        renderPlanSummary("goat", MODEL_DEALS, PLAN_CATALOG, {
+          source: { kind: "pin", via: "environment" },
+        }),
       )
       assertEqual(asked, 0, "no pin path may consult the Host credential")
+    },
+  ],
+
+  [
+    "cmd_plan_summary names the credential rung that resolved (issue #205)",
+    async () => {
+      const dir = mkdtempSync(join(tmpdir(), "cmd-plan-rungs-"))
+      const authFile = join(dir, "auth.json")
+      writeFileSync(authFile, JSON.stringify({ apiKey: "file_key" }))
+      const whoami = {
+        success: true,
+        user: { id: "u_42", userName: "rashid", email: "rashid@example.com" },
+        org: null,
+      }
+      const bodies = {
+        "/alpha/whoami": whoami,
+        "/alpha/billing/subscriptions": SUBSCRIPTION_ACTIVE("individual-goat"),
+      }
+      const cases: Array<[string, PlanSummaryOptions, string]> = [
+        [
+          "host store",
+          { hostCredential: async () => ({ key: "host_key", source: "host" }) },
+          "Account: `rashid` — credential: Host connection",
+        ],
+        [
+          "host env",
+          { hostCredential: async () => ({ key: "host_key", source: "environment" }) },
+          "Account: `rashid` — credential: Host connection (COMMANDCODE_API_KEY)",
+        ],
+        [
+          "host config",
+          { hostCredential: async () => ({ key: "host_key", source: "config" }) },
+          "Account: `rashid` — credential: Host configuration",
+        ],
+        [
+          "explicit option",
+          { apiKey: "opt_key" },
+          "Account: `rashid` — credential: the explicit `apiKey` option",
+        ],
+        [
+          "environment",
+          { env: { COMMANDCODE_API_KEY: "env_key" } },
+          "Account: `rashid` — credential: COMMANDCODE_API_KEY",
+        ],
+        [
+          "legacy file",
+          { authPaths: [authFile] },
+          `Account: \`rashid\` — credential: legacy file \`${authFile}\``,
+        ],
+      ]
+      try {
+        for (const [label, options, expected] of cases) {
+          const { fetch } = recordingFetch(bodies)
+          const out = await planSummaryTool({
+            env: {},
+            ...options,
+            baseURL: "http://mock",
+            fetch,
+          }).execute({})
+          const head = out.split("\n").slice(0, 2).join(" | ")
+          assert(out.includes(expected), `${label}: expected ${expected}, got ${head}`)
+          for (const secret of ["host_key", "env_key", "file_key", "opt_key"]) {
+            assert(!out.includes(secret), `${label} must not render a key, got ${head}`)
+          }
+          assert(
+            !out.includes("rashid@example.com"),
+            `${label} must never render the account email, got ${head}`,
+          )
+        }
+      } finally {
+        rmSync(dir, { recursive: true, force: true })
+      }
+    },
+  ],
+
+  [
+    "the account label is absent when whoami names no account (issue #205)",
+    async () => {
+      const hostCredential = async () => ({ key: "host_key", source: "host" as const })
+      // whoami fails on its own: the subscription leg still resolves the plan
+      // (each leg is independent), but the summary claims no identity.
+      const failing = (async (url: string) =>
+        url.includes("whoami")
+          ? new Response("boom", { status: 500 })
+          : new Response(JSON.stringify(SUBSCRIPTION_ACTIVE("individual-goat")), {
+              status: 200,
+            })) as unknown as typeof fetch
+      const failed = await planSummaryTool({
+        hostCredential,
+        baseURL: "http://mock",
+        fetch: failing,
+        env: {},
+      }).execute({})
+      assert(failed.includes("GOAT"), `the plan must still resolve, got: ${failed.split("\n")[0]}`)
+      assert(!failed.includes("Account:"), "a failed whoami must not yield an account claim")
+      assert(
+        failed.includes("Credential: Host connection"),
+        "the credential rung is still reported",
+      )
+
+      // A whoami that answers without naming a user is the same case: nothing to
+      // label the account with, so no account claim is rendered.
+      for (const [label, user] of [
+        ["no user", undefined],
+        ["empty user", {}],
+      ] as const) {
+        const { fetch } = recordingFetch({
+          "/alpha/whoami": { success: true, org: null, ...(user ? { user } : {}) },
+          "/alpha/billing/subscriptions": SUBSCRIPTION_ACTIVE("individual-goat"),
+        })
+        const out = await planSummaryTool({
+          hostCredential,
+          baseURL: "http://mock",
+          fetch,
+          env: {},
+        }).execute({})
+        assert(!out.includes("Account:"), `${label}: no account label may be rendered`)
+      }
+
+      // No userName: an elided user id is the label ("short form", #205).
+      const id = `u_${"abcdefghij".repeat(4)}`
+      const { fetch } = recordingFetch({
+        "/alpha/whoami": { success: true, user: { id }, org: null },
+        "/alpha/billing/subscriptions": SUBSCRIPTION_ACTIVE("individual-goat"),
+      })
+      const elided = await planSummaryTool({
+        hostCredential,
+        baseURL: "http://mock",
+        fetch,
+        env: {},
+      }).execute({})
+      assert(
+        elided.includes("Account: `u_abcdefghijabcdefghijabcdefghi…`"),
+        `a long user id must be elided, got: ${elided.split("\n")[1]}`,
+      )
+      assert(!elided.includes(id), "the raw user id must not be rendered whole")
     },
   ],
 
@@ -513,8 +661,11 @@ run([
     "cmd_plan_summary (v1 + v2) renders unknown instead of Go when nothing resolves",
     async () => {
       const notFound = (async () => new Response("not found", { status: 404 })) as typeof fetch
-      const v1 = await planSummaryTool({ fetch: notFound, env: {} }).execute({})
-      const v2def = planSummaryV2Tool({ fetch: notFound, env: {} })
+      // `authPaths: []` keeps the ladder off this machine's real auth files, so
+      // "nothing resolved" is a fact of the test rather than of the developer's
+      // home directory.
+      const v1 = await planSummaryTool({ fetch: notFound, env: {}, authPaths: [] }).execute({})
+      const v2def = planSummaryV2Tool({ fetch: notFound, env: {}, authPaths: [] })
       const v2 = await v2def.execute({})
       for (const [label, out] of [
         ["v1", v1],
@@ -524,6 +675,13 @@ run([
         assert(out.includes("COMMANDCODE_PLAN"), `${label} must name the pin override`)
         assert(!out.includes("buys $"), `${label} must not render a guessed plan's credits`)
         assert(!out.includes("5-hour window $3"), `${label} must not render Go's windows`)
+        // An unknown plan with no credential at all says so, and claims no
+        // account it did not look up (issue #205).
+        assert(
+          out.includes("Credential: none resolved"),
+          `${label} must report that nothing resolved`,
+        )
+        assert(!out.includes("Account:"), `${label} must not claim an account`)
         assertEqual(
           PLAN_SUMMARY_DESCRIPTION.includes(
             "plan is detected from the account's billing subscription",
@@ -533,6 +691,26 @@ run([
         )
       }
       assertEqual(v2def.name, "cmd_plan_summary")
+    },
+  ],
+
+  [
+    "cmd_plan_summary renders the account and the credential source (issue #205)",
+    async () => {
+      const { fetch } = recordingFetch({
+        "/alpha/whoami": { success: true, user: { id: "u_42", userName: "rashid" }, org: null },
+        "/alpha/billing/subscriptions": SUBSCRIPTION_ACTIVE("individual-goat"),
+      })
+      const out = await planSummaryTool({
+        hostCredential: async () => ({ key: "host_key", source: "host" }),
+        baseURL: "http://mock",
+        fetch,
+        env: {},
+      }).execute({})
+      assert(
+        out.includes("Account: `rashid` — credential: Host connection"),
+        `the summary must name the account and the rung, got: ${out}`,
+      )
     },
   ],
 
