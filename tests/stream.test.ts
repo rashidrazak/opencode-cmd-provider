@@ -682,6 +682,249 @@ run([
   ],
 
   [
+    "createOpenAIStreamParser keeps one reasoning block when every chunk carries usage (GLM-5.3)",
+    () => {
+      // Command Code's GLM-5.3 carries a cumulative usage object on every
+      // OpenAI-dialect chunk — its Z.ai upstream reports usage per SSE event.
+      // Reading usage alone as the terminal closed and reopened the reasoning
+      // part once per token, so the Host stored one part per token and rendered
+      // the answer one word per line. Only a finish_reason, or the dialect's
+      // usage-only chunk (choices:[]), may end the turn.
+      const parser = createOpenAIStreamParser()
+      const chunkId = "gen_glm53"
+      const usage = (completion: number) => ({
+        prompt_tokens: 17,
+        completion_tokens: completion,
+        total_tokens: 17 + completion,
+      })
+      const chunks = [
+        {
+          id: chunkId,
+          choices: [{ delta: { role: "assistant" }, finish_reason: null }],
+          usage: usage(0),
+        },
+        {
+          id: chunkId,
+          choices: [{ delta: { reasoning_content: "The" }, finish_reason: null }],
+          usage: usage(1),
+        },
+        {
+          id: chunkId,
+          choices: [{ delta: { reasoning_content: " user" }, finish_reason: null }],
+          usage: usage(2),
+        },
+        {
+          id: chunkId,
+          choices: [{ delta: { reasoning_content: " asked." }, finish_reason: null }],
+          usage: usage(3),
+        },
+        {
+          id: chunkId,
+          choices: [{ delta: { content: "ok" }, finish_reason: "stop" }],
+          usage: usage(4),
+        },
+      ]
+      const parts = chunks.flatMap((c) => parser(c))
+      assertEqual(
+        parts.map((p) => (p as { type: string }).type),
+        [
+          "reasoning-start",
+          "reasoning-delta",
+          "reasoning-delta",
+          "reasoning-delta",
+          "reasoning-end",
+          "text-start",
+          "text-delta",
+          "text-end",
+          "finish",
+        ],
+      )
+      // One part lifecycle each: the reasoning block stays open across the
+      // per-chunk usage until the content starts, and the text block until the
+      // finish_reason chunk.
+      const lifecycles = parts.filter((p) =>
+        [
+          "reasoning-start",
+          "reasoning-delta",
+          "reasoning-end",
+          "text-start",
+          "text-delta",
+          "text-end",
+        ].includes((p as { type: string }).type),
+      )
+      for (const part of lifecycles) assertEqual((part as { id?: string }).id, chunkId)
+      assertEqual(
+        parts
+          .filter((p) => p.type === "reasoning-delta")
+          .map((p) => (p as { delta: string }).delta),
+        ["The", " user", " asked."],
+      )
+      const finish = parts[parts.length - 1] as {
+        usage?: { inputTokens: { total: number }; outputTokens: { total: number } }
+      }
+      assertEqual(finish.usage?.inputTokens.total, 17)
+      assertEqual(finish.usage?.outputTokens.total, 4)
+    },
+  ],
+
+  [
+    "createOpenAIStreamParser ignores an empty tool_calls array on content chunks (GLM-5.3)",
+    () => {
+      // Command Code's GLM-5.3 attaches `tool_calls: []` to every content
+      // chunk. An empty array is not a tool call, but treating it as one closed
+      // the open reasoning part at every chunk — the same one-word-per-line
+      // symptom as the usage terminal.
+      const parser = createOpenAIStreamParser()
+      const chunkId = "gen_glm53_empty_tools"
+      const chunks = [
+        {
+          id: chunkId,
+          choices: [{ delta: { reasoning_content: "The", tool_calls: [] }, finish_reason: null }],
+        },
+        {
+          id: chunkId,
+          choices: [{ delta: { reasoning_content: " user", tool_calls: [] }, finish_reason: null }],
+        },
+        {
+          id: chunkId,
+          choices: [{ delta: { reasoning_content: " asked." }, finish_reason: null }],
+        },
+        {
+          id: chunkId,
+          choices: [{ delta: { content: "ok" }, finish_reason: "stop" }],
+          usage: { prompt_tokens: 17, completion_tokens: 4, total_tokens: 21 },
+        },
+      ]
+      const parts = chunks.flatMap((c) => parser(c))
+      assertEqual(parts.filter((p) => p.type === "reasoning-start").length, 1)
+      assertEqual(parts.filter((p) => p.type === "reasoning-end").length, 1)
+      assertEqual(parts.filter((p) => p.type === "text-start").length, 1)
+      assertEqual(parts.filter((p) => p.type === "text-end").length, 1)
+      assertEqual(
+        parts
+          .filter((p) => p.type === "reasoning-delta")
+          .map((p) => (p as { delta: string }).delta)
+          .join(""),
+        "The user asked.",
+      )
+    },
+  ],
+
+  [
+    "createOpenAIStreamParser keeps one reasoning block when usage-only chunks precede the finish (GLM-5.3)",
+    () => {
+      // Some per-event-usage wires send a usage-only chunk (`choices: []`)
+      // between content chunks, not only after a finish_reason. A usage-only
+      // chunk before any finish_reason is a running report, not the terminal.
+      const parser = createOpenAIStreamParser()
+      const chunkId = "gen_glm53_usage_only"
+      const usage = (completion: number) => ({
+        prompt_tokens: 17,
+        completion_tokens: completion,
+        total_tokens: 17 + completion,
+      })
+      const chunks = [
+        { id: chunkId, choices: [], usage: usage(0) },
+        {
+          id: chunkId,
+          choices: [{ delta: { reasoning_content: "The" }, finish_reason: null }],
+          usage: usage(1),
+        },
+        { id: chunkId, choices: [], usage: usage(1) },
+        {
+          id: chunkId,
+          choices: [{ delta: { reasoning_content: " user" }, finish_reason: null }],
+          usage: usage(2),
+        },
+        {
+          id: chunkId,
+          choices: [{ delta: { content: "ok" }, finish_reason: "stop" }],
+          usage: usage(3),
+        },
+      ]
+      const parts = chunks.flatMap((c) => parser(c))
+      assertEqual(parts.filter((p) => p.type === "reasoning-start").length, 1)
+      assertEqual(parts.filter((p) => p.type === "reasoning-end").length, 1)
+      assertEqual(
+        parts
+          .filter((p) => p.type === "reasoning-delta")
+          .map((p) => (p as { delta: string }).delta)
+          .join(""),
+        "The user",
+      )
+    },
+  ],
+
+  [
+    "createOpenAIStreamParser keeps a fragmented tool call whole when every chunk carries usage (GLM-5.3)",
+    () => {
+      // The same per-chunk usage that split reasoning parts also corrupted tool
+      // calls: reading each usage-bearing chunk as the terminal flushed (and
+      // deleted) the half-built call at every chunk, so the consumer got a
+      // `tool-call` per fragment with truncated arguments. The call now
+      // completes once, when its accumulated arguments parse — and the
+      // finish_reason chunk carries the turn's usage.
+      const parser = createOpenAIStreamParser()
+      const chunkId = "gen_glm53_tool"
+      const usage = (completion: number) => ({
+        prompt_tokens: 17,
+        completion_tokens: completion,
+        total_tokens: 17 + completion,
+      })
+      const chunks = [
+        {
+          id: chunkId,
+          choices: [
+            {
+              delta: {
+                tool_calls: [
+                  { index: 0, id: "call_9", function: { name: "do_thing", arguments: '{"a":' } },
+                ],
+              },
+              finish_reason: null,
+            },
+          ],
+          usage: usage(1),
+        },
+        {
+          id: chunkId,
+          choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: "1}" } }] } }],
+          usage: usage(2),
+        },
+        {
+          id: chunkId,
+          choices: [{ delta: {}, finish_reason: "tool_calls" }],
+          usage: usage(3),
+        },
+      ]
+      const parts = chunks.flatMap((c) => parser(c))
+      assertEqual(
+        parts.map((p) => (p as { type: string }).type),
+        [
+          "tool-input-start",
+          "tool-input-delta",
+          "tool-input-delta",
+          "tool-input-end",
+          "tool-call",
+          "finish",
+        ],
+      )
+      assertEqual(parts[4], {
+        type: "tool-call",
+        toolCallId: "call_9",
+        toolName: "do_thing",
+        input: '{"a":1}',
+      })
+      const finish = parts[5] as {
+        finishReason?: { unified?: string }
+        usage?: { outputTokens: { total: number } }
+      }
+      assertEqual(finish.finishReason?.unified, "tool-calls")
+      assertEqual(finish.usage?.outputTokens.total, 3)
+    },
+  ],
+
+  [
     "createAnthropicStreamParser handles thinking block lifecycle",
     () => {
       const parser = createAnthropicStreamParser()

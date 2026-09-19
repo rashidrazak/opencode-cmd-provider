@@ -838,7 +838,12 @@ export function createOpenAIStreamParser(): StreamEventParser {
       }
 
       const toolCalls = delta.tool_calls ?? delta.toolCalls
-      if (Array.isArray(toolCalls)) {
+      // An empty array is not a tool call: some OpenAI-dialect providers attach
+      // `tool_calls: []` to every content chunk (Command Code's GLM-5.3 does),
+      // and closing the open reasoning/text parts on the empty array split them
+      // once per chunk — the same one-word-per-line symptom as the usage
+      // terminal below.
+      if (Array.isArray(toolCalls) && toolCalls.length > 0) {
         if (reasoningStarted && !reasoningEnded) {
           parts.push(...closeReasoning())
         }
@@ -901,6 +906,16 @@ export function createOpenAIStreamParser(): StreamEventParser {
     }
     const rawUsage = (event as Record<string, unknown>).usage
     const hasUsage = rawUsage !== undefined && rawUsage !== null
+    // A usage report alone does not end the turn: some OpenAI-dialect providers
+    // attach a cumulative usage object to every content chunk — Command Code's
+    // GLM-5.3 does (its Z.ai upstream reports usage per SSE event) — and
+    // reading each one as the terminal closed and reopened the reasoning and
+    // text parts once per token, which the Host renders one word per line. The
+    // dialect's only usage-only terminal is the trailing `choices: []` report,
+    // and it counts as terminal only once a finish_reason has already been seen:
+    // a usage-only chunk before any finish_reason is a running report from a
+    // per-event-usage provider, not an ending.
+    const choices = (event as Record<string, unknown>).choices
     const finishReasonRaw =
       stringValue(choice?.finish_reason) ??
       stringValue(choice?.finishReason) ??
@@ -908,7 +923,9 @@ export function createOpenAIStreamParser(): StreamEventParser {
       stringValue((event as Record<string, unknown>).finishReason)
     const finishReason = finishReasonRaw ? mapFinishReason(finishReasonRaw) : undefined
     if (finishReason) lastFinishReason = finishReason
-    if (lastFinishReason || hasUsage) {
+    const usageOnlyTerminal =
+      hasUsage && lastFinishReason !== undefined && !(Array.isArray(choices) && choices.length > 0)
+    if (lastFinishReason || usageOnlyTerminal) {
       if (reasoningStarted && !reasoningEnded) {
         parts.push(...closeReasoning())
       }
