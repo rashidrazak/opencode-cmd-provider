@@ -768,6 +768,75 @@ run([
   ],
 
   [
+    "createOpenAIStreamParser keeps a fragmented tool call whole when every chunk carries usage (GLM-5.3)",
+    () => {
+      // The same per-chunk usage that split reasoning parts also corrupted tool
+      // calls: reading each usage-bearing chunk as the terminal flushed (and
+      // deleted) the half-built call at every chunk, so the consumer got a
+      // `tool-call` per fragment with truncated arguments. The call now
+      // completes once, when its accumulated arguments parse — and the
+      // finish_reason chunk carries the turn's usage.
+      const parser = createOpenAIStreamParser()
+      const chunkId = "gen_glm53_tool"
+      const usage = (completion: number) => ({
+        prompt_tokens: 17,
+        completion_tokens: completion,
+        total_tokens: 17 + completion,
+      })
+      const chunks = [
+        {
+          id: chunkId,
+          choices: [
+            {
+              delta: {
+                tool_calls: [
+                  { index: 0, id: "call_9", function: { name: "do_thing", arguments: '{"a":' } },
+                ],
+              },
+              finish_reason: null,
+            },
+          ],
+          usage: usage(1),
+        },
+        {
+          id: chunkId,
+          choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: "1}" } }] } }],
+          usage: usage(2),
+        },
+        {
+          id: chunkId,
+          choices: [{ delta: {}, finish_reason: "tool_calls" }],
+          usage: usage(3),
+        },
+      ]
+      const parts = chunks.flatMap((c) => parser(c))
+      assertEqual(
+        parts.map((p) => (p as { type: string }).type),
+        [
+          "tool-input-start",
+          "tool-input-delta",
+          "tool-input-delta",
+          "tool-input-end",
+          "tool-call",
+          "finish",
+        ],
+      )
+      assertEqual(parts[4], {
+        type: "tool-call",
+        toolCallId: "call_9",
+        toolName: "do_thing",
+        input: '{"a":1}',
+      })
+      const finish = parts[5] as {
+        finishReason?: { unified?: string }
+        usage?: { outputTokens: { total: number } }
+      }
+      assertEqual(finish.finishReason?.unified, "tool-calls")
+      assertEqual(finish.usage?.outputTokens.total, 3)
+    },
+  ],
+
+  [
     "createAnthropicStreamParser handles thinking block lifecycle",
     () => {
       const parser = createAnthropicStreamParser()

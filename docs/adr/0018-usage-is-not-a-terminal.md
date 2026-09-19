@@ -46,6 +46,12 @@ relies on usage-as-terminal; OpenAI and Command Code both send `finish_reason`.
 - One part lifecycle per block, whatever the provider's usage cadence: the Host
   sees one reasoning part and one text part for a GLM-5.3 turn, as it does for
   GLM-5.3 Flash (whose stream carries usage only on the terminal chunk).
+- Tool calls on the same wire were corrupted the same way: the per-chunk
+  terminal flushed and deleted the half-built call at every chunk, so the
+  consumer received a `tool-call` per fragment with truncated arguments. The
+  call now completes once, when its accumulated arguments parse, or fails the
+  turn with the rest of it — `tests/stream.test.ts` pins both the tool-call
+  lifecycle and the reasoning one.
 - Cost reporting is unchanged: the terminal chunk that ends a GLM-5.3 turn
   carries usage itself, and `MissingUsageError` still fails a finish synthesized
   from a `finish_reason` whose usage never arrived (issue #171).

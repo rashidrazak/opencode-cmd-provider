@@ -629,6 +629,43 @@ run([
     },
   ],
   [
+    "provider: per-chunk usage without a finish_reason is a truncation, never a turn",
+    async () => {
+      // The other half of the GLM-5.3 rule: usage on a content chunk is a
+      // running report, not an ending. A body that ends before any
+      // finish_reason declares nothing, so it is the truncation the legacy
+      // guards already describe (issues #170, #187) — not a completed turn
+      // synthesized off the first usage report, which is what the old gate did.
+      const mock = await startMockCc({
+        chatCompletionsStream: [
+          {
+            id: "gen_cut",
+            choices: [{ delta: { content: "half an ans" }, finish_reason: null }],
+            usage: { prompt_tokens: 17, completion_tokens: 3, total_tokens: 20 },
+          },
+          eventsEnd,
+        ],
+      })
+      try {
+        const parts = await collect(
+          createCommandCode({ apiKey: "k", baseURL: mock.url }).languageModel("zai-org/GLM-5.3"),
+          [{ role: "user", content: "hi" }],
+        )
+        assertEqual(
+          parts.filter((p) => p.type === "finish"),
+          [],
+          "never a completed turn",
+        )
+        const failure = parts[parts.length - 1]!.error as Error & { status?: number }
+        assertEqual(failure.name, "TruncatedStreamError")
+        assertEqual(failure.status, 502)
+        assertEqual(failure.message, TRUNCATION_MESSAGE)
+      } finally {
+        await mock.close()
+      }
+    },
+  ],
+  [
     "provider: Anthropic message_delta usage survives the trailing message_stop (issue #174)",
     async () => {
       // Live /provider/v1/messages order (2026-09-16): message_start →

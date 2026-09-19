@@ -909,7 +909,9 @@ export function createOpenAIStreamParser(): StreamEventParser {
     // dialect's only usage-only terminal is the chunk with no choices
     // (OpenAI's trailing `choices: []` report); every other ending carries a
     // finish_reason, which the sticky `lastFinishReason` keeps for a trailing
-    // usage-only chunk.
+    // usage-only chunk. Residual hole, unobserved on this wire: a usage-only
+    // chunk sent between content chunks still ends the turn here, because
+    // nothing distinguishes it from the trailing report.
     const choices = (event as Record<string, unknown>).choices
     const usageOnlyTerminal = hasUsage && !(Array.isArray(choices) && choices.length > 0)
     const finishReasonRaw =
