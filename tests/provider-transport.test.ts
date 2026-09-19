@@ -568,6 +568,67 @@ run([
     },
   ],
   [
+    "provider: per-chunk usage on the OpenAI dialect keeps one reasoning block (GLM-5.3)",
+    async () => {
+      // Live GLM-5.3 wire (2026-09-19): every chunk carries a cumulative usage
+      // object, only the last carries a finish_reason. The transport used to
+      // read each usage report as the terminal, closing and reopening the
+      // reasoning part once per token — the Host then stored one part per token
+      // and rendered the answer one word per line.
+      const mock = await startMockCc({
+        chatCompletionsStream: [
+          {
+            id: "gen_glm53",
+            choices: [{ delta: { role: "assistant" }, finish_reason: null }],
+            usage: { prompt_tokens: 17, completion_tokens: 0, total_tokens: 17 },
+          },
+          {
+            id: "gen_glm53",
+            choices: [{ delta: { reasoning_content: "The" }, finish_reason: null }],
+            usage: { prompt_tokens: 17, completion_tokens: 1, total_tokens: 18 },
+          },
+          {
+            id: "gen_glm53",
+            choices: [{ delta: { reasoning_content: " user" }, finish_reason: null }],
+            usage: { prompt_tokens: 17, completion_tokens: 2, total_tokens: 19 },
+          },
+          {
+            id: "gen_glm53",
+            choices: [{ delta: { reasoning_content: " asked." }, finish_reason: null }],
+            usage: { prompt_tokens: 17, completion_tokens: 3, total_tokens: 20 },
+          },
+          {
+            id: "gen_glm53",
+            choices: [{ delta: { content: "ok" }, finish_reason: "stop" }],
+            usage: { prompt_tokens: 17, completion_tokens: 4, total_tokens: 21 },
+          },
+        ],
+      })
+      try {
+        const parts = await collect(
+          createCommandCode({ apiKey: "k", baseURL: mock.url }).languageModel("zai-org/GLM-5.3"),
+          [{ role: "user", content: "hi" }],
+        )
+        assertEqual(parts.filter((p) => p.type === "reasoning-start").length, 1)
+        assertEqual(parts.filter((p) => p.type === "reasoning-end").length, 1)
+        const reasoning = parts
+          .filter((p) => p.type === "reasoning-delta")
+          .map((p) => (p as never as { delta: string }).delta)
+          .join("")
+        assertEqual(reasoning, "The user asked.")
+        const finish = parts.find((p) => p.type === "finish") as {
+          finishReason?: { unified?: string }
+          usage?: { inputTokens: { total: number }; outputTokens: { total: number } }
+        }
+        assertEqual(finish.finishReason?.unified, "stop")
+        assertEqual(finish.usage?.inputTokens.total, 17)
+        assertEqual(finish.usage?.outputTokens.total, 4)
+      } finally {
+        await mock.close()
+      }
+    },
+  ],
+  [
     "provider: Anthropic message_delta usage survives the trailing message_stop (issue #174)",
     async () => {
       // Live /provider/v1/messages order (2026-09-16): message_start →

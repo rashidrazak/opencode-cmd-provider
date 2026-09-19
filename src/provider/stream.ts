@@ -901,6 +901,17 @@ export function createOpenAIStreamParser(): StreamEventParser {
     }
     const rawUsage = (event as Record<string, unknown>).usage
     const hasUsage = rawUsage !== undefined && rawUsage !== null
+    // A usage report alone does not end the turn: some OpenAI-dialect providers
+    // attach a cumulative usage object to every content chunk — Command Code's
+    // GLM-5.3 does (its Z.ai upstream reports usage per SSE event) — and
+    // reading each one as the terminal closed and reopened the reasoning and
+    // text parts once per token, which the Host renders one word per line. The
+    // dialect's only usage-only terminal is the chunk with no choices
+    // (OpenAI's trailing `choices: []` report); every other ending carries a
+    // finish_reason, which the sticky `lastFinishReason` keeps for a trailing
+    // usage-only chunk.
+    const choices = (event as Record<string, unknown>).choices
+    const usageOnlyTerminal = hasUsage && !(Array.isArray(choices) && choices.length > 0)
     const finishReasonRaw =
       stringValue(choice?.finish_reason) ??
       stringValue(choice?.finishReason) ??
@@ -908,7 +919,7 @@ export function createOpenAIStreamParser(): StreamEventParser {
       stringValue((event as Record<string, unknown>).finishReason)
     const finishReason = finishReasonRaw ? mapFinishReason(finishReasonRaw) : undefined
     if (finishReason) lastFinishReason = finishReason
-    if (lastFinishReason || hasUsage) {
+    if (lastFinishReason || usageOnlyTerminal) {
       if (reasoningStarted && !reasoningEnded) {
         parts.push(...closeReasoning())
       }

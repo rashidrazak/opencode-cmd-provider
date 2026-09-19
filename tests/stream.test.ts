@@ -682,6 +682,92 @@ run([
   ],
 
   [
+    "createOpenAIStreamParser keeps one reasoning block when every chunk carries usage (GLM-5.3)",
+    () => {
+      // Command Code's GLM-5.3 carries a cumulative usage object on every
+      // OpenAI-dialect chunk — its Z.ai upstream reports usage per SSE event.
+      // Reading usage alone as the terminal closed and reopened the reasoning
+      // part once per token, so the Host stored one part per token and rendered
+      // the answer one word per line. Only a finish_reason, or the dialect's
+      // usage-only chunk (choices:[]), may end the turn.
+      const parser = createOpenAIStreamParser()
+      const chunkId = "gen_glm53"
+      const usage = (completion: number) => ({
+        prompt_tokens: 17,
+        completion_tokens: completion,
+        total_tokens: 17 + completion,
+      })
+      const chunks = [
+        {
+          id: chunkId,
+          choices: [{ delta: { role: "assistant" }, finish_reason: null }],
+          usage: usage(0),
+        },
+        {
+          id: chunkId,
+          choices: [{ delta: { reasoning_content: "The" }, finish_reason: null }],
+          usage: usage(1),
+        },
+        {
+          id: chunkId,
+          choices: [{ delta: { reasoning_content: " user" }, finish_reason: null }],
+          usage: usage(2),
+        },
+        {
+          id: chunkId,
+          choices: [{ delta: { reasoning_content: " asked." }, finish_reason: null }],
+          usage: usage(3),
+        },
+        {
+          id: chunkId,
+          choices: [{ delta: { content: "ok" }, finish_reason: "stop" }],
+          usage: usage(4),
+        },
+      ]
+      const parts = chunks.flatMap((c) => parser(c))
+      assertEqual(
+        parts.map((p) => (p as { type: string }).type),
+        [
+          "reasoning-start",
+          "reasoning-delta",
+          "reasoning-delta",
+          "reasoning-delta",
+          "reasoning-end",
+          "text-start",
+          "text-delta",
+          "text-end",
+          "finish",
+        ],
+      )
+      // One part lifecycle each: the reasoning block stays open across the
+      // per-chunk usage until the content starts, and the text block until the
+      // finish_reason chunk.
+      const lifecycles = parts.filter((p) =>
+        [
+          "reasoning-start",
+          "reasoning-delta",
+          "reasoning-end",
+          "text-start",
+          "text-delta",
+          "text-end",
+        ].includes((p as { type: string }).type),
+      )
+      for (const part of lifecycles) assertEqual((part as { id?: string }).id, chunkId)
+      assertEqual(
+        parts
+          .filter((p) => p.type === "reasoning-delta")
+          .map((p) => (p as { delta: string }).delta),
+        ["The", " user", " asked."],
+      )
+      const finish = parts[parts.length - 1] as {
+        usage?: { inputTokens: { total: number }; outputTokens: { total: number } }
+      }
+      assertEqual(finish.usage?.inputTokens.total, 17)
+      assertEqual(finish.usage?.outputTokens.total, 4)
+    },
+  ],
+
+  [
     "createAnthropicStreamParser handles thinking block lifecycle",
     () => {
       const parser = createAnthropicStreamParser()
