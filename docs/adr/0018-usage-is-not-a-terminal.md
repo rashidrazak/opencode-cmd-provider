@@ -21,18 +21,20 @@ were.
 
 ## The decision
 
-**A `usage` report ends the turn only on a chunk that carries no choices.** A
-chunk with choices ends the turn only through a `finish_reason`, which the
-parser's sticky `lastFinishReason` keeps for a trailing usage-only chunk. Usage
-on a content-bearing chunk is read as what it is on this wire — a running
-report — and changes nothing about the open parts.
+**A `usage` report ends the turn only on a chunk that carries no choices, and
+only after a `finish_reason` has already been seen.** A chunk with choices ends
+the turn only through a `finish_reason`, which the parser's sticky
+`lastFinishReason` keeps for a trailing usage-only chunk. Usage on a
+content-bearing chunk, or on a usage-only chunk before any `finish_reason`, is
+read as what it is on this wire — a running report — and changes nothing about
+the open parts.
 
 The two OpenAI terminal shapes are unchanged:
 
 - `finish_reason` on a content chunk (with or without usage) — terminal;
-- a trailing usage-only chunk (`choices: []`, or no `choices`) — terminal, and
-  it replaces the held finish with the usage-bearing one (`lastFinishReason`
-  keeps the real reason, issue #171).
+- a trailing usage-only chunk (`choices: []`, or no `choices`) that follows a
+  `finish_reason` — terminal, and it replaces the held finish with the
+  usage-bearing one (`lastFinishReason` keeps the real reason, issue #171).
 
 The practical difference is the failure mode for a stream that never sends a
 `finish_reason` at all: it is now a truncation (`TruncatedStreamError`,
@@ -52,6 +54,10 @@ relies on usage-as-terminal; OpenAI and Command Code both send `finish_reason`.
   call now completes once, when its accumulated arguments parse, or fails the
   turn with the rest of it — `tests/stream.test.ts` pins both the tool-call
   lifecycle and the reasoning one.
+- An empty `tool_calls: []` array on a content chunk is not a boundary either: a
+  call fragment carries a non-empty array, and closing the open reasoning/text
+  parts on the empty one split them once per chunk exactly as the usage terminal
+  did — `tests/stream.test.ts` pins it alongside the pre-finish usage-only chunk.
 - Cost reporting is unchanged: the terminal chunk that ends a GLM-5.3 turn
   carries usage itself, and `MissingUsageError` still fails a finish synthesized
   from a `finish_reason` whose usage never arrived (issue #171).

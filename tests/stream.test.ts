@@ -768,6 +768,94 @@ run([
   ],
 
   [
+    "createOpenAIStreamParser ignores an empty tool_calls array on content chunks (GLM-5.3)",
+    () => {
+      // Command Code's GLM-5.3 attaches `tool_calls: []` to every content
+      // chunk. An empty array is not a tool call, but treating it as one closed
+      // the open reasoning part at every chunk — the same one-word-per-line
+      // symptom as the usage terminal.
+      const parser = createOpenAIStreamParser()
+      const chunkId = "gen_glm53_empty_tools"
+      const chunks = [
+        {
+          id: chunkId,
+          choices: [{ delta: { reasoning_content: "The", tool_calls: [] }, finish_reason: null }],
+        },
+        {
+          id: chunkId,
+          choices: [{ delta: { reasoning_content: " user", tool_calls: [] }, finish_reason: null }],
+        },
+        {
+          id: chunkId,
+          choices: [{ delta: { reasoning_content: " asked." }, finish_reason: null }],
+        },
+        {
+          id: chunkId,
+          choices: [{ delta: { content: "ok" }, finish_reason: "stop" }],
+          usage: { prompt_tokens: 17, completion_tokens: 4, total_tokens: 21 },
+        },
+      ]
+      const parts = chunks.flatMap((c) => parser(c))
+      assertEqual(parts.filter((p) => p.type === "reasoning-start").length, 1)
+      assertEqual(parts.filter((p) => p.type === "reasoning-end").length, 1)
+      assertEqual(parts.filter((p) => p.type === "text-start").length, 1)
+      assertEqual(parts.filter((p) => p.type === "text-end").length, 1)
+      assertEqual(
+        parts
+          .filter((p) => p.type === "reasoning-delta")
+          .map((p) => (p as { delta: string }).delta)
+          .join(""),
+        "The user asked.",
+      )
+    },
+  ],
+
+  [
+    "createOpenAIStreamParser keeps one reasoning block when usage-only chunks precede the finish (GLM-5.3)",
+    () => {
+      // Some per-event-usage wires send a usage-only chunk (`choices: []`)
+      // between content chunks, not only after a finish_reason. A usage-only
+      // chunk before any finish_reason is a running report, not the terminal.
+      const parser = createOpenAIStreamParser()
+      const chunkId = "gen_glm53_usage_only"
+      const usage = (completion: number) => ({
+        prompt_tokens: 17,
+        completion_tokens: completion,
+        total_tokens: 17 + completion,
+      })
+      const chunks = [
+        { id: chunkId, choices: [], usage: usage(0) },
+        {
+          id: chunkId,
+          choices: [{ delta: { reasoning_content: "The" }, finish_reason: null }],
+          usage: usage(1),
+        },
+        { id: chunkId, choices: [], usage: usage(1) },
+        {
+          id: chunkId,
+          choices: [{ delta: { reasoning_content: " user" }, finish_reason: null }],
+          usage: usage(2),
+        },
+        {
+          id: chunkId,
+          choices: [{ delta: { content: "ok" }, finish_reason: "stop" }],
+          usage: usage(3),
+        },
+      ]
+      const parts = chunks.flatMap((c) => parser(c))
+      assertEqual(parts.filter((p) => p.type === "reasoning-start").length, 1)
+      assertEqual(parts.filter((p) => p.type === "reasoning-end").length, 1)
+      assertEqual(
+        parts
+          .filter((p) => p.type === "reasoning-delta")
+          .map((p) => (p as { delta: string }).delta)
+          .join(""),
+        "The user",
+      )
+    },
+  ],
+
+  [
     "createOpenAIStreamParser keeps a fragmented tool call whole when every chunk carries usage (GLM-5.3)",
     () => {
       // The same per-chunk usage that split reasoning parts also corrupted tool

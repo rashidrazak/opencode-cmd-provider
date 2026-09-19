@@ -838,7 +838,12 @@ export function createOpenAIStreamParser(): StreamEventParser {
       }
 
       const toolCalls = delta.tool_calls ?? delta.toolCalls
-      if (Array.isArray(toolCalls)) {
+      // An empty array is not a tool call: some OpenAI-dialect providers attach
+      // `tool_calls: []` to every content chunk (Command Code's GLM-5.3 does),
+      // and closing the open reasoning/text parts on the empty array split them
+      // once per chunk — the same one-word-per-line symptom as the usage
+      // terminal below.
+      if (Array.isArray(toolCalls) && toolCalls.length > 0) {
         if (reasoningStarted && !reasoningEnded) {
           parts.push(...closeReasoning())
         }
@@ -906,14 +911,11 @@ export function createOpenAIStreamParser(): StreamEventParser {
     // GLM-5.3 does (its Z.ai upstream reports usage per SSE event) — and
     // reading each one as the terminal closed and reopened the reasoning and
     // text parts once per token, which the Host renders one word per line. The
-    // dialect's only usage-only terminal is the chunk with no choices
-    // (OpenAI's trailing `choices: []` report); every other ending carries a
-    // finish_reason, which the sticky `lastFinishReason` keeps for a trailing
-    // usage-only chunk. Residual hole, unobserved on this wire: a usage-only
-    // chunk sent between content chunks still ends the turn here, because
-    // nothing distinguishes it from the trailing report.
+    // dialect's only usage-only terminal is the trailing `choices: []` report,
+    // and it counts as terminal only once a finish_reason has already been seen:
+    // a usage-only chunk before any finish_reason is a running report from a
+    // per-event-usage provider, not an ending.
     const choices = (event as Record<string, unknown>).choices
-    const usageOnlyTerminal = hasUsage && !(Array.isArray(choices) && choices.length > 0)
     const finishReasonRaw =
       stringValue(choice?.finish_reason) ??
       stringValue(choice?.finishReason) ??
@@ -921,6 +923,8 @@ export function createOpenAIStreamParser(): StreamEventParser {
       stringValue((event as Record<string, unknown>).finishReason)
     const finishReason = finishReasonRaw ? mapFinishReason(finishReasonRaw) : undefined
     if (finishReason) lastFinishReason = finishReason
+    const usageOnlyTerminal =
+      hasUsage && lastFinishReason !== undefined && !(Array.isArray(choices) && choices.length > 0)
     if (lastFinishReason || usageOnlyTerminal) {
       if (reasoningStarted && !reasoningEnded) {
         parts.push(...closeReasoning())
