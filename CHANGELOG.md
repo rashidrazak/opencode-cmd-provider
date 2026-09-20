@@ -1,3 +1,46 @@
+## 2.1.4 - 2026-09-20
+
+### Model catalog
+
+## Model catalog
+
+- **FACTS_LAST_REFRESHED**: `2026-09-18` → `2026-09-20`
+
+| Model                      | Change  | Before                    | After                     |
+| -------------------------- | ------- | ------------------------- | ------------------------- |
+| `meituan/LongCat-2.0`      | added   | —                         | LongCat 2.0 · 1050000 ctx |
+| `meituan/LongCat-2.0:free` | removed | LongCat 2.0 · 1050000 ctx | —                         |
+
+### Removed models (1)
+
+- `meituan/LongCat-2.0:free`: LongCat 2.0 · 1050000 ctx — package row removed, pruned from the Snapshot
+
+### API divergence
+
+- `gpt-6-astra`: in package membership but not served by the listing API
+
+### Reasoning classification
+
+## Reasoning classification
+
+- **CLASSIFICATION_LAST_REFRESHED**: `2026-09-18` → `2026-09-20`
+
+| Model                      | Change  | Before                    | After                     |
+| -------------------------- | ------- | ------------------------- | ------------------------- |
+| `meituan/LongCat-2.0`      | new     | —                         | reasoning-without-efforts |
+| `meituan/LongCat-2.0:free` | retired | reasoning-without-efforts | —                         |
+
+### Deals intelligence
+
+## Deals intelligence
+
+- **DEAL_LAST_REFRESHED**: `2026-09-18` → `2026-09-20`
+
+| Model                      | Change  | Before            | After      |
+| -------------------------- | ------- | ----------------- | ---------- |
+| `meituan/LongCat-2.0`      | added   | —                 | opensource |
+| `meituan/LongCat-2.0:free` | removed | opensource (free) | —          |
+
 ## 2.1.3 - 2026-09-18
 
 **Highlight — `cmd_plan_summary` answers for the account you actually stream
