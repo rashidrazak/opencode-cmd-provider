@@ -398,6 +398,10 @@ function provideRscSlugRecords() {
 // Cache state: `undefined` = not attempted, `null` = attempt failed
 // (degrade, retry allowed), else the resolved Map.
 let pageCache
+// The slugs the models page carried, when it was fetched — `null` means "no
+// page evidence", which keeps the page-relative pin classes "not evaluated"
+// rather than falsely clean. Set alongside `pageCache`.
+let pageSlugs = null
 async function provideModelsPage() {
   if (pageCache) return pageCache
   const { parseModelsPage, slugToSnapshotId } = await import("./parse-models-page.mjs")
@@ -410,17 +414,22 @@ async function provideModelsPage() {
   // A parse failure here is a shape change — loud, never a silent degrade.
   const { rows: parsedRows, notes } = parseModelsPage(html)
   for (const note of notes) console.log(`refresh-snapshot: ${note}`)
+  pageSlugs = parsedRows.map((row) => row.slug)
   const byId = new Map()
   for (const row of parsedRows) {
     let id
     try {
       id = slugToSnapshotId(row.slug)
-    } catch (error) {
-      // A slug the pinned map doesn't know is a shape change — loud,
-      // never silently dropped (the enum in parse-models-page is TOTAL).
-      fail(
-        `models page slug "${row.slug}" does not resolve to a snapshot id: ${error instanceof Error ? error.message : String(error)}`,
-      )
+    } catch {
+      // A slug the pinned map doesn't know is *pin drift*, not a shape
+      // change: upstream is ahead of the pin, and the page is enrichment —
+      // never membership, never a gate (issue #132). Skipping the row costs
+      // that model its models-page rung and nothing else; the drift is
+      // reported with the other pin classes below, and the ladder carries
+      // on. (This used to `fail()` here, which aborted the whole refresh —
+      // the cost ladder would have died on the first docs-ahead slug the
+      // day any models.md row lost its price cell.)
+      continue
     }
     byId.set(id, row)
   }
@@ -667,6 +676,35 @@ if (apiIds !== null) {
   }
   if (inPackageNotApi.length === 0 && inApiNotPackage.length === 0) {
     console.log("refresh-snapshot: divergence note — listing API matches package membership")
+  }
+}
+
+// Pinned-slug-map drift (spec #108 pending report, issue #132 contract).
+// The map mirrors two upstream-owned facts — the models-page slug and the
+// Snapshot id — so upstream can rename either out from under it (the
+// 2026-09-19/20 cron failure: `meituan/LongCat-2.0:free` →
+// `meituan/LongCat-2.0`, slug `longcat-2-0-free` → `longcat-2-0`). Reported
+// as pending pins for the refresh-PR body; never a failure, never silent.
+{
+  const { slugMapPinReport } = await import("./parse-models-page.mjs")
+  const pins = slugMapPinReport({
+    snapshotIds: [...packageIds],
+    pageSlugs: pageSlugs ?? undefined,
+  })
+  for (const { slug, id } of pins.stale ?? []) {
+    console.log(
+      `refresh-snapshot: slug map pending — value ${slug} → ${id}: pinned id is not in the Snapshot (re-pin the map)`,
+    )
+  }
+  for (const slug of pins.dangling ?? []) {
+    console.log(
+      `refresh-snapshot: slug map pending — key ${slug}: pinned key has no live models-page row (prune or re-pin)`,
+    )
+  }
+  for (const slug of pins.unmapped ?? []) {
+    console.log(
+      `refresh-snapshot: slug map pending — key ${slug}: models-page slug not in the pinned map (docs-ahead; page evidence skipped)`,
+    )
   }
 }
 

@@ -243,6 +243,69 @@ run([
   ],
 
   [
+    "skew: a docs-ahead models-page slug is a pending pin, never a refresh abort (spec #108)",
+    async () => {
+      // The pinned SLUG_TO_SNAPSHOT_ID map mirrors two upstream-owned facts
+      // (the page slug and the Snapshot id), so upstream can move either out
+      // from under it. A page row the map does not know yet is *pin drift*,
+      // not a shape change: the page is enrichment — never membership, never
+      // a gate (issue #132) — so the refresh must still complete and report
+      // the drift as a pending pin. It used to `fail()` on the first
+      // unpinned slug, which aborted the entire refresh the moment any
+      // models.md row needed the cost ladder (the 2026-09-19/20 cron class:
+      // the live page carried five unpinned slugs).
+      const MODEL = "gpt-5.4"
+      const modelsPage =
+        `<table><thead><tr><th>Model</th><th>Context</th><th>Intelligence</th><th>Tok/s</th><th>Input</th><th>Output</th><th>Cache read</th><th>Cache write</th><th>Caps</th></tr></thead><tbody>` +
+        `<tr><td><a href="/models/gpt-5-4">GPT-5.4</a></td><td><span>1M</span></td><td>52</td><td>—</td><td><span>$7</span></td><td><span>$14</span></td><td><span>$0.7</span></td><td><span>—</span></td><td><button type="button" aria-label="Capabilities: Text input"></button></td></tr>` +
+        `<tr><td><a href="/models/brand-new-model">Brand New Model</a></td><td><span>1M</span></td><td>60</td><td>—</td><td><span>$1</span></td><td><span>$2</span></td><td><span>$0.1</span></td><td><span>—</span></td><td><button type="button" aria-label="Capabilities: Text input, Reasoning"></button></td></tr>` +
+        `</tbody></table>`
+      const dir = await mkdtemp(join(tmpdir(), "cc-ladders-pin-"))
+      const out = join(dir, "snapshot.ts")
+      const factsOut = join(dir, "facts.ts")
+      const mock = await startMockCc({
+        models: API_UNLISTED,
+        registry: REGISTRY,
+        factsMd: MODELS_MD([`| \`${MODEL}\` | GPT-5.4 | 1M | — | — | Go | best |`]),
+        modalitiesBundle: `const models = { U: { id: "vendor/unrelated", name: "U", inputModalities: ["text"], contextWindow: 1e6 } }`,
+        rscGoat: "",
+        rscPro: "",
+        modelsPageHtml: modelsPage,
+      })
+      const env = {
+        ...process.env,
+        COMMANDCODE_API_BASE: mock.url,
+        COMMANDCODE_REGISTRY_URL: `${mock.url}/registry`,
+        COMMANDCODE_FACTS_URL: `${mock.url}/models.md`,
+        COMMANDCODE_MODALITIES_URL: `${mock.url}/cli.mjs`,
+        COMMANDCODE_RSC_GOAT_URL: `${mock.url}/docs/plans/goat`,
+        COMMANDCODE_RSC_PRO_URL: `${mock.url}/docs/plans/pro`,
+        COMMANDCODE_MODELS_PAGE_URL: `${mock.url}/models-page.html`,
+        COMMANDCODE_MODELS_DETAIL_URL: `${mock.url}/model-detail`,
+      }
+      try {
+        const result = await runScript(
+          ["scripts/refresh-snapshot.mjs", "--out", out, "--facts-out", factsOut],
+          env,
+        )
+        assertEqual(result.status, 0, result.stderr || result.stdout)
+        // The pinned row still resolved through the page rung…
+        const mod = (await import(out)) as { MODEL_SNAPSHOT?: Array<Record<string, unknown>> }
+        const row = (mod.MODEL_SNAPSHOT ?? []).find((r) => r.id === MODEL)
+        assertEqual(row?.costSource, "models-page")
+        // …and the docs-ahead slug is a visible pending pin, never silence.
+        assert(
+          result.stdout.includes("slug map pending — key brand-new-model"),
+          `expected a pending pin note naming the docs-ahead slug, got stdout: ${result.stdout}`,
+        )
+      } finally {
+        await mock.close()
+        await rm(dir, { recursive: true, force: true })
+      }
+    },
+  ],
+
+  [
     "skew: explicit all-zero stays free (picker suffix and sidebar agreement), missing never reads as free",
     async () => {
       const FREE = "vendor/free-model"

@@ -45,7 +45,7 @@ function sortedUnique(ids) {
  *     `models-page:` lines `refresh-snapshot` echoes with its own prefix).
  *
  * @param {string} logText
- * @returns {{ inMembershipNotApi: string[], inApiNotMembership: string[], skipped: boolean, matched: boolean, known: boolean, pendingModalities: string[], bandedNotes: string[] }}
+ * @returns {{ inMembershipNotApi: string[], inApiNotMembership: string[], skipped: boolean, matched: boolean, known: boolean, pendingModalities: string[], bandedNotes: string[], slugMapStalePins: Array<{slug: string, id: string}>, slugMapDanglingKeys: string[], slugMapUnmappedKeys: string[] }}
  *   `known` is true when the log carried any divergence signal (either
  *   direction, the matches line, or the skipped line) — only then does the
  *   renderer claim anything about the API.
@@ -59,6 +59,9 @@ export function parseRefreshLog(logText) {
     matched: false,
     pendingModalities: [],
     bandedNotes: [],
+    slugMapStalePins: [],
+    slugMapDanglingKeys: [],
+    slugMapUnmappedKeys: [],
   }
   const splitIds = (list) =>
     String(list ?? "")
@@ -104,11 +107,51 @@ export function parseRefreshLog(logText) {
     match = line.match(/models-page:\s*(.+?)\s*$/)
     if (match) {
       out.bandedNotes.push(`models-page: ${match[1].trim()}`)
+      continue
+    }
+    // Pinned-slug-map drift — three shapes, all a *pending* report (spec
+    // #108: upstream value moves land as refresh-PR diffs, never as red
+    // tests; the 2026-09-19/20 cron went red on exactly this).
+    //
+    // A map *value* the Snapshot no longer carries: upstream renamed the
+    // model id ("refresh-snapshot: slug map pending — value <slug> → <id>:
+    // pinned id is not in the Snapshot (re-pin the map)"). The id is greedy
+    // up to the ": pinned id" suffix: a Snapshot id may itself carry a colon
+    // (`meituan/LongCat-2.0:free` is exactly the shape that reddened the
+    // cron), so a lazy `(\S+?):` would truncate it.
+    match = line.match(/slug map pending — value (\S+) → (.+?): pinned id is not in the Snapshot/)
+    if (match) {
+      out.slugMapStalePins.push({ slug: match[1], id: match[2] })
+      continue
+    }
+    // A map *key* with no live models-page row: upstream renamed the slug.
+    match = line.match(/slug map pending — key (\S+): pinned key has no live/)
+    if (match) {
+      out.slugMapDanglingKeys.push(match[1])
+      continue
+    }
+    // A live models-page slug the map does not carry yet (docs-ahead skew):
+    // logged per slug by `refresh-snapshot`, and as the aggregate prose line
+    // by `refresh-classification` ("… slug(s) not in the pinned slug-to-id
+    // map (docs-ahead; page evidence skipped for them): a, b, c").
+    match = line.match(/slug map pending — key (\S+): models-page slug not in the pinned map/)
+    if (match) {
+      out.slugMapUnmappedKeys.push(match[1])
+      continue
+    }
+    match = line.match(/not in the pinned slug-to-id map[^:]*:\s*(.+)$/)
+    if (match) {
+      out.slugMapUnmappedKeys.push(...splitIds(match[1]))
     }
   }
   out.inMembershipNotApi = sortedUnique(out.inMembershipNotApi)
   out.inApiNotMembership = sortedUnique(out.inApiNotMembership)
   out.pendingModalities = sortedUnique(out.pendingModalities)
+  out.slugMapDanglingKeys = sortedUnique(out.slugMapDanglingKeys)
+  out.slugMapUnmappedKeys = sortedUnique(out.slugMapUnmappedKeys)
+  out.slugMapStalePins = [
+    ...new Map(out.slugMapStalePins.map((pin) => [`${pin.slug}\u0000${pin.id}`, pin])).values(),
+  ].sort((a, b) => a.slug.localeCompare(b.slug))
   out.bandedNotes = [...new Set(out.bandedNotes)].sort((a, b) => a.localeCompare(b))
   out.known =
     out.matched ||
@@ -137,7 +180,7 @@ function snapshotRowsOf(value) {
  * refresh log text.
  *
  * @param {{ snapshotAfter?: unknown, classificationAfter?: unknown, dealsAfter?: unknown, refreshLogText?: string }} args
- * @returns {{ pendingClassification: string[], pendingDeals: string[], pendingModalities: string[], carriedForward: Array<{id: string, contextLength: number}>, costFallbacks: Array<{id: string, source: string}>, apiDivergence: { inMembershipNotApi: string[], inApiNotMembership: string[], skipped: boolean } | null, bandedNotes: string[] }}
+ * @returns {{ pendingClassification: string[], pendingDeals: string[], pendingModalities: string[], carriedForward: Array<{id: string, contextLength: number}>, costFallbacks: Array<{id: string, source: string}>, apiDivergence: { inMembershipNotApi: string[], inApiNotMembership: string[], skipped: boolean } | null, bandedNotes: string[], slugMapPins: { stale: Array<{slug: string, id: string}>, danglingKeys: string[], unmappedKeys: string[] } }}
  *   `apiDivergence` is null when the log carried no divergence signal —
  *   the renderer then omits the section instead of claiming a match.
  */
@@ -193,6 +236,16 @@ export function buildEnrichment({
         }
       : null,
     bandedNotes: log.bandedNotes,
+    // Pinned-slug-map drift (spec #108 pending report). Kept as one object so
+    // the renderer can omit the section wholesale when nothing drifted, and
+    // report "not evaluated" (null) vs "clean" (empty array) per class: the
+    // value class is membership-relative (always evaluated), the two key
+    // classes need page evidence, which only some refreshes fetch.
+    slugMapPins: {
+      stale: log.slugMapStalePins,
+      danglingKeys: log.slugMapDanglingKeys,
+      unmappedKeys: log.slugMapUnmappedKeys,
+    },
   }
 }
 
