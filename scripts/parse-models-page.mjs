@@ -278,7 +278,7 @@ export const SLUG_TO_SNAPSHOT_ID = {
   "kimi-k2-7-code-highspeed": "moonshotai/Kimi-K2.7-Code-Highspeed",
   "kimi-k3": "moonshotai/Kimi-K3",
   "laguna-s-2-1-free": "poolside/laguna-s-2.1-free",
-  "longcat-2-0-free": "meituan/LongCat-2.0:free",
+  "longcat-2-0": "meituan/LongCat-2.0",
   "mimo-v2-5": "xiaomi/mimo-v2.5",
   "mimo-v2-5-pro": "xiaomi/mimo-v2.5-pro",
   "minimax-m2-5": "MiniMaxAI/MiniMax-M2.5",

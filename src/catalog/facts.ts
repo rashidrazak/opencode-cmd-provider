@@ -6,10 +6,10 @@
 // parse from the CLI bundle (dist/cli.mjs). Regenerate with
 // `npm run refresh:snapshot`.
 
-export const FACTS_SOURCE_URL = "https://unpkg.com/command-code@1.56.2/dist/bundled/command-code-knowledge/reference/models.md"
-export const MODALITIES_SOURCE_URL = "https://unpkg.com/command-code@1.56.2/dist/cli.mjs"
-export const FACTS_PACKAGE_VERSION = "1.56.2"
-export const FACTS_LAST_REFRESHED = "2026-09-18"
+export const FACTS_SOURCE_URL = "https://unpkg.com/command-code@1.58.1/dist/bundled/command-code-knowledge/reference/models.md"
+export const MODALITIES_SOURCE_URL = "https://unpkg.com/command-code@1.58.1/dist/cli.mjs"
+export const FACTS_PACKAGE_VERSION = "1.58.1"
+export const FACTS_LAST_REFRESHED = "2026-09-20"
 
 export const MODEL_EFFORTS: Readonly<Record<string, readonly string[]>> = {
   "deepseek/deepseek-v4-pro": ["high","max"],
@@ -95,7 +95,7 @@ export const MODEL_COSTS: Readonly<
   "Qwen/Qwen3.7-Flash": { input: 0.03, output: 0.13, cacheRead: 0.006, cacheWrite: 0.038 },
   "Qwen/Qwen3.6-Max-Preview": { input: 1.3, output: 7.8, cacheRead: 0.26, cacheWrite: 1.63 },
   "Qwen/Qwen3.6-Plus": { input: 0.5, output: 3, cacheRead: 0.1, cacheWrite: 0 },
-  "meituan/LongCat-2.0:free": { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+  "meituan/LongCat-2.0": { input: 0.3, output: 1.2, cacheRead: 0.006, cacheWrite: 0 },
   "stepfun/Step-3.7-Flash": { input: 0.2, output: 1.15, cacheRead: 0.04, cacheWrite: 0 },
   "stepfun/Step-3.5-Flash": { input: 0.1, output: 0.3, cacheRead: 0.02, cacheWrite: 0 },
   "tencent/hy3-paid": { input: 0.14, output: 0.58, cacheRead: 0.035, cacheWrite: 0 },
