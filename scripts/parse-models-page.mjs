@@ -219,21 +219,30 @@ export function parseModelsPage(html) {
  * `qwen3-8-max-0902`) that don't match the Snapshot's vendor-prefixed or
  * date-suffixed ids (`meta/muse-spark-1.3`, `z-ai/glm-5.3-flash`,
  * `Qwen/Qwen3.8-Max-0902`). Keys are the page slugs (verified against the
- * live page 2026-09-05); values are the Snapshot ids. Every slug is listed
- * — identity slugs (page form == Snapshot id) included — so the map is
- * TOTAL and an unmapped slug fails loudly: a new page slug needs an entry
- * here (a shape change, never a silent drop).
+ * live page 2026-09-05); values are the Snapshot ids. Every slug known at
+ * pin time is listed — identity slugs (page form == Snapshot id) included —
+ * so resolution never guesses: `slugToSnapshotId` throws on anything else.
+ *
+ * Both sides of an entry are upstream-owned, so upstream can move either one
+ * out from under the pin — and drift is a *pending report*, never a silent
+ * drop **and never a red suite** (spec #108): `slugMapPinReport` classifies
+ * a stale value, a dangling key, and a docs-ahead slug for the refresh log
+ * and the refresh-PR body. Callers decide what a throw means, and both
+ * refresh scripts treat it as drift (`refresh-snapshot` skips the row,
+ * `refresh-classification` reports it pending); the 2026-09-19/20
+ * catalog-refresh cron died asserting a stale value instead.
  *
  * Date-suffixed/vendor-prefixed examples handled here:
- *   - `claude-haiku-4-5` → `claude-haiku-4-5-20251001` (date suffix);
- *   - `qwen3-8-max-0902` → `Qwen/Qwen3.8-Max-0902` (vendor prefix + date);
- *   - `tencent-hy3`      → `tencent/hy3-paid` (vendor prefix + paid);
- *   - `longcat-2-0-free` → `meituan/LongCat-2.0:free` (vendor + free suffix);
- *   - `minimax-m3`       → `MiniMaxAI/MiniMax-M3` (vendor prefix).
+ *   - `claude-haiku-4-5`  → `claude-haiku-4-5-20251001` (date suffix);
+ *   - `qwen3-8-max-0902`  → `Qwen/Qwen3.8-Max-0902` (vendor prefix + date);
+ *   - `tencent-hy3`       → `tencent/hy3-paid` (vendor prefix + paid);
+ *   - `laguna-s-2-1-free` → `poolside/laguna-s-2.1-free` (vendor + free suffix);
+ *   - `minimax-m3`        → `MiniMaxAI/MiniMax-M3` (vendor prefix).
  */
 export const SLUG_TO_SNAPSHOT_ID = {
   // Identity slugs (the page slug already equals the Snapshot id). Listed
-  // explicitly so the map is TOTAL: an unmapped slug always fails loudly.
+  // explicitly so the map is TOTAL over the pinned set — an unpinned slug is
+  // pin drift for `slugMapPinReport` to report, not a silent drop.
   "gpt-6-astra": "gpt-6-astra",
   "claude-fable-5-1": "claude-fable-5-1",
   "claude-fable-5": "claude-fable-5",
@@ -305,10 +314,13 @@ export const SLUG_TO_SNAPSHOT_ID = {
 }
 
 /**
- * Resolves a models-page slug to a Snapshot id. The map is TOTAL (every
- * known slug, identity and vendor-prefixed alike, has an entry), so an
- * unmapped slug fails loudly — a new models-page slug is a shape change
- * that needs a map entry, never a silent drop.
+ * Resolves a models-page slug to a Snapshot id, or throws. The map is TOTAL
+ * over the pinned set (every slug known at pin time, identity and
+ * vendor-prefixed alike, has an entry), so this is an exact join — never a
+ * guess, never a silent drop. An unmapped slug is *pin drift* (the page is
+ * ahead of the pin), which the caller reports as pending
+ * (`refresh-classification` skips it, `refresh-snapshot` skips the row);
+ * `slugMapPinReport` is the classifier for all three drift shapes.
  *
  * @param {string} slug
  * @returns {string} the Snapshot id
@@ -321,8 +333,62 @@ export function slugToSnapshotId(slug) {
     return SLUG_TO_SNAPSHOT_ID[slug]
   }
   throw new Error(
-    `could not resolve models-page slug "${String(slug)}": unmapped (add a SLUG_TO_SNAPSHOT_ID entry or pin the shape)`,
+    `could not resolve models-page slug "${String(slug)}": unmapped (docs-ahead pin drift — add a SLUG_TO_SNAPSHOT_ID entry)`,
   )
+}
+
+/**
+ * Pin-drift report for `SLUG_TO_SNAPSHOT_ID`. The pinned map mirrors two
+ * upstream-owned facts — the models-page slug and the Snapshot id — so
+ * upstream can move either one out from under it. All three drift classes
+ * are **pending reports, never loud failures** (spec #108): the cause is a
+ * value change, and a value change must land as a refresh-PR diff, never
+ * as a red suite. The 2026-09-19/20 catalog-refresh cron went red exactly
+ * because a pinned *value* (`meituan/LongCat-2.0:free`) was asserted
+ * against live membership after upstream renamed the id.
+ *
+ *  - `stale`: a map value that is no longer a Snapshot id. Needs the
+ *    membership side (`snapshotIds`).
+ *  - `dangling`: a map key no live models-page row carries any more while
+ *    its pinned id is still shipped — the model lives, the page slug
+ *    moved, so the key needs re-pinning. Needs both sides.
+ *  - `unmapped`: a live models-page slug the map does not carry yet
+ *    (docs-ahead skew). Needs page evidence (`pageSlugs`).
+ *
+ * A side whose evidence was not supplied reports `null` — "not evaluated",
+ * never "clean" — so a caller that skipped the page fetch cannot claim the
+ * page-relative classes are empty. `dangling` is restricted to live pins
+ * on purpose: a pin whose model also left membership is already `stale`,
+ * and a page that renders few rows must not flood the report with every
+ * key it happens not to carry.
+ *
+ * Pure: no I/O, no side effects.
+ *
+ * @param {{ snapshotIds?: readonly string[], pageSlugs?: readonly string[] }} [evidence]
+ * @returns {{ stale: Array<{slug: string, id: string}> | null, dangling: string[] | null, unmapped: string[] | null }}
+ */
+export function slugMapPinReport({ snapshotIds, pageSlugs } = {}) {
+  const haveSnapshot = Array.isArray(snapshotIds)
+  const havePage = Array.isArray(pageSlugs)
+  const stale = haveSnapshot
+    ? Object.entries(SLUG_TO_SNAPSHOT_ID)
+        .filter(([, id]) => !snapshotIds.includes(id))
+        .map(([slug, id]) => ({ slug, id }))
+        .sort((a, b) => a.slug.localeCompare(b.slug))
+    : null
+  if (!havePage) return { stale, dangling: null, unmapped: null }
+  const live = new Set(pageSlugs)
+  const dangling =
+    haveSnapshot === false
+      ? null
+      : Object.entries(SLUG_TO_SNAPSHOT_ID)
+          .filter(([slug, id]) => !live.has(slug) && snapshotIds.includes(id))
+          .map(([slug]) => slug)
+          .sort((a, b) => a.localeCompare(b))
+  const unmapped = [...live]
+    .filter((slug) => !Object.prototype.hasOwnProperty.call(SLUG_TO_SNAPSHOT_ID, slug))
+    .sort((a, b) => a.localeCompare(b))
+  return { stale, dangling, unmapped }
 }
 
 // ---------------------------------------------------------------------------

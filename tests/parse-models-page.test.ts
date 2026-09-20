@@ -7,6 +7,7 @@ import {
   parseModelsPage,
   parseRateCell,
   SLUG_TO_SNAPSHOT_ID,
+  slugMapPinReport,
   slugToSnapshotId,
 } from "../scripts/parse-models-page.mjs"
 import { readFile } from "node:fs/promises"
@@ -178,17 +179,90 @@ run([
   ],
 
   [
-    "the pinned slug map is bijective with the live Snapshot ids (identity + mapped), and every entry round-trips",
+    "the pinned slug map round-trips every entry, and a pin upstream moved away from is a pending report, never a red test",
     async () => {
       // Structural, not a count pin: every map value must be a real
       // Snapshot id and every Snapshot id must have a slug entry (a new
       // upstream model shows up as a fresh pair, never as a red count).
+      //
+      // The round-trip half is a self-consistency pin — the map against its
+      // own resolver, which upstream cannot move — so it stays loud. The
+      // *membership* half is upstream-owned: when upstream renames a model
+      // id the pinned value goes stale, and spec #108 says a value move
+      // lands as a refresh-PR diff, never as a red suite. So a stale value
+      // is reported as a pending pin (the refresh log and PR body carry the
+      // same signal) instead of asserted. The 2026-09-19/20
+      // catalog-refresh cron went red asserting exactly this, after
+      // upstream renamed `meituan/LongCat-2.0:free` → `meituan/LongCat-2.0`
+      // and the refresh had already rewritten the Snapshot.
       const { MODEL_SNAPSHOT } = await import("../src/catalog/snapshot.js")
-      const snapshotIds = new Set(MODEL_SNAPSHOT.map((model) => model.id))
+      const snapshotIds = MODEL_SNAPSHOT.map((model) => model.id)
+      const { stale } = slugMapPinReport({ snapshotIds })
+      assert(stale !== null, "the membership side must be evaluated")
       for (const [slug, id] of Object.entries(SLUG_TO_SNAPSHOT_ID)) {
         assertEqual(slugToSnapshotId(slug), id, `${slug} must round-trip`)
-        assert(snapshotIds.has(id), `map value ${id} (for slug ${slug}) must be a Snapshot id`)
       }
+      for (const { slug, id } of stale) {
+        assertEqual(
+          SLUG_TO_SNAPSHOT_ID[slug],
+          id,
+          `the pending report must name ${slug}'s pinned value`,
+        )
+      }
+      if (stale.length > 0) {
+        console.log(
+          `parse-models-page: pinned slug map pending — ${stale
+            .map(({ slug, id }) => `${slug} → ${id} is not a Snapshot id`)
+            .join("; ")}`,
+        )
+      }
+    },
+  ],
+
+  [
+    "slugMapPinReport classifies stale values, dangling keys, and docs-ahead slugs — and never calls an unevaluated side clean",
+    () => {
+      // Derivation-style: expectations come from the pinned map itself, so
+      // nothing here re-types an upstream value (the pin gate's contract).
+      const entries = Object.entries(SLUG_TO_SNAPSHOT_ID)
+      const [slug, id] = entries[0]
+      // Membership side only: the page-relative classes are null ("not
+      // evaluated"), never empty — a caller that skipped the page fetch
+      // cannot claim the page is clean.
+      const valueOnly = slugMapPinReport({ snapshotIds: [] })
+      assert(valueOnly.stale !== null, "stale must be evaluated")
+      assert(
+        valueOnly.stale.some((pin) => pin.slug === slug && pin.id === id),
+        "every pin is stale when membership is empty",
+      )
+      assertEqual(valueOnly.stale.length, entries.length)
+      assertEqual(valueOnly.dangling, null, "dangling needs page evidence")
+      assertEqual(valueOnly.unmapped, null, "unmapped needs page evidence")
+      // A pin whose model still ships is not stale.
+      const clean = slugMapPinReport({ snapshotIds: entries.map(([, value]) => value) })
+      assertEqual(clean.stale, [], "no stale pins when membership carries every value")
+      // Page side: a live slug the map does not know is docs-ahead; a key no
+      // live row carries is dangling only while its model still ships. (A
+      // partial page therefore reports every key it did not carry — the live
+      // page mirrors the map ~1:1, so the real report stays short.)
+      const pageSlugs = [slug, "brand-new-model"]
+      const shippingValues = entries.map(([, value]) => value)
+      const both = slugMapPinReport({ snapshotIds: shippingValues, pageSlugs })
+      assertEqual(both.stale, [], `${slug} still ships, so nothing is stale`)
+      assertEqual(both.unmapped, ["brand-new-model"], "the docs-ahead slug must be reported")
+      assert(!both.dangling.includes(slug), `${slug} is live on the page — it cannot dangle`)
+      assertEqual(both.dangling.length, entries.length - 1, "every key off this page dangles")
+      // Drop the live row: the key dangles (its model still ships)…
+      const noRow = slugMapPinReport({ snapshotIds: [id], pageSlugs: ["brand-new-model"] })
+      assertEqual(noRow.dangling, [slug], "a pinned key with no live row must dangle")
+      // …but not once its model left membership too — that is the stale
+      // class, and reporting it twice would double the PR-body noise.
+      const modelGone = slugMapPinReport({ snapshotIds: [], pageSlugs: ["brand-new-model"] })
+      assertEqual(modelGone.dangling, [], "a pin whose model is gone is stale, not dangling")
+      assertEqual(modelGone.stale.length, entries.length)
+      // Sorted + unique, so the log lines and the PR body are deterministic.
+      const many = slugMapPinReport({ pageSlugs: ["zeta", "alpha", "zeta"] })
+      assertEqual(many.unmapped, ["alpha", "zeta"])
     },
   ],
 

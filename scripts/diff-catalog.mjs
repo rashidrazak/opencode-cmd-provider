@@ -83,7 +83,7 @@ import { readFile } from "node:fs/promises"
 
 /**
  * @typedef {Object} SnapshotEnrichment
- * The refresh-time input for the snapshot kind's six #134 sections. Built
+ * The refresh-time input for the snapshot kind's #134 sections. Built
  * by `scripts/build-enrichment.mjs` from the "after" extracts + refresh
  * log; every field is optional and every missing/empty field omits its
  * subsection. All lists are sorted for deterministic output.
@@ -94,6 +94,7 @@ import { readFile } from "node:fs/promises"
  * @property {Array<{id: string, source: string}>} [costFallbacks]  Rows whose costSource is not "models.md".
  * @property {{ inMembershipNotApi?: string[], inApiNotMembership?: string[], skipped?: boolean }} [apiDivergence]  The annotate-only divergence notes (both directions, or the skipped/matches state).
  * @property {string[]} [bandedNotes]            The models-page verification notes.
+ * @property {{ stale?: Array<{slug: string, id: string}>, danglingKeys?: string[], unmappedKeys?: string[] }} [slugMapPins]  Pinned slug-map drift (spec #108 pending report): stale map values, dangling map keys, and docs-ahead page slugs.
  */
 
 /**
@@ -533,7 +534,7 @@ function removedSectionLines(beforeIndex, afterIndex) {
  * refresh without captured enrichment stays backward compatible.
  *
  * @param {SnapshotEnrichment | undefined} enrichment
- * @returns {{ pendingClassification: string[], pendingDeals: string[], pendingModalities: string[], carriedForward: Array<{id: string, contextLength: number}>, costFallbacks: Array<{id: string, source: string}>, apiDivergence: { inMembershipNotApi: string[], inApiNotMembership: string[], skipped: boolean, known: boolean } | null, bandedNotes: string[] }}
+ * @returns {{ pendingClassification: string[], pendingDeals: string[], pendingModalities: string[], carriedForward: Array<{id: string, contextLength: number}>, costFallbacks: Array<{id: string, source: string}>, apiDivergence: { inMembershipNotApi: string[], inApiNotMembership: string[], skipped: boolean, known: boolean } | null, bandedNotes: string[], slugMapPins: { stale: Array<{slug: string, id: string}>, danglingKeys: string[], unmappedKeys: string[] } }}
  */
 function enrichmentOf(enrichment) {
   const sorted = (ids) =>
@@ -578,6 +579,23 @@ function enrichmentOf(enrichment) {
     bandedNotes: [...new Set(Array.isArray(rec.bandedNotes) ? rec.bandedNotes : [])].sort((a, b) =>
       a.localeCompare(b),
     ),
+    // Pinned-slug-map drift (spec #108 pending report). Each class is
+    // normalized independently; an absent class stays empty, and the
+    // renderer omits the section when all three are empty.
+    slugMapPins: {
+      stale: (Array.isArray(rec.slugMapPins?.stale) ? rec.slugMapPins.stale : [])
+        .filter(
+          (pin) =>
+            pin !== null &&
+            typeof pin === "object" &&
+            typeof pin.slug === "string" &&
+            typeof pin.id === "string",
+        )
+        .map((pin) => ({ slug: pin.slug, id: pin.id }))
+        .sort((a, b) => a.slug.localeCompare(b.slug)),
+      danglingKeys: sorted(rec.slugMapPins?.danglingKeys),
+      unmappedKeys: sorted(rec.slugMapPins?.unmappedKeys),
+    },
   }
 }
 
@@ -684,6 +702,37 @@ function bandedPricingSectionLines(bandedNotes) {
   const lines = [`### Banded pricing (${bandedNotes.length})`, ""]
   for (const note of bandedNotes) {
     lines.push(`- ${note}`)
+  }
+  lines.push("")
+  return lines
+}
+
+/**
+ * The "Pinned slug map" subsection (spec #108): the pinned
+ * `SLUG_TO_SNAPSHOT_ID` entries upstream has drifted away from. Pending
+ * reports, not failures — a renamed model id or page slug lands here so a
+ * reviewer can re-pin the map, instead of reddening the suite (the
+ * 2026-09-19/20 catalog-refresh cron died on the LongCat id rename).
+ *
+ * @param {{ stale: Array<{slug: string, id: string}>, danglingKeys: string[], unmappedKeys: string[] }} pins
+ * @returns {string[]}
+ */
+function slugMapPinsSectionLines(pins) {
+  const total = pins.stale.length + pins.danglingKeys.length + pins.unmappedKeys.length
+  if (total === 0) return []
+  const lines = [`### Pinned slug map (${total})`, ""]
+  for (const { slug, id } of pins.stale) {
+    lines.push(
+      `- \`${slug}\` → \`${id}\`: pinned id is not in the Snapshot (upstream renamed it; re-pin the map)`,
+    )
+  }
+  for (const slug of pins.danglingKeys) {
+    lines.push(`- \`${slug}\`: pinned key has no live models-page row (prune or re-pin)`)
+  }
+  for (const slug of pins.unmappedKeys) {
+    lines.push(
+      `- \`${slug}\`: models-page slug not in the pinned map (docs-ahead; page evidence skipped)`,
+    )
   }
   lines.push("")
   return lines
@@ -888,6 +937,7 @@ export function diffCatalogs(args) {
           ...costFallbackSectionLines(enrichment.costFallbacks),
           ...apiDivergenceSectionLines(enrichment.apiDivergence),
           ...bandedPricingSectionLines(enrichment.bandedNotes),
+          ...slugMapPinsSectionLines(enrichment.slugMapPins),
         ]
   const facts = {
     before: factsPayloadOf(args.beforeFacts ?? {}),
