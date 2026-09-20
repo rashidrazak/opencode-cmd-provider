@@ -160,7 +160,9 @@ surfaces in two places:
   legacy auth files when the Host resolves none
   ([ADR-0015](adr/0015-host-credential-for-tools.md)); pass the `plan` argument
   or set `COMMANDCODE_PLAN` (`go|goat|pro|max|max20|teampro|provider`) to skip the
-  lookup. It renders one provenance line under the plan header — the account the
+  lookup, and the header then reads `# Command Code plan: Go (pinned)` — a pin
+  never renders as a detected plan (issue #214). It renders one provenance line
+  under the plan header — the account the
   lookup answered for plus the credential rung (`Host connection`,
   `COMMANDCODE_API_KEY`, `legacy file ~/.commandcode/auth.json`, the pin) — so a
   lookup that fell through to another account's file is visible; the line carries
