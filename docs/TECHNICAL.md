@@ -302,9 +302,11 @@ providers — Command Code's GLM-5.3, via its Z.ai upstream — attach a cumulat
 usage object to every chunk, and reading each as the turn's end closed and
 reopened the reasoning and text parts once per token, so the Host stored one
 part per token and rendered the answer one word per line. Only a chunk with no
-choices (the dialect's trailing usage-only report) is terminal on usage alone; a
-chunk with choices ends the turn only through a `finish_reason`, which the held
-finish keeps for that trailing usage-only chunk (ADR-0018). A stream that never
+choices (the dialect's trailing usage-only report) is terminal on usage alone,
+and only once a `finish_reason` has already been seen — a usage-only chunk
+before any `finish_reason` is a running report, not an ending. A chunk with
+choices ends the turn only through a `finish_reason`, which the held finish
+keeps for that trailing usage-only chunk (ADR-0018). A stream that never
 reports a `finish_reason` is therefore a truncation, exactly like any other body
 that closes without a terminal.
 

@@ -915,7 +915,6 @@ export function createOpenAIStreamParser(): StreamEventParser {
     // and it counts as terminal only once a finish_reason has already been seen:
     // a usage-only chunk before any finish_reason is a running report from a
     // per-event-usage provider, not an ending.
-    const choices = (event as Record<string, unknown>).choices
     const finishReasonRaw =
       stringValue(choice?.finish_reason) ??
       stringValue(choice?.finishReason) ??
@@ -923,9 +922,7 @@ export function createOpenAIStreamParser(): StreamEventParser {
       stringValue((event as Record<string, unknown>).finishReason)
     const finishReason = finishReasonRaw ? mapFinishReason(finishReasonRaw) : undefined
     if (finishReason) lastFinishReason = finishReason
-    const usageOnlyTerminal =
-      hasUsage && lastFinishReason !== undefined && !(Array.isArray(choices) && choices.length > 0)
-    if (lastFinishReason || usageOnlyTerminal) {
+    if (lastFinishReason) {
       if (reasoningStarted && !reasoningEnded) {
         parts.push(...closeReasoning())
       }
