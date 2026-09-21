@@ -299,6 +299,19 @@ terminal — truncated by a proxy, or ended early by the server — raises
 Both failures surface as the `error` part; `doGenerate` fails the same way, off
 the same transport.
 
+On the OpenAI dialect a `usage` report is not by itself a terminal. Some
+providers — Command Code's GLM-5.3, via its Z.ai upstream — attach a cumulative
+usage object to every chunk, and reading each as the turn's end closed and
+reopened the reasoning and text parts once per token, so the Host stored one
+part per token and rendered the answer one word per line. Only a chunk with no
+choices (the dialect's trailing usage-only report) is terminal on usage alone,
+and only once a `finish_reason` has already been seen — a usage-only chunk
+before any `finish_reason` is a running report, not an ending. A chunk with
+choices ends the turn only through a `finish_reason`, which the held finish
+keeps for that trailing usage-only chunk (ADR-0018). A stream that never
+reports a `finish_reason` is therefore a truncation, exactly like any other body
+that closes without a terminal.
+
 A `pause_turn` is not an ending either. The provider stopped mid-turn and
 expects the request to continue it — Anthropic reports it as a
 `message_delta` stop_reason, the legacy codec in its `finish` event (upstream
@@ -538,3 +551,4 @@ Both e2e scripts are excluded from `npm test`.
 | [0015](adr/0015-host-credential-for-tools.md)                  | The plan summary uses the Host's resolved credential, not a legacy file   |
 | [0016](adr/0016-openai-dialect-reasoning-history.md)           | The OpenAI dialect replays assistant reasoning in history                 |
 | [0017](adr/0017-plan-summary-provenance-line.md)               | The plan summary renders the account and the credential rung              |
+| [0018](adr/0018-usage-is-not-a-terminal.md)                    | A usage report is not by itself a terminal on the OpenAI dialect          |
