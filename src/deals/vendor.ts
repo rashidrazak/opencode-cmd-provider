@@ -8,6 +8,7 @@ const VENDOR_FAMILIES: Readonly<Record<string, string>> = {
   "deepseek/": "deepseek",
   "Qwen/": "qwen",
   "moonshotai/": "kimi",
+  "z-ai/": "glm",
   "zai-org/": "glm",
   "MiniMaxAI/": "minimax",
   "xiaomi/": "mimo",
