@@ -66,7 +66,12 @@ Snapshot, and a snapshot model missing enrichment ships core-only with a
 visible pending note — never an exit-1. `refresh:deals` and
 `refresh:classification` log pending reports (`deals pending —`,
 `classification pending`) and exit 0. `--allow-partial` remains an accepted
-no-op. The shape gate stays: the RSC `reasoning` flag is required on
+no-op. The pinned models-page slug map (`SLUG_TO_SNAPSHOT_ID`) is drift, not
+a gate: a map value upstream has renamed away, a key with no live page row,
+or a page slug the map lacks (docs-ahead) is a `slug map pending —` report
+surfaced in the refresh log and the refresh-PR body, never an exit-1 — the
+2026-09-19/20 cron went red asserting a stale pinned id. The shape gate
+stays: the RSC `reasoning` flag is required on
 consumed slug records — upstream renaming or dropping it is a loud
 failure, never a silent default-to-non-reasoning (see ADR-0006). Only two
 loud failure classes survive anywhere: an unshippable ship-bar row after

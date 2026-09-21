@@ -2,11 +2,11 @@
 // sections + refresh enrichment subsections.
 //
 // A package-table row removal prunes the Snapshot immediately; the refresh
-// diff carries a loud removed-section plus five enrichment subsections
+// diff carries a loud removed-section plus six enrichment subsections
 // (pending enrichment per model, carried-forward context, cost-fallback
-// provenance, API divergence, banded-pricing notes). All six render
-// deterministically over synthetic data — never upstream's live ids —
-// through the pure `diffCatalogs` snapshot seam, fed by the pure
+// provenance, API divergence, banded-pricing notes, pinned slug-map drift).
+// All seven render deterministically over synthetic data — never upstream's
+// live ids — through the pure `diffCatalogs` snapshot seam, fed by the pure
 // `buildEnrichment` builder (synthetic extracts + refresh-log text).
 import { readFile } from "node:fs/promises"
 import { join } from "node:path"
@@ -58,6 +58,11 @@ const FULL_ENRICHMENT = {
   bandedNotes: [
     "models-page: Gamma — banded pricing (2 context price bands); base rate shipped, verify against RSC peak/off-peak and over-context fields",
   ],
+  slugMapPins: {
+    stale: [{ slug: "vendor-renewed-old", id: "vendor/renewed:free" }],
+    danglingKeys: ["vendor-dangling"],
+    unmappedKeys: ["vendor-docs-ahead"],
+  },
 }
 
 run([
@@ -90,7 +95,7 @@ run([
     },
   ],
   [
-    "snapshot: all six sections render deterministically over synthetic enrichment",
+    "snapshot: all seven sections render deterministically over synthetic enrichment",
     () => {
       const before = [
         { id: "vendor/keep", name: "Keep Model", contextLength: 1000000 },
@@ -126,7 +131,7 @@ run([
       const args = { kind: "snapshot", before, after, enrichment: FULL_ENRICHMENT }
       const md1 = diffCatalogs(args)
       const md2 = diffCatalogs(args)
-      assertEqual(md1, md2, "six-section output must be byte-stable across calls")
+      assertEqual(md1, md2, "seven-section output must be byte-stable across calls")
       // 1. Removed models (loud).
       assert(md1.includes("### Removed models (1)"), `missing removed-section, got: ${md1}`)
       assert(hasBullet(md1, "`vendor/retire`", "Retire Model"), `missing removed bullet: ${md1}`)
@@ -171,6 +176,20 @@ run([
         hasBullet(md1, "banded pricing", "verify against RSC"),
         `missing banded bullet: ${md1}`,
       )
+      // 7. Pinned slug map (spec #108 pending report): one bullet per class.
+      assert(md1.includes("### Pinned slug map (3)"), `missing slug-map section, got: ${md1}`)
+      assert(
+        hasBullet(md1, "`vendor-renewed-old`", "`vendor/renewed:free`", "re-pin the map"),
+        `missing stale-pin bullet: ${md1}`,
+      )
+      assert(
+        hasBullet(md1, "`vendor-dangling`", "no live models-page row"),
+        `missing dangling-key bullet: ${md1}`,
+      )
+      assert(
+        hasBullet(md1, "`vendor-docs-ahead`", "docs-ahead"),
+        `missing unmapped-slug bullet: ${md1}`,
+      )
       // Sorted: alpha before beta in the pending section.
       assert(
         md1.indexOf("`vendor/alpha`") < md1.indexOf("`vendor/beta`"),
@@ -192,6 +211,7 @@ run([
           carriedForward: [],
           costFallbacks: [],
           bandedNotes: [],
+          slugMapPins: { stale: [], danglingKeys: [], unmappedKeys: [] },
         },
       })
       const without = diffCatalogs({
@@ -207,6 +227,7 @@ run([
       assert(!withEmpty.includes("### Cost-fallback"), "no cost section when empty")
       assert(!withEmpty.includes("### API divergence"), "no divergence section when unknown")
       assert(!withEmpty.includes("### Banded pricing"), "no banded section when empty")
+      assert(!withEmpty.includes("### Pinned slug map"), "no slug-map section when nothing drifted")
     },
   ],
   [
@@ -298,10 +319,55 @@ run([
       assertEqual(empty.inMembershipNotApi, [])
       assertEqual(empty.bandedNotes, [])
       assertEqual(empty.pendingModalities, [])
+      assertEqual(empty.slugMapStalePins, [])
+      assertEqual(empty.slugMapDanglingKeys, [])
+      assertEqual(empty.slugMapUnmappedKeys, [])
     },
   ],
   [
-    "buildEnrichment: derives the six-section input from synthetic extracts + log",
+    "parseRefreshLog: pinned-slug-map drift parses from every log shape the refresh scripts emit",
+    () => {
+      // The three shapes: the membership-relative value, the page-relative
+      // dangling key, the docs-ahead per-slug line from refresh-snapshot,
+      // and refresh-classification's aggregate prose line for the same
+      // docs-ahead class (both scripts report it; dedupe keeps one entry).
+      const parsed = parseRefreshLog(
+        [
+          "refresh-snapshot: slug map pending — value longcat-2-0-free → meituan/LongCat-2.0:free: pinned id is not in the Snapshot (re-pin the map)",
+          "refresh-snapshot: slug map pending — key longcat-2-0-free: pinned key has no live models-page row (prune or re-pin)",
+          "refresh-snapshot: slug map pending — key longcat-2-0: models-page slug not in the pinned map (docs-ahead; page evidence skipped)",
+          "refresh-classification: note — models page lists 2 slug(s) not in the pinned slug-to-id map (docs-ahead; page evidence skipped for them): longcat-2-0, glm-5-3-flashx",
+          // Unrelated lines must not leak into the pin buckets.
+          "refresh-snapshot: modalities pending — vendor/beta: CLI omits and no Caps Vision evidence; text-only fallback",
+        ].join("\n"),
+      )
+      assertEqual(parsed.slugMapStalePins, [
+        { slug: "longcat-2-0-free", id: "meituan/LongCat-2.0:free" },
+      ])
+      assertEqual(parsed.slugMapDanglingKeys, ["longcat-2-0-free"])
+      assertEqual(parsed.slugMapUnmappedKeys, ["glm-5-3-flashx", "longcat-2-0"])
+      assertEqual(parsed.pendingModalities, ["vendor/beta"])
+    },
+  ],
+  [
+    "buildEnrichment: pinned-slug-map drift reaches the enrichment input, and an absent log stays empty",
+    () => {
+      const enrichment = buildEnrichment({
+        snapshotAfter: {
+          MODEL_SNAPSHOT: [{ id: "vendor/alpha", name: "Alpha", contextLength: 1 }],
+        },
+        refreshLogText:
+          "refresh-snapshot: slug map pending — value vendor-old → vendor/old:free: pinned id is not in the Snapshot (re-pin the map)",
+      })
+      assertEqual(enrichment.slugMapPins.stale, [{ slug: "vendor-old", id: "vendor/old:free" }])
+      assertEqual(enrichment.slugMapPins.danglingKeys, [])
+      assertEqual(enrichment.slugMapPins.unmappedKeys, [])
+      const fromNoLog = buildEnrichment({ snapshotAfter: { MODEL_SNAPSHOT: [] } })
+      assertEqual(fromNoLog.slugMapPins, { stale: [], danglingKeys: [], unmappedKeys: [] })
+    },
+  ],
+  [
+    "buildEnrichment: derives the seven-section input from synthetic extracts + log",
     () => {
       const enrichment = buildEnrichment({
         snapshotAfter: {
@@ -383,6 +449,7 @@ run([
       assertEqual(enrichment.carriedForward, [])
       assertEqual(enrichment.costFallbacks, [])
       assertEqual(enrichment.bandedNotes, [])
+      assertEqual(enrichment.slugMapPins, { stale: [], danglingKeys: [], unmappedKeys: [] })
       // No log signal → the divergence section is omitted, not "matches".
       assertEqual(enrichment.apiDivergence, null)
     },
@@ -463,7 +530,7 @@ run([
     },
   ],
   [
-    "snapshot: six-section output is Prettier-stable (format:check safety for release notes)",
+    "snapshot: seven-section output is Prettier-stable (format:check safety for release notes)",
     async () => {
       const { execFile } = await import("node:child_process")
       const { promisify } = await import("node:util")
