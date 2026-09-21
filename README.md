@@ -130,10 +130,13 @@ Code and the section disappears — there is nothing to show for other providers
 
 ### Plan and deal summaries
 
-Ask OpenCode something like _"How many requests does my Command Code plan cover
-this month?"_ and it uses the built-in `cmd_plan_summary` tool: your plan's
-allowances and the current deals, turned into an estimate. If you want to force
-a plan, add it to the question (for example `plan=pro`).
+Ask OpenCode something like _"Which Command Code plan am I on?"_ or _"How many
+requests does my Command Code plan cover this month?"_ and it uses the built-in
+`cmd_plan_summary` tool: the plan and account the current credential resolves
+to (or the plan you pinned), its allowances and the current deals, turned into
+an estimate. If you want to force a plan, add it to the question (for example
+`plan=pro`) — a plan pinned that way is marked `(pinned)` in the header, so it
+never reads as a plan that was detected.
 
 The summary always says where the credential came from — your OpenCode
 connection, `COMMANDCODE_API_KEY`, a legacy Command Code auth file, or the plan
