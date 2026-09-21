@@ -839,9 +839,10 @@ run([
           prompt: [{ role: "user", content: "hi" }],
           providerOptions: withEffort("minimal"),
         })
-        assert(
-          !("reasoning_effort" in (calls[2].body as { params: object }).params),
-          "unmapped level not sent on legacy",
+        assertEqual(
+          (calls[2].body as { params: { reasoning_effort?: unknown } }).params.reasoning_effort,
+          "low",
+          "minimal snaps to the nearest advertised level on legacy (ADR-0019)",
         )
       }
       await withEnvVars({ COMMANDCODE_PLAN: "goat" }, async () => {
@@ -875,7 +876,11 @@ run([
         const oaOff = calls.filter((c) => c.url.includes("chat/completions")).at(-1)!.body as {
           reasoning_effort?: unknown
         }
-        assert(!("reasoning_effort" in oaOff), "unmapped level not sent on OpenAI")
+        assertEqual(
+          oaOff.reasoning_effort,
+          "low",
+          "minimal snaps to the nearest advertised level on OpenAI (ADR-0019)",
+        )
         await collect(provider.languageModel("claude-sonnet-5"), {
           prompt: [{ role: "user", content: "hi" }],
           providerOptions: withEffort("off"),
