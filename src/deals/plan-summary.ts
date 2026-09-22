@@ -10,6 +10,11 @@
 // account is exactly the wrong answer that used to be invisible; the line makes
 // it legible, and it stays key-free (ADR-0015 rule 4).
 //
+// A pinned plan is marked in the header itself (issue #214). The header used to
+// be identical to a detected plan's, so an agent that arrived with a wrong
+// belief could have it confirmed back by its own pin; `(pinned)` says the plan
+// was named, not detected (ADR-0017 rule 3).
+//
 // Transport selection never calls this lookup: the provider transport honours
 // only an explicitly written plan pin, so no request is made merely to route
 // (see src/provider/command-code-model.ts). Rendering is a pure function so
@@ -274,6 +279,13 @@ function renderProvenance(provenance: PlanProvenance | undefined): string | unde
   return `Account: \`${provenance.account}\` — credential: ${label}`
 }
 
+/**
+ * One rendering for both hosts, and for every caller that pins a plan.
+ *
+ * A pinned plan's header carries `(pinned)`, and the marker comes from the
+ * provenance: callers that pin a plan pass pin provenance (the tool path
+ * always does), so a plan named by a pin cannot render as a detected one.
+ */
 export function renderPlanSummary(
   plan: PlanId | undefined,
   deals: Readonly<Record<string, ModelDeals>> = MODEL_DEALS,
@@ -281,7 +293,13 @@ export function renderPlanSummary(
   provenance?: PlanProvenance,
 ): string {
   const lines: string[] = []
-  lines.push(`# Command Code plan: ${plan ? PLAN_DISPLAY[plan] : "unknown"}`)
+  // Only a pin is marked: a detected plan and a provenance-free render keep the
+  // plain header, and "unknown" never takes the marker (a pin always names a
+  // plan, so the guard is belt-and-braces against a mis-paired caller).
+  const pinned = plan !== undefined && provenance?.source.kind === "pin"
+  lines.push(
+    `# Command Code plan: ${plan ? PLAN_DISPLAY[plan] : "unknown"}${pinned ? " (pinned)" : ""}`,
+  )
   const provenanceLine = renderProvenance(provenance)
   if (provenanceLine) lines.push(provenanceLine)
   if (plan === undefined) {
@@ -382,10 +400,18 @@ function estimateMonthlyRequests(modelId: string, allowance: number): number {
  * The tool's description and argument contract, shared verbatim by both hosts
  * so a v1 and a v2 session see the same tool (ADR-0010). v1 builds it with the
  * `tool()` zod helper, v2 with a plain JSON Schema.
+ *
+ * The description leads with the identity use (issue #214): tool catalogs
+ * truncate, and an agent asked "what plan are we on?" read the old lead-in
+ * ("credits, usage windows, per-model allowances") as a table tool and went
+ * looking in `auth.json` at an account the session was not even streaming
+ * with. The detection sentence stays, and the argument states what a pin
+ * short-circuits — a pin renders the plan it names, it does not find it.
  */
 export const PLAN_SUMMARY_DESCRIPTION =
-  "Show the Command Code plan's credits, usage windows, per-model monthly allowances (GOAT/Pro) or active deals (other plans), with estimated monthly request counts. The plan is detected from the account's billing subscription; pass the `plan` argument or set COMMANDCODE_PLAN (go|goat|pro|max|max20|teampro|provider) to pin it without network access. When no plan can be detected the summary says so instead of guessing."
-export const PLAN_SUMMARY_ARG_DESCRIPTION = "go|goat|pro|max|max20|teampro|provider"
+  "Use this to answer which plan and account the current credential is on; the provenance line names the source it resolved through. It shows that plan's credits, usage windows, per-model monthly allowances (GOAT/Pro) or active deals (other plans), with estimated monthly request counts. The plan is detected from the account's billing subscription; pass the `plan` argument or set COMMANDCODE_PLAN (go|goat|pro|max|max20|teampro|provider) only to pin a plan you already know — a pin skips detection and the credential lookup and its header reads `(pinned)`. When no plan can be detected the summary says so instead of guessing."
+export const PLAN_SUMMARY_ARG_DESCRIPTION =
+  "The plan to pin: go|goat|pro|max|max20|teampro|provider. A pin makes no network request: it skips plan detection and the credential lookup, renders the named plan marked `(pinned)`, and claims no account. An unrecognized value is not a pin — it falls back to detection. Use it to compare plans, not to discover the current one."
 
 /**
  * Credential seam for the tool path: `apiKey` and the Host getter below feed

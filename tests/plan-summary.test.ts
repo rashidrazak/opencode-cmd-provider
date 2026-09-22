@@ -10,6 +10,7 @@ import {
   planSummaryTool,
   planSummaryV2Tool,
   PLAN_SUMMARY_DESCRIPTION,
+  PLAN_SUMMARY_ARG_DESCRIPTION,
   type PlanSummaryOptions,
 } from "../src/deals/plan-summary.js"
 import { normalizePlan } from "../src/catalog/plans.js"
@@ -63,6 +64,19 @@ function withFetchStub(
   return p.finally(() => {
     globalThis.fetch = prev
   })
+}
+
+/**
+ * A fetch that counts calls and throws: a pinned summary must resolve without
+ * one, so any call is the failure the test is looking for (ADR-0011 §2).
+ */
+function pinnedFetchGuard(): { fetch: typeof fetch; calls: () => number } {
+  let calls = 0
+  const impl = (async () => {
+    calls++
+    throw new Error("a pinned summary must not touch the network")
+  }) as unknown as typeof fetch
+  return { fetch: impl, calls: () => calls }
 }
 
 run([
@@ -485,15 +499,13 @@ run([
     "cmd_plan_summary: a pinned plan never asks the Host for a credential (ADR-0011 §2)",
     async () => {
       let asked = 0
-      const neverFetch = (async () => {
-        throw new Error("a pinned summary must not touch the network")
-      }) as unknown as typeof fetch
+      const guard = pinnedFetchGuard()
       const options = {
         hostCredential: async () => {
           asked++
           return { key: "host_key", source: "host" as const }
         },
-        fetch: neverFetch,
+        fetch: guard.fetch,
         env: {},
       }
       const byArg = await planSummaryTool(options).execute({ plan: "max" })
@@ -518,6 +530,7 @@ run([
         }),
       )
       assertEqual(asked, 0, "no pin path may consult the Host credential")
+      assertEqual(guard.calls(), 0, "no pin path may make a network request")
     },
   ],
 
@@ -754,15 +767,107 @@ run([
           `${label} must report that nothing resolved`,
         )
         assert(!out.includes("Account:"), `${label} must not claim an account`)
-        assertEqual(
-          PLAN_SUMMARY_DESCRIPTION.includes(
-            "plan is detected from the account's billing subscription",
-          ),
-          true,
-          "the shared description documents the detection source",
-        )
       }
       assertEqual(v2def.name, "cmd_plan_summary")
+    },
+  ],
+
+  [
+    "cmd_plan_summary leads with the plan/account identity use (issue #214)",
+    () => {
+      // Tool catalogs truncate, so the identity use comes first: an agent asked
+      // "what plan are we on?" must read this tool as the answer to that, ahead
+      // of the allowance and deal tables it also renders.
+      assert(
+        PLAN_SUMMARY_DESCRIPTION.startsWith(
+          "Use this to answer which plan and account the current credential is on",
+        ),
+        `the description must front-load the identity use, got: ${PLAN_SUMMARY_DESCRIPTION}`,
+      )
+      assert(
+        PLAN_SUMMARY_DESCRIPTION.includes(
+          "plan is detected from the account's billing subscription",
+        ),
+        "the shared description documents the detection source",
+      )
+      assert(
+        PLAN_SUMMARY_ARG_DESCRIPTION.includes("skips plan detection and the credential lookup"),
+        `the argument must document what a pin short-circuits, got: ${PLAN_SUMMARY_ARG_DESCRIPTION}`,
+      )
+      assert(
+        PLAN_SUMMARY_ARG_DESCRIPTION.includes("(pinned)"),
+        "the argument must say a pinned plan renders as pinned",
+      )
+      // The argument is a free string, so an unrecognized value falls through
+      // to detection: the prose must not promise a pin it cannot honour.
+      assert(
+        PLAN_SUMMARY_ARG_DESCRIPTION.includes("falls back to detection"),
+        `the argument must own the unrecognized-value fallback, got: ${PLAN_SUMMARY_ARG_DESCRIPTION}`,
+      )
+      assert(
+        PLAN_SUMMARY_ARG_DESCRIPTION.includes("compare plans, not to discover the current one"),
+        `the argument must steer pins away from discovery, got: ${PLAN_SUMMARY_ARG_DESCRIPTION}`,
+      )
+      // ADR-0010: both hosts carry the same text, so the wording above is what
+      // either host's catalog shows.
+      assertEqual(planSummaryTool().description, PLAN_SUMMARY_DESCRIPTION)
+      assertEqual(planSummaryV2Tool().description, PLAN_SUMMARY_DESCRIPTION)
+      assertEqual(planSummaryTool().args.plan.description, PLAN_SUMMARY_ARG_DESCRIPTION)
+      const v2Input = planSummaryV2Tool().input as {
+        properties: { plan: { description: string } }
+      }
+      assertEqual(v2Input.properties.plan.description, PLAN_SUMMARY_ARG_DESCRIPTION)
+    },
+  ],
+
+  [
+    "a pinned plan renders as pinned and claims no account (issue #214)",
+    async () => {
+      const { fetch: neverFetch } = pinnedFetchGuard()
+      const options = { fetch: neverFetch, env: {} }
+      const byArg = await planSummaryTool(options).execute({ plan: "go" })
+      const byEnv = await planSummaryTool({
+        ...options,
+        env: { COMMANDCODE_PLAN: "pro" },
+      }).execute({})
+      const v2 = await planSummaryV2Tool(options).execute({ plan: "goat" })
+      const v2Content = typeof v2.content === "string" ? v2.content : ""
+
+      // A pin's header used to be identical to a detected plan's (#214), so a
+      // pin could confirm an agent's wrong prior. It now says it is one.
+      assertEqual(byArg.split("\n")[0], "# Command Code plan: Go (pinned)")
+      assertEqual(byEnv.split("\n")[0], "# Command Code plan: Pro (pinned)")
+      assertEqual(v2Content.split("\n")[0], "# Command Code plan: GOAT (pinned)")
+      for (const [label, out] of [
+        ["v1", byArg],
+        ["v2", v2Content],
+      ] as const) {
+        assert(
+          out.includes("plan pinned by the `plan` argument"),
+          `${label} must name the pin as its source`,
+        )
+        assert(!out.includes("Account:"), `${label} must not claim an account`)
+      }
+      assert(byEnv.includes("plan pinned by COMMANDCODE_PLAN"), "the environment pin is named too")
+      // A detected plan — and a summary rendered without provenance — keeps the
+      // plain header: only a pin is marked.
+      assertEqual(
+        renderPlanSummary("go", MODEL_DEALS, PLAN_CATALOG).split("\n")[0],
+        "# Command Code plan: Go",
+      )
+      assertEqual(
+        renderPlanSummary("go", MODEL_DEALS, PLAN_CATALOG, {
+          source: { kind: "ladder", rung: { kind: "environment" } },
+        }).split("\n")[0],
+        "# Command Code plan: Go",
+      )
+      // Belt-and-braces: a mis-paired caller cannot make "unknown" claim a pin.
+      assertEqual(
+        renderPlanSummary(undefined, MODEL_DEALS, PLAN_CATALOG, {
+          source: { kind: "pin", via: "argument" },
+        }).split("\n")[0],
+        "# Command Code plan: unknown",
+      )
     },
   ],
 
