@@ -6,6 +6,8 @@
 //     - availability array  (paid + free models, with `tiers`, `deal`,
 //       `caps`, `contextWindow`, `intelligenceIndex`, `outputTokensPerSec`)
 //     - compact array       (paid models only, with `planAllowanceUsd`)
+//     - usage-limits plan table (rendered React elements, the sole live
+//       source for the PLAN_CATALOG rows — issue #229)
 //   /docs/plans/goat
 //     - slug records array  (per-model records, vendor-prefixed id, used
 //       as the source of truth for the snapshot `id` and `name`)
@@ -89,6 +91,146 @@ export function extractPricingLimitsRsc(html) {
     if (out.availability && out.compact) break
   }
   return out
+}
+
+// --- The docs usage-limits plan table (issue #229) -------------------------
+//
+// The pricing-limits page renders a server-side "usage limits" table:
+//
+//   Plan | Your cost | Monthly credits | 5-hour limit | Weekly limit
+//
+// with one row per subscription plan (Go, GOAT, Pro, Max 10×, Max 20×,
+// Team Pro). Unlike the model records above it is not embedded as a data
+// array — the flight payload carries it as rendered React elements — but it
+// is still machine-readable, and it is the sole live source for the
+// PLAN_CATALOG rows the deals generator emits. Two rows have no live source
+// (`prolegacy`, `provider`) and are explicit pins in the generator.
+//
+// A missing table, a renamed header, or an unreadable cell is a parser shape
+// change and throws (ADR-0008) — the plan rows must never silently default.
+
+/** The header the usage-limits table must carry, in column order. */
+export const PLAN_TABLE_HEADER = [
+  "Plan",
+  "Your cost",
+  "Monthly credits",
+  "5-hour limit",
+  "Weekly limit",
+]
+
+// The flight payload represents every rendered element as an array:
+// ["$", "<tag>", null, { …props }]. Text nodes are plain strings inside a
+// props `children` array.
+function isRenderedTable(value) {
+  return Array.isArray(value) && value[0] === "$" && value[1] === "table"
+}
+
+// A rendered element's children, normalized to a list. The flight format
+// collapses a lone child to the child itself — a bare string for text, the
+// element array for a single element — so both collapsed and list shapes
+// normalize here.
+function renderedChildren(element) {
+  const props = Array.isArray(element) ? element[3] : undefined
+  if (!props || typeof props !== "object") return []
+  const children = props.children
+  if (children === undefined || children === null) return []
+  // A lone element child is one array starting with the "$" marker; a list of
+  // elements instead starts with an array (or a string).
+  if (Array.isArray(children) && children[0] === "$") return [children]
+  return Array.isArray(children) ? children : [children]
+}
+
+// The single text child of a rendered cell, or undefined when the cell
+// carries rich content (a link, a badge) instead of text.
+function renderedText(element) {
+  const children = renderedChildren(element)
+  return children.length === 1 && typeof children[0] === "string" ? children[0] : undefined
+}
+
+// React's flight format escapes a literal leading "$" in a text node as
+// "$$" (the "$" prefix otherwise introduces a model reference). The plan
+// table's money cells arrive as "$$10" / "$$70 of usage".
+function unescapeFlightText(text) {
+  return text.startsWith("$$") ? text.slice(1) : text
+}
+
+// Parses a money cell ("$$10", "$$70 of usage") into a number. Anything
+// without a leading dollar amount is a shape change — a silent default here
+// would ship a wrong plan price (ADR-0008).
+function planTableMoney(value, planLabel, column) {
+  if (typeof value !== "string") {
+    throw new Error(
+      `RSC plan table shape change: ${planLabel}'s "${column}" cell is not text ` +
+        `(got ${JSON.stringify(value)})`,
+    )
+  }
+  const match = unescapeFlightText(value).match(/^\$([0-9][0-9,]*(?:\.[0-9]+)?)/)
+  if (!match) {
+    throw new Error(
+      `RSC plan table shape change: ${planLabel}'s "${column}" cell ` +
+        `"${value}" is not a dollar amount`,
+    )
+  }
+  return Number(match[1].replaceAll(",", ""))
+}
+
+function renderedTableHeader(table) {
+  const parts = renderedChildren(table)
+  const head = parts.find((part) => Array.isArray(part) && part[1] === "thead")
+  if (!head) return undefined
+  const [headerRow] = renderedChildren(head)
+  return headerRow === undefined ? undefined : renderedChildren(headerRow).map(renderedText)
+}
+
+function renderedTableRows(table) {
+  const parts = renderedChildren(table)
+  const body = parts.find((part) => Array.isArray(part) && part[1] === "tbody")
+  return body === undefined
+    ? []
+    : renderedChildren(body).map((row) => renderedChildren(row).map(renderedText))
+}
+
+// Returns the usage-limits plan table as an array of
+// `{ display, price, credits, window5h, windowWeek }` rows, in page order.
+//
+// The first rendered table carrying the exact header is used, so the page's
+// other rendered tables (individual plans, team plans, geo limits, …) can't
+// match. A payload without it, or with a renamed header or an unreadable cell,
+// throws: the plan rows gate the emitted PLAN_CATALOG (issue #229) and a shape
+// change is a loud failure, never a silent row drop.
+export function extractPlanTableRsc(html) {
+  const text = decodeEscapedJson(html)
+  for (const table of findJsonValues(text, isRenderedTable)) {
+    const header = renderedTableHeader(table)
+    if (
+      !header ||
+      header.length !== PLAN_TABLE_HEADER.length ||
+      !PLAN_TABLE_HEADER.every((label, index) => header[index] === label)
+    ) {
+      continue
+    }
+    return renderedTableRows(table).map((cells) => {
+      const [display, price, credits, window5h, windowWeek] = cells
+      if (typeof display !== "string" || display.length === 0) {
+        throw new Error(
+          `RSC plan table shape change: a row's "Plan" cell is not a plan name ` +
+            `(got ${JSON.stringify(display)})`,
+        )
+      }
+      return {
+        display,
+        price: planTableMoney(price, display, PLAN_TABLE_HEADER[1]),
+        credits: planTableMoney(credits, display, PLAN_TABLE_HEADER[2]),
+        window5h: planTableMoney(window5h, display, PLAN_TABLE_HEADER[3]),
+        windowWeek: planTableMoney(windowWeek, display, PLAN_TABLE_HEADER[4]),
+      }
+    })
+  }
+  throw new Error(
+    `RSC plan table shape change: no rendered table with header ` +
+      `"${PLAN_TABLE_HEADER.join(" | ")}" — the docs usage-limits table moved or ` +
+      `was renamed (see PLAN_TABLE_HEADER in scripts/parse-rsc.mjs)`,
+  )
 }
 
 // Returns the per-plan (goat or pro) slug records array as a Map keyed

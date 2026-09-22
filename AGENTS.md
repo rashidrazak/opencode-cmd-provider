@@ -75,7 +75,8 @@ stays: the RSC `reasoning` flag is required on
 consumed slug records — upstream renaming or dropping it is a loud
 failure, never a silent default-to-non-reasoning (see ADR-0006). Only two
 loud failure classes survive anywhere: an unshippable ship-bar row after
-the full enrichment ladder (issue #132) and a parser shape change in any
+the full enrichment ladder (issue #132; the plan rows share the class —
+table → pin → carried-forward, #229) and a parser shape change in any
 source. The refresh scripts' subset checks stay in lockstep with the
 fixtures (see `scripts/check-deals-coverage.mjs` and
 `tests/deals-coverage.test.ts`).

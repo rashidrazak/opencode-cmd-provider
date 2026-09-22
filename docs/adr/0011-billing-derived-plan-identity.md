@@ -92,7 +92,19 @@ captures, which is why our docs-derived catalog lost the legacy row.
 `individual-pro` → `prolegacy`, rendered as `Pro (legacy)` — because collapsing
 them made a legacy account read as the current tier's price, pool and windows.
 The legacy row renders no per-model allowance table: the docs allowances are
-keyed `pro` and describe the current tier, not the grandfathered one. Its row
-is hand-typed in the generator with a provenance comment, since no live source
-still carries it; the #162 follow-up to generate or gate the plan rows instead
-of hand-typing them remains open.
+keyed `pro` and describe the current tier, not the grandfathered one.
+
+**Resolved by issue #229.** The `PLAN_CATALOG` rows are no longer hand-typed
+wholesale: every row the pricing-limits usage-limits table carries (Go, GOAT,
+Pro, Max 10×, Max 20×, Team Pro) is parsed from that table, which is the sole
+live source. Only `prolegacy` (the archived pre-reprice row) and `provider`
+(the pay-as-you-go plan, which has no usage-limits table row — the marketing
+table's Provider row carries the $15 price but prose for its credits) are pins,
+each with a provenance comment in the emitted module. A plan table shape change
+is a loud refresh failure; a table row outside the vocabulary and a PlanId no
+source carries are `plan table pending` reports — a vanished plan row is
+carried forward, never silently dropped, and a PlanId with no source after the
+table → pin → carried-forward ladder is an unshippable row (ADR-0008's first
+loud class) that aborts the refresh. `tests/deals-coverage.test.ts` joins the
+committed fixture table against the emitted rows, so a hand edit cannot drift
+from the page the cron sees.

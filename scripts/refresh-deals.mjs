@@ -28,10 +28,15 @@
 // air-gapped environments per the wayfinder spec at #77; this script
 // no longer calls them. Run them via Node directly if you need the
 // legacy HTML pipeline.
-import { mkdir, writeFile } from "node:fs/promises"
+import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { dirname, resolve } from "node:path"
 import { num, ratesFor, benchmarkFor, endsAtFor } from "./parse-docs.mjs"
-import { applySlugIdAlias, extractPlanPageRsc, extractPricingLimitsRsc } from "./parse-rsc.mjs"
+import {
+  applySlugIdAlias,
+  extractPlanPageRsc,
+  extractPlanTableRsc,
+  extractPricingLimitsRsc,
+} from "./parse-rsc.mjs"
 import { applyTierOverride } from "./tier-overrides.mjs"
 import { RSC_PAGES, loadRscPages, missingSnapshotModels } from "./rsc-source.mjs"
 import { snapshotIndex } from "./snapshot-index.mjs"
@@ -139,6 +144,207 @@ export function modelDealEntry(record) {
   return entry
 }
 
+// --- Plan rows (issue #229) -------------------------------------------------
+//
+// The PLAN_CATALOG rows used to be hand-typed in this template and nothing
+// covered them: upstream repriced Pro and added GOAT between the 2026-08-03
+// and 2026-08-06 docs captures and nothing here noticed (issue #162 was found
+// by a user). The pricing-limits RSC renders the usage-limits table
+// (`Plan | Your cost | Monthly credits | 5-hour limit | Weekly limit`) with
+// every subscription plan; it is now the live source for the emitted rows.
+// Only the two rows the usage-limits table cannot source are pinned below,
+// each with its provenance rendered as a comment above the row.
+
+// The docs usage-limits table's row labels → this package's PlanId vocabulary.
+// A table row whose label is not in this map is docs-ahead skew (the #132
+// superset discipline): it is reported as `plan table pending` and skipped —
+// never silently emitted under a guessed id.
+export const PLAN_LABEL_TO_ID = {
+  Go: "go",
+  GOAT: "goat",
+  Pro: "pro",
+  "Max 10×": "max",
+  "Max 20×": "max20",
+  "Team Pro": "teampro",
+}
+
+// The only hand-typed plan rows. `note` is the provenance comment the emitter
+// writes above the row, so a pin is never mistaken for a parsed value.
+export const PLAN_PINS = {
+  prolegacy: {
+    row: { price: 15, credits: 30, window5h: 9, windowWeek: 18, display: "Pro (legacy)" },
+    note: [
+      "Legacy Pro: the docs table's row before the Aug 2026 repricing, kept",
+      "for grandfathered individual-pro accounts (issue #162). Source:",
+      "https://web.archive.org/web/20260803033612/https://commandcode.ai/docs/resources/pricing-limits",
+      "Docs allowances stay keyed pro, so this row has no allowance table.",
+    ],
+  },
+  provider: {
+    row: { price: 15, credits: 0, window5h: 0, windowWeek: 0, display: "Provider" },
+    note: [
+      "Provider: pinned — the usage-limits table has no Provider row, because",
+      "the plan is pay-as-you-go API access: no monthly credits or window",
+      "caps. The $15/mo price and PAYG terms are from",
+      "https://commandcode.ai/provider (the marketing table's Provider row",
+      "carries the price but prose, not plan figures).",
+    ],
+  },
+}
+
+// Emission order — the PlanId vocabulary order of src/catalog/plans.ts. The
+// emitted module is a `Record<PlanId, PlanInfo>` literal, so a PlanId missing
+// here fails `npm run typecheck` instead of shipping a partial catalog.
+export const PLAN_ID_ORDER = [
+  "go",
+  "goat",
+  "pro",
+  "prolegacy",
+  "max",
+  "max20",
+  "teampro",
+  "provider",
+]
+
+/**
+ * A plan row's figures: what the docs usage-limits table carries and what the
+ * emitter writes into PLAN_CATALOG.
+ * @typedef {{ display: string, price: number, credits: number, window5h: number, windowWeek: number }} PlanRow
+ */
+
+/**
+ * A resolved plan row: the figures plus the provenance comment lines the
+ * emitter writes above the row (absent for a table-sourced row).
+ * @typedef {{ row: PlanRow, note?: string[] }} PlanRowEntry
+ */
+
+// Builds the PLAN_CATALOG rows from the parsed docs plan table, the pins, and
+// the previously emitted rows:
+//
+//   rows            Map<PlanId, PlanRowEntry> in PLAN_ID_ORDER order
+//   unmatched       table rows whose label maps to no PlanId (pending report)
+//   carriedForward  PlanIds no source carries whose previous row was reused
+//   missing         PlanIds with no row at all (an unshippable plan row)
+//
+// Precedence: the live table wins over a pin; a pin covers a PlanId the table
+// does not carry; a carried-forward previous row covers one neither the table
+// nor a pin carries (a plan upstream removed — a `plan table pending` report,
+// never a silent row drop). A PlanId with no source after that full ladder is
+// an unshippable row (the same loud class as a Snapshot row that stays
+// unresolved after its ladder): shipping a plan summary with no figures is
+// worse than not shipping.
+export function buildPlanRows({
+  tableRows = [],
+  previousRows = new Map(),
+  pins = PLAN_PINS,
+  labelToId = PLAN_LABEL_TO_ID,
+  order = PLAN_ID_ORDER,
+} = {}) {
+  for (const id of Object.keys(pins)) {
+    if (!order.includes(id)) {
+      throw new Error(`plan pin "${id}" is not in PLAN_ID_ORDER — the pin would never be emitted`)
+    }
+  }
+  // Match the table rows to PlanIds first (and detect duplicates), then walk
+  // the vocabulary order so the emitted rows keep a stable order regardless of
+  // the order the docs table lists them in.
+  const tableById = new Map()
+  const unmatched = []
+  for (const tableRow of tableRows) {
+    const id = labelToId[tableRow.display]
+    if (id === undefined) {
+      unmatched.push(tableRow)
+      continue
+    }
+    if (!order.includes(id)) {
+      throw new Error(
+        `plan table row "${tableRow.display}" maps to PlanId "${id}", ` +
+          `which is not in PLAN_ID_ORDER — update scripts/refresh-deals.mjs`,
+      )
+    }
+    if (tableById.has(id)) {
+      throw new Error(
+        `RSC plan table shape change: two table rows map to PlanId "${id}" ` +
+          `(second label: "${tableRow.display}")`,
+      )
+    }
+    tableById.set(id, tableRow)
+  }
+  const rows = new Map()
+  const carriedForward = []
+  const missing = []
+  for (const id of order) {
+    const tableRow = tableById.get(id)
+    if (tableRow) {
+      rows.set(id, { row: tableRow })
+      continue
+    }
+    const pin = pins[id]
+    if (pin) {
+      rows.set(id, { row: pin.row, note: pin.note })
+      continue
+    }
+    const previous = previousRows.get(id)
+    if (previous) {
+      rows.set(id, {
+        row: previous,
+        note: [
+          "Carried forward: the docs usage-limits table no longer carries this",
+          "plan, so these are its last table-sourced values. Re-pin the row here",
+          "or prune the PlanId (issue #229).",
+        ],
+      })
+      carriedForward.push(id)
+      continue
+    }
+    missing.push(id)
+  }
+  return { rows, unmatched, carriedForward, missing }
+}
+
+// The plan rows for one pricing-limits payload: the parsed table joined to the
+// pins / carry-forward state. Both the RSC emit seam and main() build their
+// rows here, so the pending-report population and the unshippable-row abort
+// can't drift between the two.
+//
+// Throws on a plan table shape change (extractPlanTableRsc) and on a PlanId
+// with no source at all (see buildPlanRows).
+export function planRowsFromRsc({ pricingLimitsRsc, previousRows = new Map() } = {}) {
+  const { rows, unmatched, carriedForward, missing } = buildPlanRows({
+    tableRows: extractPlanTableRsc(pricingLimitsRsc ?? ""),
+    previousRows,
+  })
+  if (missing.length > 0) {
+    throw new Error(
+      `plan row(s) without a source: ${missing.join(", ")} — neither the docs ` +
+        `usage-limits table, a PLAN_PINS entry, nor a previously emitted row to ` +
+        `carry forward (unshippable plan row)`,
+    )
+  }
+  return { rows, unmatched, carriedForward }
+}
+
+// The previously emitted PLAN_CATALOG rows, read back for the carry-forward
+// step above. The refresh runs under plain node and the catalog is a generated
+// .ts file, so the rows are extracted with a line regex (the same approach
+// scripts/snapshot-index.mjs uses) rather than a runtime TS import.
+const PREVIOUS_PLAN_ROW_RE =
+  /^ {2}([A-Za-z0-9]+): \{ price: ([0-9]+(?:\.[0-9]+)?), credits: ([0-9]+(?:\.[0-9]+)?), window5h: ([0-9]+(?:\.[0-9]+)?), windowWeek: ([0-9]+(?:\.[0-9]+)?), display: ("(?:[^"\\]|\\.)*") \},$/gm
+
+export function parsePreviousPlanRows(text) {
+  const rows = new Map()
+  for (const match of text.matchAll(PREVIOUS_PLAN_ROW_RE)) {
+    rows.set(match[1], {
+      price: Number(match[2]),
+      credits: Number(match[3]),
+      window5h: Number(match[4]),
+      windowWeek: Number(match[5]),
+      display: JSON.parse(match[6]),
+    })
+  }
+  return rows
+}
+
 // Builds the deals module text from already-normalised inputs. The
 // template (PLAN_CATALOG, interfaces, header) lives here so the emit
 // step can't drift from the rest of the script.
@@ -146,6 +352,7 @@ export function buildDealsModule({
   bySnapshotId,
   goatBySnapshot,
   proBySnapshot,
+  planRows,
   lastRefreshed,
   packageVersion,
 }) {
@@ -162,6 +369,16 @@ export function buildDealsModule({
     modelLines.push(`  ${JSON.stringify(id)}: { ${parts.join(", ")} },`)
   }
 
+  const planLines = []
+  for (const [id, entry] of planRows) {
+    for (const line of entry.note ?? []) planLines.push(`  // ${line}`)
+    planLines.push(
+      `  ${id}: { price: ${entry.row.price}, credits: ${entry.row.credits}, ` +
+        `window5h: ${entry.row.window5h}, windowWeek: ${entry.row.windowWeek}, ` +
+        `display: ${JSON.stringify(entry.row.display)} },`,
+    )
+  }
+
   return [
     "// src/deals/catalog.ts — GENERATED by scripts/refresh-deals.mjs. Do not edit.",
     "//",
@@ -169,6 +386,10 @@ export function buildDealsModule({
     "// site (pricing-limits, plans/goat, plans/pro). Bundled so the plugin can",
     "// enrich the model picker, the sidebar panel, and the plan summary tool",
     "// without network access at runtime. Regenerate with `npm run refresh:deals`.",
+    "//",
+    "// PLAN_CATALOG rows are parsed from the pricing-limits usage-limits table;",
+    "// rows the table cannot source carry their pin / carry-forward provenance",
+    "// comment above the row (issue #229).",
     "//",
     "// Plan identity (PlanId) lives in Core — src/catalog/plans.ts — so the",
     "// provider transport can read an explicit plan pin without importing this",
@@ -215,23 +436,7 @@ export function buildDealsModule({
     "}",
     "",
     "export const PLAN_CATALOG: Readonly<Record<PlanId, PlanInfo>> = {",
-    '  go: { price: 1, credits: 10, window5h: 3, windowWeek: 6, display: "Go" },',
-    '  goat: { price: 10, credits: 70, window5h: 14, windowWeek: 35, display: "GOAT" },',
-    '  pro: { price: 20, credits: 80, window5h: 16, windowWeek: 40, display: "Pro" },',
-    // Legacy Pro (issue #162): individual-pro is the pre-reprice SKU kept for
-    // grandfathered accounts; the live docs table carries the current Pro
-    // (individual-pro-v1) only. This row is from the docs table's 2026-08-03
-    // capture — the table switched rows between the 2026-08-03 and 2026-08-06
-    // captures — and is hand-typed because no live source still carries it.
-    "  // Legacy Pro: the docs table's row before the Aug 2026 repricing, kept",
-    "  // for grandfathered individual-pro accounts (issue #162). Source:",
-    "  // https://web.archive.org/web/20260803033612/https://commandcode.ai/docs/resources/pricing-limits",
-    "  // Docs allowances stay keyed pro, so this row has no allowance table.",
-    '  prolegacy: { price: 15, credits: 30, window5h: 9, windowWeek: 18, display: "Pro (legacy)" },',
-    '  max: { price: 100, credits: 150, window5h: 45, windowWeek: 90, display: "Max 10×" },',
-    '  max20: { price: 200, credits: 300, window5h: 90, windowWeek: 180, display: "Max 20×" },',
-    '  teampro: { price: 40, credits: 40, window5h: 12, windowWeek: 24, display: "Team Pro" },',
-    '  provider: { price: 15, credits: 0, window5h: 0, windowWeek: 0, display: "Provider" },',
+    ...planLines,
     "}",
     "",
     `export const DEAL_SOURCE_URL = ${JSON.stringify(DEFAULT_RSC_PRICING_URL)}`,
@@ -346,6 +551,7 @@ export function emitDealsModuleFromRsc({
   pricingLimitsRsc,
   goatRsc,
   proRsc,
+  previousPlanRows = new Map(),
   lastRefreshed,
   packageVersion,
 }) {
@@ -354,13 +560,26 @@ export function emitDealsModuleFromRsc({
     goatRsc,
     proRsc,
   })
+  const { rows: planRows } = planRowsFromRsc({ pricingLimitsRsc, previousRows: previousPlanRows })
   return buildDealsModule({
     bySnapshotId,
     goatBySnapshot,
     proBySnapshot,
+    planRows,
     lastRefreshed,
     packageVersion,
   })
+}
+
+// The previously emitted PLAN_CATALOG rows at `out`, for the carry-forward
+// step above. A missing or unreadable file simply means there is nothing to
+// carry forward.
+async function readPreviousPlanRows(out) {
+  try {
+    return parsePreviousPlanRows(await readFile(out, "utf-8"))
+  } catch {
+    return new Map()
+  }
 }
 
 async function main() {
@@ -397,6 +616,38 @@ async function main() {
   }
 
   const out = argValue("--out") ?? DEFAULT_OUT
+
+  // Plan rows (issue #229). The usage-limits table is parsed before the model
+  // try/catch: a missing table, a renamed header, or an unreadable cell is a
+  // parser shape change and must abort the refresh loudly (ADR-0008), never
+  // degrade to the empty-catalog fallback below. A table row the vocabulary
+  // does not know, and a PlanId no source carries, are pending reports — the
+  // row is never silently dropped (the #132 superset discipline); a PlanId
+  // with no source after the full table → pin → carried-forward ladder is an
+  // unshippable plan row and aborts.
+  const {
+    rows: planRows,
+    unmatched,
+    carriedForward,
+  } = planRowsFromRsc({
+    pricingLimitsRsc: pricingRsc,
+    previousRows: await readPreviousPlanRows(out),
+  })
+  if (unmatched.length > 0) {
+    console.log(
+      `refresh-deals: plan table pending — ${unmatched.length} docs table row(s) map to no ` +
+        `PlanId: ${unmatched.map((row) => `"${row.display}"`).join(", ")}. Add the PlanId and ` +
+        `its aliases to src/catalog/plans.ts and PLAN_LABEL_TO_ID in scripts/refresh-deals.mjs ` +
+        `to ship them.`,
+    )
+  }
+  if (carriedForward.length > 0) {
+    console.log(
+      `refresh-deals: plan table pending — no live source carries ${carriedForward.join(", ")}; ` +
+        `carried forward the last emitted row(s). Re-pin or prune the PlanId (issue #229).`,
+    )
+  }
+
   let module
   try {
     // Build the inputs once — the pending report consumes
@@ -427,6 +678,7 @@ async function main() {
       bySnapshotId,
       goatBySnapshot,
       proBySnapshot,
+      planRows,
       lastRefreshed: new Date().toISOString().split("T")[0],
       packageVersion: "docs",
     })
@@ -438,6 +690,7 @@ async function main() {
       bySnapshotId: new Map(),
       goatBySnapshot: new Map(),
       proBySnapshot: new Map(),
+      planRows,
       lastRefreshed: new Date().toISOString().split("T")[0],
       packageVersion: "docs",
     })

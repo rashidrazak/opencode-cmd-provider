@@ -67,6 +67,10 @@ RSC/deals record ships core-only — enrichment skipped, a `deals pending —`
 report logged, never an exit-1. The fixtures are re-captured on every
 `npm run refresh` and by the daily catalog-refresh cron so they stay in sync
 with the snapshot.
+`PLAN_CATALOG` (per-plan price, credits and windows) is parsed from the same
+`pricing-limits` RSC's usage-limits table; only `prolegacy` and `provider`
+are explicit pins, and a plan the table adds or drops is a `plan table
+pending —` report, never a silent row drop (issue #229).
 _Avoid_: pricing table, deal feed
 
 **Deals intelligence**:

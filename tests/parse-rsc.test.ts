@@ -5,14 +5,17 @@ import { readFileSync } from "node:fs"
 import {
   applySlugIdAlias,
   extractPlanPageRsc,
+  extractPlanTableRsc,
   extractPricingLimitsRsc,
   missingFields,
+  PLAN_TABLE_HEADER,
   REQUIRED_AVAILABILITY_FIELDS,
   REQUIRED_COMPACT_FIELDS,
   REQUIRED_SLUG_RECORD_FIELDS,
   SLUG_ID_TO_SNAPSHOT_ID,
 } from "../scripts/parse-rsc.mjs"
-import { assert, assertEqual, run } from "./harness.js"
+import { assert, assertEqual, run, throws } from "./harness.js"
+import { renderedTableRsc } from "./helpers/flight-table.js"
 
 const RSC_PRICING = readFileSync(
   new URL("./fixtures/rsc-pricing-limits.txt", import.meta.url),
@@ -209,6 +212,71 @@ run([
       const record = goat.get("poolside/laguna-s-2.1-free")
       assert(record, "free-variant record must be retrievable")
       assertEqual(record.id, "poolside/laguna-s-2.1-free", "free-variant id must not be rewritten")
+    },
+  ],
+  [
+    "extractPlanTableRsc parses the committed usage-limits table",
+    () => {
+      // Shape contract only: the values the fixture carries are asserted
+      // against the emitted PLAN_CATALOG by tests/deals-coverage.test.ts, so
+      // an upstream repricing moves the fixture and the catalog together
+      // (issue #229) instead of reddening this test.
+      const rows = extractPlanTableRsc(RSC_PRICING)
+      assert(rows.length > 0, "the committed fixture must carry the usage-limits table")
+      assertEqual(
+        new Set(rows.map((row: { display: string }) => row.display)).size,
+        rows.length,
+        "every plan row must have a distinct label",
+      )
+      for (const row of rows as Array<Record<string, unknown>>) {
+        assert(
+          typeof row.display === "string" && row.display.length > 0,
+          "every row must carry a plan label",
+        )
+        for (const key of ["price", "credits", "window5h", "windowWeek"]) {
+          assert(
+            typeof row[key] === "number" && Number.isFinite(row[key]),
+            `${String(row.display)}: ${key} must parse to a number`,
+          )
+        }
+      }
+    },
+  ],
+  [
+    "extractPlanTableRsc parses a synthetic flight-payload table (values test-owned)",
+    () => {
+      const table = renderedTableRsc(PLAN_TABLE_HEADER, [
+        ["Go", "$$1", "$$10", "$$3", "$$6"],
+        ["GOAT", "$$10", "$$70 of usage", "$$14", "$$35"],
+      ])
+      assertEqual(extractPlanTableRsc(table), [
+        { display: "Go", price: 1, credits: 10, window5h: 3, windowWeek: 6 },
+        { display: "GOAT", price: 10, credits: 70, window5h: 14, windowWeek: 35 },
+      ])
+    },
+  ],
+  [
+    "extractPlanTableRsc throws on a renamed header (shape change, never a default)",
+    () => {
+      const table = renderedTableRsc(
+        ["Plan", "Cost", "Monthly credits", "5-hour limit", "Weekly limit"],
+        [["Go", "$$1", "$$10", "$$3", "$$6"]],
+      )
+      throws(() => extractPlanTableRsc(table), /shape change/)
+    },
+  ],
+  [
+    "extractPlanTableRsc throws on an unreadable money cell (shape change)",
+    () => {
+      const table = renderedTableRsc(PLAN_TABLE_HEADER, [["Go", "Free", "$$10", "$$3", "$$6"]])
+      throws(() => extractPlanTableRsc(table), /Your cost/)
+    },
+  ],
+  [
+    "extractPlanTableRsc throws when the payload carries no plan table",
+    () => {
+      throws(() => extractPlanTableRsc("no json here, just text"), /shape change/)
+      throws(() => extractPlanTableRsc(""), /shape change/)
     },
   ],
 ])
