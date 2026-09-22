@@ -33,7 +33,7 @@ import {
 import { isRecord, stringValue } from "../provider/converters.js"
 import type { V2ToolDefinition } from "../plugin/v2-types.js"
 import { MODEL_DEALS, PLAN_CATALOG, type ModelDeals, type PlanInfo } from "./catalog.js"
-import { formatRate } from "./format.js"
+import { discountLabel, formatRate, todayIso } from "./format.js"
 
 const PLAN_DISPLAY: Record<PlanId, string> = {
   go: "Go",
@@ -292,6 +292,7 @@ export function renderPlanSummary(
   deals: Readonly<Record<string, ModelDeals>> = MODEL_DEALS,
   catalog: Readonly<Record<PlanId, PlanInfo>> = PLAN_CATALOG,
   provenance?: PlanProvenance,
+  today: string = todayIso(),
 ): string {
   const lines: string[] = []
   // Only a pin is marked: a detected plan and a provenance-free render keep the
@@ -352,10 +353,7 @@ export function renderPlanSummary(
     const safeId = id.replace(/[|`]/g, " ")
     const dealBits: string[] = []
     if (d.free) dealBits.push("FREE")
-    if (d.discount)
-      dealBits.push(
-        `${d.discount.pct}% off${d.discount.endsAt ? ` until ${d.discount.endsAt}` : ""}`,
-      )
+    if (d.discount) dealBits.push(discountLabel(d.discount.pct, d.discount.endsAt, today))
     if (d.peakOffPeak) dealBits.push(`peak/off-peak (${d.peakOffPeak.windows})`)
     const dealText = dealBits.join("; ") || "—"
     if (hasAllowances) {

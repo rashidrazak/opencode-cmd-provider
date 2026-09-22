@@ -17,7 +17,7 @@ import type { RGBA } from "@opentui/core"
 import type { Provider } from "@opencode-ai/sdk/v2"
 import type { TuiPlugin, TuiPluginApi, TuiPluginModule } from "@opencode-ai/plugin/tui"
 import { DEAL_SOURCE_URL, PLAN_CATALOG } from "./catalog.js"
-import { formatRate } from "./format.js"
+import { discountLabel, formatRate, todayIso } from "./format.js"
 import type { PlanId } from "../catalog/plans.js"
 import type { V2TuiContext, V2TuiModel, V2TuiPluginDefinition } from "../plugin/v2-tui-types.js"
 
@@ -56,7 +56,7 @@ function rateString(rates: { input?: unknown; output?: unknown }): string | unde
 }
 
 /** Renders the `cmd` payload (identical on both hosts) into sidebar rows. */
-function cmdRows(cmd: Cmd | undefined): DealsRow[] {
+function cmdRows(cmd: Cmd | undefined, today: string): DealsRow[] {
   if (!cmd) return []
   if (cmd.unavailable === true) {
     return [
@@ -77,7 +77,11 @@ function cmdRows(cmd: Cmd | undefined): DealsRow[] {
   if (cmd.discount && typeof cmd.discount.pct === "number") {
     rows.push([
       "Deal",
-      `${cmd.discount.pct}% off${typeof cmd.discount.endsAt === "string" ? ` until ${cmd.discount.endsAt}` : ""}`,
+      discountLabel(
+        cmd.discount.pct,
+        typeof cmd.discount.endsAt === "string" ? cmd.discount.endsAt : undefined,
+        today,
+      ),
     ])
   }
   const was = cmd.was ? rateString(cmd.was) : undefined
@@ -109,8 +113,9 @@ function cmdRows(cmd: Cmd | undefined): DealsRow[] {
  */
 export function dealsRows(
   model: { options?: { cmd?: Record<string, unknown> } } | undefined,
+  today: string = todayIso(),
 ): DealsRow[] {
-  return cmdRows(model?.options?.cmd as Cmd | undefined)
+  return cmdRows(model?.options?.cmd as Cmd | undefined, today)
 }
 
 /**
@@ -119,8 +124,9 @@ export function dealsRows(
  */
 export function dealsRowsV2(
   model: { settings?: Readonly<Record<string, unknown>> } | undefined,
+  today: string = todayIso(),
 ): DealsRow[] {
-  return cmdRows(model?.settings?.["cmd"] as Cmd | undefined)
+  return cmdRows(model?.settings?.["cmd"] as Cmd | undefined, today)
 }
 
 const id = "commandcode.deals"

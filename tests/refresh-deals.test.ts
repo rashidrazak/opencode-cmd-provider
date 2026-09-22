@@ -59,6 +59,13 @@ run([
         pct: 50,
         endsAt: "2026-12-31",
       })
+      // Expiry is a rendering concern, never a filter (issue #90): a date
+      // that has already passed survives verbatim into the catalog, so the
+      // presenters — not the generator — own the ended/active reading.
+      assertEqual(discountFor({ deal: { discountPercent: 50, expires: "2020-01-01T23:59:59Z" } }), {
+        pct: 50,
+        endsAt: "2020-01-01",
+      })
       assertEqual(discountFor({ deal: { discountPercent: "$undefined" } }), undefined)
       assertEqual(discountFor({}), undefined)
       assertEqual(discountFor({ deal: null }), undefined)

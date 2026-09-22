@@ -18,3 +18,33 @@
 export function formatRate(value: number): string {
   return String(Number(value.toFixed(6)))
 }
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/
+
+/**
+ * The plugin's day: an ISO `YYYY-MM-DD` date. Surfaces take the day as an
+ * argument instead of reading a clock inside the formatter, so a render stays a
+ * function of its inputs and the tests pin "today" rather than race the
+ * calendar.
+ */
+export function todayIso(): string {
+  return new Date().toISOString().slice(0, 10)
+}
+
+/**
+ * The "Deal" text. `endsAt` stays verbatim in the catalog (issue #90: the
+ * captured RSC is the truth, and the Snapshot — not this metadata — is what
+ * bills), so the ended/active distinction is made here, once, for both
+ * presenters. A past ISO date reads `50% off (ended 2026-06-22)` instead of
+ * claiming an "until" that has already passed. A deal ending *today* is still
+ * active: upstream expires at 23:59:59Z of the named day. A non-ISO `endsAt`
+ * (the vestigial "while capacity lasts") has no date to compare and keeps the
+ * historic phrasing.
+ */
+export function discountLabel(pct: number, endsAt: string | undefined, today: string): string {
+  const base = `${pct}% off`
+  if (endsAt === undefined) return base
+  // Lexicographic order is chronological for ISO dates.
+  if (ISO_DATE.test(endsAt) && endsAt < today) return `${base} (ended ${endsAt})`
+  return `${base} until ${endsAt}`
+}
