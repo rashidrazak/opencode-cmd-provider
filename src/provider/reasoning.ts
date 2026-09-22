@@ -132,7 +132,53 @@ export function mappedReasoningEffort(
   const level = options?.reasoning
   if (!level || level === "off" || !model.reasoning) return undefined
   const mapped = model.thinkingLevelMap?.[level as PiThinkingLevel]
-  return typeof mapped === "string" && mapped !== "off" ? mapped : undefined
+  if (typeof mapped === "string" && mapped !== "off") return mapped
+  return snapToNearestAdvertisedLevel(level, model.thinkingLevelMap)
+}
+
+/**
+ * A requested effort the model does not advertise snaps to the nearest
+ * advertised level on the thinking ladder, ties upward (ADR-0019). The
+ * families advertise different vocabularies — Qwen 3.8 tops out at `xhigh`
+ * and skips `high`, DeepSeek V4 and GLM stop at `max` and skip `medium` — so
+ * a host-wide effort setting inevitably misses some models' sets, and
+ * dropping it left the provider's default depth in charge of a request the
+ * user explicitly asked to make deeper or shallower.
+ *
+ * The snap is request-path only: `thinkingLevelMap` metadata and the variant
+ * cycle keep advertising exactly the levels the model supports, so the host
+ * UI surface is unchanged. `off` never reaches here (it means "send no
+ * effort"), a string that is not a ladder level at all stays dropped rather
+ * than guessed, and a model with no advertised levels (reasoning without
+ * efforts) still sends nothing and lets Command Code choose the depth.
+ */
+function snapToNearestAdvertisedLevel(
+  level: string,
+  thinkingLevelMap: Partial<Record<PiThinkingLevel, string | null>> | undefined,
+): string | undefined {
+  const requestedIndex = PI_THINKING_LEVELS.indexOf(level as PiThinkingLevel)
+  if (requestedIndex < 0) return undefined
+  let best: PiThinkingLevel | undefined
+  let bestDistance = Number.MAX_SAFE_INTEGER
+  for (const candidate of PI_THINKING_LEVELS) {
+    if (candidate === "off") continue
+    const mapped = thinkingLevelMap?.[candidate]
+    if (typeof mapped !== "string" || mapped === "off") continue
+    const distance = Math.abs(PI_THINKING_LEVELS.indexOf(candidate) - requestedIndex)
+    // Ties snap upward: `high` on a model that skips it gets `xhigh`, not
+    // `medium` — the request asked for that much thinking.
+    if (
+      distance < bestDistance ||
+      (distance === bestDistance &&
+        best !== undefined &&
+        PI_THINKING_LEVELS.indexOf(candidate) > PI_THINKING_LEVELS.indexOf(best))
+    ) {
+      best = candidate
+      bestDistance = distance
+    }
+  }
+  const snapped = best === undefined ? undefined : thinkingLevelMap?.[best]
+  return typeof snapped === "string" ? snapped : undefined
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

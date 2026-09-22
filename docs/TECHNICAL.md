@@ -189,8 +189,12 @@ Reasoning metadata derives from the generated classification module
 as reasoning-capable advertise `reasoning: true` automatically — with explicit
 effort variants when the generated facts list levels, without variants
 otherwise. Supported levels are sent as the documented `reasoning_effort`
-request field; `off`, unsupported levels, and models with no metadata add no
-reasoning fields. No prompt instructions are injected. On the Anthropic dialect
+request field; an unadvertised ladder level snaps to the nearest advertised one,
+ties upward, on the fixed ladder
+`off < minimal < low < medium < high < xhigh < max`
+([ADR-0019](adr/0019-out-of-vocabulary-efforts-snap.md)). `off`, a string that is
+not a ladder level, and a model with no advertised levels add no reasoning
+fields. No prompt instructions are injected. On the Anthropic dialect
 (claude models), reasoning blocks from completed assistant turns are not
 replayed upstream in later requests — only user-visible text and completed tool
 calls go back as history — because a replayed Anthropic thinking block must
@@ -552,3 +556,4 @@ Both e2e scripts are excluded from `npm test`.
 | [0016](adr/0016-openai-dialect-reasoning-history.md)           | The OpenAI dialect replays assistant reasoning in history                 |
 | [0017](adr/0017-plan-summary-provenance-line.md)               | The plan summary renders the account and the credential rung              |
 | [0018](adr/0018-usage-is-not-a-terminal.md)                    | A usage report is not by itself a terminal on the OpenAI dialect          |
+| [0019](adr/0019-out-of-vocabulary-efforts-snap.md)             | An unadvertised reasoning effort snaps to the nearest advertised level    |
