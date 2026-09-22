@@ -77,11 +77,22 @@ at all, not something this change introduces or removes.
 `tests/provider-transport.test.ts` pins those fields on the fallback path so
 the exposure stays visible and deliberate rather than incidental.
 
-## Not decided here
+## The two Pro SKUs, resolved (issue #162)
 
-`PLAN_CATALOG` remains docs-derived (ADR-0008) and single-row per plan, while
-the CLI's owns credits map distinguishes `individual-pro` (30) from
-`individual-pro-v1` (80) where our catalog has one `pro: 80`. If the API
-returns plain `individual-pro` for current Pro accounts, the summary overstates
-their credits — a catalog-vs-API discrepancy, tracked separately from this
-detection fix.
+The CLI's credits map and the docs table were never in conflict: they describe
+two SKUs. `individual-pro` is the pre-reprice Pro — $15/mo, $30 of credits,
+5h $9 / weekly $18 — kept for grandfathered subscribers; upstream's own web app
+keys its "Legacy Pro" upgrade banner off exactly that id
+(`assets/use-legacy-pro-status-*.js`, `assets/constants-*.js`,
+`assets/plan-tiers-*.js`, fetched 2026-09-23). `individual-pro-v1` is the
+current Pro the docs table describes ($20/$80, 5h $16 / weekly $40); the docs
+table swapped its single Pro row for it between the 2026-08-03 and 2026-08-06
+captures, which is why our docs-derived catalog lost the legacy row.
+`PLAN_CATALOG` therefore carries both — `individual-pro-v1` → `pro`,
+`individual-pro` → `prolegacy`, rendered as `Pro (legacy)` — because collapsing
+them made a legacy account read as the current tier's price, pool and windows.
+The legacy row renders no per-model allowance table: the docs allowances are
+keyed `pro` and describe the current tier, not the grandfathered one. Its row
+is hand-typed in the generator with a provenance comment, since no live source
+still carries it; the #162 follow-up to generate or gate the plan rows instead
+of hand-typing them remains open.

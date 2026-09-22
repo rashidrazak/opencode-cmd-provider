@@ -159,8 +159,8 @@ surfaces in two places:
   v1's provider record — and only falls back to `COMMANDCODE_API_KEY` and the
   legacy auth files when the Host resolves none
   ([ADR-0015](adr/0015-host-credential-for-tools.md)); pass the `plan` argument
-  or set `COMMANDCODE_PLAN` (`go|goat|pro|max|max20|teampro|provider`) to skip the
-  lookup, and the header then reads `# Command Code plan: Go (pinned)` — a pin
+  or set `COMMANDCODE_PLAN` (`go|goat|pro|prolegacy|max|max20|teampro|provider`)
+  to skip the lookup, and the header then reads `# Command Code plan: Go (pinned)` — a pin
   never renders as a detected plan (issue #214). It renders one provenance line
   under the plan header — the account the
   lookup answered for plus the credential rung (`Host connection`,

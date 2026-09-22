@@ -39,6 +39,7 @@ const PLAN_DISPLAY: Record<PlanId, string> = {
   go: "Go",
   goat: "GOAT",
   pro: "Pro",
+  prolegacy: "Pro (legacy)",
   max: "Max 10×",
   max20: "Max 20×",
   teampro: "Team Pro",
@@ -309,7 +310,7 @@ export function renderPlanSummary(
       "The plan could not be detected — no `plan` argument or COMMANDCODE_PLAN override, and the Command Code API reported no active subscription (or could not be reached).",
     )
     lines.push(
-      "Pass `plan` or set COMMANDCODE_PLAN to pin it: go|goat|pro|max|max20|teampro|provider.",
+      "Pass `plan` or set COMMANDCODE_PLAN to pin it: go|goat|pro|prolegacy|max|max20|teampro|provider.",
     )
     lines.push(
       "No allowance or deal figures are shown rather than reporting a plan you may not be on.",
@@ -408,9 +409,9 @@ function estimateMonthlyRequests(modelId: string, allowance: number): number {
  * short-circuits — a pin renders the plan it names, it does not find it.
  */
 export const PLAN_SUMMARY_DESCRIPTION =
-  "Use this to answer which plan and account the current credential is on; the provenance line names the source it resolved through. It shows that plan's credits, usage windows, per-model monthly allowances (GOAT/Pro) or active deals (other plans), with estimated monthly request counts. The plan is detected from the account's billing subscription; pass the `plan` argument or set COMMANDCODE_PLAN (go|goat|pro|max|max20|teampro|provider) only to pin a plan you already know — a pin skips detection and the credential lookup and its header reads `(pinned)`. When no plan can be detected the summary says so instead of guessing."
+  "Use this to answer which plan and account the current credential is on; the provenance line names the source it resolved through. It shows that plan's credits, usage windows, per-model monthly allowances (GOAT/Pro) or active deals (other plans), with estimated monthly request counts. The plan is detected from the account's billing subscription (the pre-reprice Pro, `individual-pro`, renders as Pro (legacy)); pass the `plan` argument or set COMMANDCODE_PLAN (go|goat|pro|prolegacy|max|max20|teampro|provider) only to pin a plan you already know — a pin skips detection and the credential lookup and its header reads `(pinned)`. When no plan can be detected the summary says so instead of guessing."
 export const PLAN_SUMMARY_ARG_DESCRIPTION =
-  "The plan to pin: go|goat|pro|max|max20|teampro|provider. A pin makes no network request: it skips plan detection and the credential lookup, renders the named plan marked `(pinned)`, and claims no account. An unrecognized value is not a pin — it falls back to detection. Use it to compare plans, not to discover the current one."
+  "The plan to pin: go|goat|pro|prolegacy|max|max20|teampro|provider. A pin makes no network request: it skips plan detection and the credential lookup, renders the named plan marked `(pinned)`, and claims no account. An unrecognized value is not a pin — it falls back to detection. Use it to compare plans, not to discover the current one."
 
 /**
  * Credential seam for the tool path: `apiKey` and the Host getter below feed

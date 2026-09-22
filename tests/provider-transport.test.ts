@@ -253,6 +253,8 @@ run([
         "individual-goat",
         "pro",
         "individual-pro",
+        "individual-pro-v1",
+        "prolegacy",
         "max",
         "max10",
         "max-10x",

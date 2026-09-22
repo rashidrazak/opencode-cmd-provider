@@ -1,20 +1,34 @@
 // src/catalog/plans.ts — Command Code plan identity (Core).
 //
 // The plan vocabulary this package works in, plus the alias table mapping the
-// ids the Command Code API and CLI use (`individual-go`, `individual-pro-v1`,
-// `teams-pro`, …), the display spellings, and the bare ids onto it. Core owns
+// ids the Command Code API and CLI use (`individual-go`, `individual-pro`,
+// `individual-pro-v1`, `teams-pro`, …) onto it. Core owns
 // this module because transport selection must recognise an explicit
 // `plan=go` pin to pick the legacy transport, and Core never imports the
 // excisable Deals slice (ADR-0004): the plan lookup that feeds
 // `cmd_plan_summary` lives in `src/deals/plan-summary.ts` and reads
 // `PlanId`/`normalizePlan` from here.
-export type PlanId = "go" | "goat" | "pro" | "max" | "max20" | "teampro" | "provider"
+export type PlanId =
+  | "go"
+  | "goat"
+  | "pro"
+  | "prolegacy"
+  | "max"
+  | "max20"
+  | "teampro"
+  | "provider"
 
 /**
  * Aliases as returned by `GET /alpha/billing/subscriptions` (`planId`), as
  * accepted by the CLI, and as written by hand in `COMMANDCODE_PLAN` / the
  * model's `plan` option. Matched case-insensitively; anything else is not a
  * plan and normalizes to undefined rather than guessing.
+ *
+ * Pro is two SKUs (issue #162): `individual-pro` is the pre-reprice plan kept
+ * for grandfathered subscribers (upstream's own web app keys its "Legacy Pro
+ * upgrade" banner off that id), `individual-pro-v1` is the current plan the
+ * docs table describes. They differ in price, credits and windows, so they
+ * must not collapse onto one row.
  */
 const PLAN_ALIASES: Readonly<Record<string, PlanId>> = {
   go: "go",
@@ -22,8 +36,11 @@ const PLAN_ALIASES: Readonly<Record<string, PlanId>> = {
   goat: "goat",
   "individual-goat": "goat",
   pro: "pro",
-  "individual-pro": "pro",
   "individual-pro-v1": "pro",
+  prolegacy: "prolegacy",
+  "pro-legacy": "prolegacy",
+  "pro legacy": "prolegacy",
+  "individual-pro": "prolegacy",
   max: "max",
   max10: "max",
   "max-10x": "max",

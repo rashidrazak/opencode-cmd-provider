@@ -218,6 +218,16 @@ export function buildDealsModule({
     '  go: { price: 1, credits: 10, window5h: 3, windowWeek: 6, display: "Go" },',
     '  goat: { price: 10, credits: 70, window5h: 14, windowWeek: 35, display: "GOAT" },',
     '  pro: { price: 20, credits: 80, window5h: 16, windowWeek: 40, display: "Pro" },',
+    // Legacy Pro (issue #162): individual-pro is the pre-reprice SKU kept for
+    // grandfathered accounts; the live docs table carries the current Pro
+    // (individual-pro-v1) only. This row is from the docs table's 2026-08-03
+    // capture — the table switched rows between the 2026-08-03 and 2026-08-06
+    // captures — and is hand-typed because no live source still carries it.
+    "  // Legacy Pro: the docs table's row before the Aug 2026 repricing, kept",
+    "  // for grandfathered individual-pro accounts (issue #162). Source:",
+    "  // https://web.archive.org/web/20260803033612/https://commandcode.ai/docs/resources/pricing-limits",
+    "  // Docs allowances stay keyed pro, so this row has no allowance table.",
+    '  prolegacy: { price: 15, credits: 30, window5h: 9, windowWeek: 18, display: "Pro (legacy)" },',
     '  max: { price: 100, credits: 150, window5h: 45, windowWeek: 90, display: "Max 10×" },',
     '  max20: { price: 200, credits: 300, window5h: 90, windowWeek: 180, display: "Max 20×" },',
     '  teampro: { price: 40, credits: 40, window5h: 12, windowWeek: 24, display: "Team Pro" },',
