@@ -981,6 +981,35 @@ run([
   ],
 
   [
+    "renderPlanSummary marks an ended deal instead of claiming an until-date (issue #90)",
+    () => {
+      // Same rule as the sidebar's, from the one shared formatter: the
+      // catalog keeps `endsAt` verbatim and the summary decides how to read
+      // it. `was`/`now` stay either way — they say what is billed.
+      const deals: Readonly<Record<string, ModelDeals>> = {
+        "x/ended": {
+          tier: "opensource",
+          discount: { pct: 25, endsAt: "2026-05-01" },
+          was: { input: 4, output: 12, cacheRead: 0.5 },
+          now: { input: 3, output: 9, cacheRead: 0.375 },
+          free: false,
+        },
+      }
+      const ended = renderPlanSummary("max", deals, PLAN_CATALOG, undefined, "2026-09-22")
+      assert(
+        ended.includes("25% off (ended 2026-05-01)"),
+        `must mark the deal ended, got:\n${ended}`,
+      )
+      assert(ended.includes("was $4/$12 in/out"), `the was row must stay, got:\n${ended}`)
+      const active = renderPlanSummary("max", deals, PLAN_CATALOG, undefined, "2026-04-30")
+      assert(
+        active.includes("25% off until 2026-05-01"),
+        `a live deal keeps the date, got:\n${active}`,
+      )
+    },
+  ],
+
+  [
     "renderPlanSummary names Team Pro from the catalog",
     () => {
       const out = renderPlanSummary("teampro", MODEL_DEALS, PLAN_CATALOG)

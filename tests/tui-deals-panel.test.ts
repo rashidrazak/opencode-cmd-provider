@@ -8,19 +8,22 @@ run([
   [
     "extracts rows from a model with full deals data",
     () => {
-      const rows = dealsRows({
-        options: {
-          cmd: {
-            tier: "premium",
-            allowance: { goat: 40, pro: 60 },
-            discount: { pct: 50, endsAt: "2026-12-31" },
-            was: { input: 1.5, output: 7.5 },
-            now: { input: 0.75, output: 3.75 },
-            benchmark: { intelligence: 56, tokPerSec: 339 },
-            free: false,
+      const rows = dealsRows(
+        {
+          options: {
+            cmd: {
+              tier: "premium",
+              allowance: { goat: 40, pro: 60 },
+              discount: { pct: 50, endsAt: "2026-12-31" },
+              was: { input: 1.5, output: 7.5 },
+              now: { input: 0.75, output: 3.75 },
+              benchmark: { intelligence: 56, tokPerSec: 339 },
+              free: false,
+            },
           },
         },
-      })
+        "2026-09-22",
+      )
       assertEqual(rows, [
         ["Tier", "Premium"],
         ["GOAT allowance", "$40/mo"],
@@ -40,21 +43,74 @@ run([
       // Upstream computes discounted rates in JS (`6 × 0.6`), so the captured
       // RSC rates carry residue like `output: 3.5999999999999996` (the
       // grok-4.7 40% deal). The panel renders what is paid, not the raw float.
-      const rows = dealsRows({
-        options: {
-          cmd: {
-            discount: { pct: 40, endsAt: "2026-09-27" },
-            was: { input: 2, output: 6 },
-            now: { input: 1.2, output: 3.5999999999999996 },
-            free: false,
+      const rows = dealsRows(
+        {
+          options: {
+            cmd: {
+              discount: { pct: 40, endsAt: "2026-09-27" },
+              was: { input: 2, output: 6 },
+              now: { input: 1.2, output: 3.5999999999999996 },
+              free: false,
+            },
           },
         },
-      })
+        "2026-09-22",
+      )
       assertEqual(rows, [
         ["Deal", "40% off until 2026-09-27"],
         ["Was", "$2/$6 in/out"],
         ["Now", "$1.2/$3.6 in/out"],
       ])
+    },
+  ],
+
+  [
+    "an ended deal reads as ended instead of claiming an until-date (issue #90)",
+    () => {
+      // The catalog keeps `endsAt` verbatim — upstream still lists the deal
+      // after its date passes (Qwen 3.7 Max's expired 2026-06-22 discount
+      // survives every refresh). The panel, not the catalog, is where the
+      // date's passing becomes visible, and the `was`/`now` rates stay:
+      // they describe what is billed, expired deal metadata or not.
+      const cmd = {
+        discount: { pct: 25, endsAt: "2026-05-01" },
+        was: { input: 4, output: 12 },
+        now: { input: 3, output: 9 },
+        free: false,
+      }
+      const dealRow = (today: string) => dealsRows({ options: { cmd } }, today)[0]
+      assertEqual(dealRow("2026-04-30"), ["Deal", "25% off until 2026-05-01"])
+      // The named day is still a live deal: upstream expires at 23:59:59Z of it.
+      assertEqual(dealRow("2026-05-01"), ["Deal", "25% off until 2026-05-01"])
+      assertEqual(dealRow("2026-05-02"), ["Deal", "25% off (ended 2026-05-01)"])
+      assertEqual(dealsRows({ options: { cmd } }, "2026-05-02"), [
+        ["Deal", "25% off (ended 2026-05-01)"],
+        ["Was", "$4/$12 in/out"],
+        ["Now", "$3/$9 in/out"],
+      ])
+      // v2's surface shares the one rule (the host split is ADR-0010's, not
+      // the formatter's).
+      assertEqual(
+        dealsRowsV2(
+          { settings: { cmd: { discount: { pct: 25, endsAt: "2026-05-01" }, free: false } } },
+          "2026-05-02",
+        ),
+        [["Deal", "25% off (ended 2026-05-01)"]],
+      )
+      // A non-ISO `endsAt` has no date to compare and keeps the historic
+      // phrasing. No catalog entry carries one today (a free deal yields no
+      // `discount` object at all), so this pins the pass-through only.
+      assertEqual(
+        dealsRows(
+          {
+            options: {
+              cmd: { discount: { pct: 50, endsAt: "while capacity lasts" }, free: false },
+            },
+          },
+          "2026-05-02",
+        ),
+        [["Deal", "50% off until while capacity lasts"]],
+      )
     },
   ],
 
