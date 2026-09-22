@@ -14,6 +14,7 @@ run([
       assertEqual(vendorFamilyForModel("moonshotai/Kimi-K3"), "kimi")
       assertEqual(vendorFamilyForModel("zai-org/GLM-5.3"), "glm")
       assertEqual(vendorFamilyForModel("z-ai/glm-5.3-flash"), "glm")
+      assertEqual(vendorFamilyForModel("z-ai/glm-5.3-flashx"), "glm")
       assertEqual(vendorFamilyForModel("MiniMaxAI/MiniMax-M3"), "minimax")
       assertEqual(vendorFamilyForModel("xiaomi/mimo-v2.5"), "mimo")
       assertEqual(vendorFamilyForModel("stepfun/Step-3.7-Flash"), "step")
