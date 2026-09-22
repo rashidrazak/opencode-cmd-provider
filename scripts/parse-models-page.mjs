@@ -31,8 +31,9 @@
 //   - context cell: bare text like `1M`, `1.1M`, `262K`, `256K`, `200K`,
 //     `400K`, `500K` (no "—" on the live page today);
 //   - price cells: `$1.50`, `Free`, `—` (cache-write often —), a struck
-//     list-price + new price for deals (`<s>$0.60</s>$0.30`), and an
-//     optional band button `+N` whose `aria-label` is
+//     list-price + new price for deals (`<s>$0.60</s>$0.30`), a struck
+//     list-price in front of `Free` (`<s>$0.042</s>Free`, the Jev Free deal
+//     live shape), and an optional band button `+N` whose `aria-label` is
 //     `<Name>: N context price bands`;
 //   - caps cell: a button with `aria-label="Capabilities: …"` listing the
 //     capability tokens. The four known combinations are exactly the
@@ -74,9 +75,10 @@ export function parseCapsLabel(label) {
 
 /**
  * Strips a rate cell into { price, crossed }. `banded` is decided by the
- * caller via the presence of a `context price bands` aria-label. The
- * struck list price (`<s>$0.60</s>`) is returned as `crossed` so callers
- * can emit a deal note; the new price is `price`.
+ * caller via the presence of a `context price bands` aria-label. A struck
+ * list price (`<s>$0.60</s>`, or a struck price in front of `Free`) is
+ * returned as `crossed` so callers can emit a deal note; the new price is
+ * `price`.
  */
 export function parseRateCell(cell) {
   const trimmed = String(cell).trim()
@@ -90,6 +92,10 @@ export function parseRateCell(cell) {
   const crossed = struck ? cleanText(struck[1]) : null
   const withoutStruck = trimmed.replace(/<s[^>]*>[\s\S]*?<\/s>/i, "")
   const text = cleanText(withoutStruck)
+  // A struck list price can precede `Free` on a discounted free deal (live
+  // shape 2026-09-22: `<s>$0.042</s>Free`). The current price is still zero;
+  // the struck value is the crossed rate.
+  if (/^free$/i.test(text)) return { price: 0, crossed }
   const match = text.match(/^\$([0-9.]+)(?:\s*\+\s*\d+)?$/)
   if (!match) {
     throw new Error(`could not parse rate cell "${trimmed}"`)

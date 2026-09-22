@@ -162,6 +162,14 @@ run([
         crossed: null,
       })
       assertEqual(parseRateCell("<span><s>$0.60</s>$0.30</span>"), { price: 0.3, crossed: "$0.60" })
+      // A struck list price in front of `Free` — the Jev Free deal live
+      // shape (2026-09-22). Current price zero, struck value crossed.
+      assertEqual(
+        parseRateCell(
+          '<span class="block leading-5 whitespace-nowrap text-foreground"><s class="mr-1 text-[10px] text-muted-foreground/50">$0.042</s>Free</span>',
+        ),
+        { price: 0, crossed: "$0.042" },
+      )
       throws(() => parseRateCell("nope"), /could not parse rate cell/)
     },
   ],
