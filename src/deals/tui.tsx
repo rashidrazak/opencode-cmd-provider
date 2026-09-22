@@ -17,6 +17,7 @@ import type { RGBA } from "@opentui/core"
 import type { Provider } from "@opencode-ai/sdk/v2"
 import type { TuiPlugin, TuiPluginApi, TuiPluginModule } from "@opencode-ai/plugin/tui"
 import { DEAL_SOURCE_URL, PLAN_CATALOG } from "./catalog.js"
+import { formatRate } from "./format.js"
 import type { PlanId } from "../catalog/plans.js"
 import type { V2TuiContext, V2TuiModel, V2TuiPluginDefinition } from "../plugin/v2-tui-types.js"
 
@@ -48,9 +49,10 @@ function tierDisplay(tier: string): string {
   return TIER_DISPLAY[tier] ?? tier
 }
 
+/** Deal rates, rounded for display (format.ts explains the residue). */
 function rateString(rates: { input?: unknown; output?: unknown }): string | undefined {
   if (typeof rates.input !== "number" || typeof rates.output !== "number") return undefined
-  return `$${rates.input}/$${rates.output} in/out`
+  return `$${formatRate(rates.input)}/$${formatRate(rates.output)} in/out`
 }
 
 /** Renders the `cmd` payload (identical on both hosts) into sidebar rows. */

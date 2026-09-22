@@ -33,6 +33,7 @@ import {
 import { isRecord, stringValue } from "../provider/converters.js"
 import type { V2ToolDefinition } from "../plugin/v2-types.js"
 import { MODEL_DEALS, PLAN_CATALOG, type ModelDeals, type PlanInfo } from "./catalog.js"
+import { formatRate } from "./format.js"
 
 const PLAN_DISPLAY: Record<PlanId, string> = {
   go: "Go",
@@ -369,9 +370,9 @@ export function renderPlanSummary(
     } else {
       const rates =
         d.discount && d.was
-          ? `was $${d.was.input}/$${d.was.output} in/out`
+          ? `was $${formatRate(d.was.input)}/$${formatRate(d.was.output)} in/out`
           : d.peakOffPeak
-            ? `$${d.peakOffPeak.peak.input}/$${d.peakOffPeak.peak.output} peak`
+            ? `$${formatRate(d.peakOffPeak.peak.input)}/$${formatRate(d.peakOffPeak.peak.output)} peak`
             : "—"
       lines.push(`| \`${safeId}\` | ${dealText} | ${rates} |`)
     }

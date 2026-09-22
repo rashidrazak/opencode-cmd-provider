@@ -35,6 +35,49 @@ run([
   ],
 
   [
+    "rounds binary-float residue in deal rates",
+    () => {
+      // Upstream computes discounted rates in JS (`6 × 0.6`), so the captured
+      // RSC rates carry residue like `output: 3.5999999999999996` (the
+      // grok-4.7 40% deal). The panel renders what is paid, not the raw float.
+      const rows = dealsRows({
+        options: {
+          cmd: {
+            discount: { pct: 40, endsAt: "2026-09-27" },
+            was: { input: 2, output: 6 },
+            now: { input: 1.2, output: 3.5999999999999996 },
+            free: false,
+          },
+        },
+      })
+      assertEqual(rows, [
+        ["Deal", "40% off until 2026-09-27"],
+        ["Was", "$2/$6 in/out"],
+        ["Now", "$1.2/$3.6 in/out"],
+      ])
+    },
+  ],
+
+  [
+    "renders already-clean deal rates unchanged",
+    () => {
+      const rows = dealsRows({
+        options: {
+          cmd: {
+            was: { input: 0.435, output: 0.87 },
+            now: { input: 1.2, output: 3.6 },
+            free: false,
+          },
+        },
+      })
+      assertEqual(rows, [
+        ["Was", "$0.435/$0.87 in/out"],
+        ["Now", "$1.2/$3.6 in/out"],
+      ])
+    },
+  ],
+
+  [
     "displays open source tier name",
     () => {
       const rows = dealsRows({
