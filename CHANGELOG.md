@@ -1,3 +1,157 @@
+## 2.1.5 - 2026-09-22
+
+**Highlight — GLM-5.3 answers stream as one block again, and an effort the
+model does not advertise stops being silently dropped.** Command Code's GLM-5.3
+attaches a cumulative `usage` object to every chunk of the OpenAI dialect, and
+the parser read any usage-bearing chunk as the turn's terminal: each token
+closed and reopened the open reasoning or text part, so the Host rendered one
+answer one word per line — and a fragmented tool call arrived as a truncated
+call per fragment. A usage report is terminal only where OpenAI puts it, on a
+trailing chunk with no choices after a `finish_reason`
+([#213](https://github.com/rashidrazak/opencode-cmd-provider/pull/213) by
+[@unsnow-iac](https://github.com/unsnow-iac), ADR-0018). Separately, a requested
+effort outside a model's advertised vocabulary — `high` on Qwen 3.8 Max,
+`medium` on GLM-5.3 — was silently dropped, leaving the provider's default in
+charge of a request the user had asked to make deeper or shallower; it now snaps
+to the nearest advertised level
+([#219](https://github.com/rashidrazak/opencode-cmd-provider/pull/219) by
+[@unsnow-iac](https://github.com/unsnow-iac), ADR-0019). The rest of the release
+lands the catalog refreshed on 2026-09-22 — five new models from `command-code`
+1.62.1 — and rounds the deal rates both Deals surfaces render.
+
+### Fixes
+
+- **A usage report is not by itself a terminal on the OpenAI dialect**
+  ([#213](https://github.com/rashidrazak/opencode-cmd-provider/pull/213),
+  ADR-0018): usage on a chunk that carries choices is a running report; only
+  the trailing `choices: []` report is terminal on usage alone, and a chunk
+  with choices ends the turn only through a `finish_reason`. The split terminal
+  and the finish guards (issues
+  [#171](https://github.com/rashidrazak/opencode-cmd-provider/issues/171),
+  [#187](https://github.com/rashidrazak/opencode-cmd-provider/issues/187)) are
+  unchanged. A stream that never sends `finish_reason` is now a
+  `TruncatedStreamError` — retryable while nothing is visible — instead of a
+  completed turn synthesized off the first usage report, and the same fix keeps
+  a fragmented tool call one call with complete arguments.
+- **An out-of-vocabulary reasoning effort snaps to the nearest advertised
+  level** ([#219](https://github.com/rashidrazak/opencode-cmd-provider/pull/219),
+  ADR-0019): the ladder is
+  `off < minimal < low < medium < high < xhigh < max`, ties snap upward, so
+  `high` on Qwen 3.8 Max reaches the wire as `xhigh`, `medium` on GLM-5.3 as
+  `high`, and `low` on DeepSeek V4 Pro as `high`. `off`, non-ladder strings,
+  and reasoning-without-efforts models still send nothing, and the host-visible
+  variant cycle is unchanged — the snap is request-path only.
+- **`cmd_plan_summary` reads as the plan check, and a pinned plan says so**
+  ([#218](https://github.com/rashidrazak/opencode-cmd-provider/pull/218),
+  closes [#214](https://github.com/rashidrazak/opencode-cmd-provider/issues/214),
+  ADR-0017 amendment): the tool description now opens with the identity use —
+  which plan and account the credential is on, and the provenance line that
+  names the source — instead of the allowance tables, so an agent asking "what
+  plan are we on?" reaches for the tool instead of reading a stale auth file
+  (incident 2026-09-19). Passing the `plan` argument is documented as a pin —
+  it skips detection and the credential lookup, claims no account, and is for
+  comparing plans — and the header now marks it:
+  `# Command Code plan: Go (pinned)`. An unrecognized value is not a pin and
+  falls back to detection.
+- **Discounted deal rates render as money**
+  ([#224](https://github.com/rashidrazak/opencode-cmd-provider/pull/224),
+  closes [#222](https://github.com/rashidrazak/opencode-cmd-provider/issues/222)):
+  upstream computes the discount in JS (`6 × 0.6`) and ships the artifact in
+  the RSC, so the sidebar showed `Now: $1.2/$3.5999999999999996 in/out` while
+  `grok-4.7`'s 40% launch deal is active. A shared `formatRate` helper — a
+  dependency-free leaf in `src/deals/format.ts` — now rounds every rate the
+  slice renders, on both hosts and in `cmd_plan_summary`, so the two surfaces
+  cannot disagree and the generated catalog stays a verbatim projection of the
+  captured fixture.
+- **Every Snapshot model resolves to a vendor family**
+  ([#220](https://github.com/rashidrazak/opencode-cmd-provider/pull/220)):
+  GLM-5.3 Flash and FlashX live under `z-ai/` while the rest of the family uses
+  `zai-org/`, and only the latter had an entry, so the two Flash models left
+  auto-registration with no `family` metadata; `meituan/` and `inclusionai/`
+  were the last two unmapped namespaces. All Snapshot models now map. The
+  `vendor.ts` header no longer claims the table cannot go stale — the values
+  derive from the id namespace, but the prefix table is hand-maintained.
+- **Pinned slug-map drift is a pending report, never a red cron**
+  ([#216](https://github.com/rashidrazak/opencode-cmd-provider/pull/216),
+  issues [#108](https://github.com/rashidrazak/opencode-cmd-provider/issues/108),
+  [#132](https://github.com/rashidrazak/opencode-cmd-provider/issues/132)): the
+  daily catalog-refresh went red on 2026-09-19 and 2026-09-20 because upstream
+  renamed `meituan/LongCat-2.0:free` → `meituan/LongCat-2.0`; the refresh
+  regenerated the catalogs correctly and then a membership assertion died
+  before the PR step, every day. `slugMapPinReport` now classifies the three
+  drift shapes — stale value, dangling key, docs-ahead page slug — as
+  `slug map pending —` lines in the refresh log and the refresh-PR body, and
+  the snapshot refresh no longer aborts on an unpinned page slug.
+- **The nine unpinned models-page slugs are pinned**
+  ([#223](https://github.com/rashidrazak/opencode-cmd-provider/pull/223)):
+  each maps to an already-shipped Snapshot id, verified against upstream's own
+  slug+id records in the committed RSC fixtures, so the models-page evidence
+  rung (Context, rates, Caps, reasoning) covers them. The generated catalogs
+  are byte-identical — the page evidence is redundant today — and the pending
+  report is clean.
+
+### Documentation
+
+- **ADR-0018** records the usage-is-not-a-terminal rule with the live GLM-5.3
+  wire and the failure mode of a stream that never sends `finish_reason`;
+  **ADR-0019** records the effort snap, the tie-upward rule, and the CLI-parity
+  note; **ADR-0017** carries a dated amendment for the pinned-plan header
+  marker. `docs/TECHNICAL.md` gains the terminal rule under "Stream termination
+  and retries" and the effort snap under "Reasoning support"; `README.md`
+  records the `(pinned)` header.
+
+### Dependencies
+
+- The npm minor/patch group
+  ([#217](https://github.com/rashidrazak/opencode-cmd-provider/pull/217)):
+  `@ai-sdk/provider` 4.0.14 → 4.0.17, `@opencode-ai/plugin` 1.18.30 → 1.18.31,
+  `@types/node` 26.5.1 → 26.6.1, `prettier` 3.9.6 → 3.9.7.
+
+### Model catalog
+
+## Model catalog
+
+- **FACTS_PACKAGE_VERSION**: `1.58.1` → `1.62.1` — the refresh reads the newer
+  CLI bundle's `models.md`; the table below carries what moved.
+- **FACTS_LAST_REFRESHED**: `2026-09-20` → `2026-09-22`
+
+| Model                             | Change | Before | After                                  |
+| --------------------------------- | ------ | ------ | -------------------------------------- |
+| `stepfun/Step-5-Preview`          | added  | —      | Step 5 Preview · 1000000 ctx           |
+| `xai/grok-4.7`                    | added  | —      | Grok 4.7 · 500000 ctx                  |
+| `xiaomi/mimo-v2.6-flash`          | added  | —      | MiMo V2.6 Flash · 1050000 ctx          |
+| `xiaomi/mimo-v2.6-pro`            | added  | —      | MiMo V2.6 Pro · 1050000 ctx            |
+| `xiaomi/mimo-v2.6-pro-ultraspeed` | added  | —      | MiMo V2.6 Pro UltraSpeed · 1050000 ctx |
+
+### API divergence
+
+- `gpt-6-astra`: in package membership but not served by the listing API
+
+### Reasoning classification
+
+## Reasoning classification
+
+- **CLASSIFICATION_LAST_REFRESHED**: `2026-09-20` → `2026-09-22`
+
+| Model                    | Change | Before | After                                    |
+| ------------------------ | ------ | ------ | ---------------------------------------- |
+| `stepfun/Step-5-Preview` | new    | —      | efforts model (low, medium, high)        |
+| `xai/grok-4.7`           | new    | —      | efforts model (low, medium, high, xhigh) |
+
+### Deals intelligence
+
+## Deals intelligence
+
+- **DEAL_LAST_REFRESHED**: `2026-09-20` → `2026-09-22`
+
+| Model                             | Change | Before | After      |
+| --------------------------------- | ------ | ------ | ---------- |
+| `stepfun/Step-5-Preview`          | added  | —      | opensource |
+| `xai/grok-4.7`                    | added  | —      | premium    |
+| `xiaomi/mimo-v2.6-flash`          | added  | —      | opensource |
+| `xiaomi/mimo-v2.6-pro`            | added  | —      | opensource |
+| `xiaomi/mimo-v2.6-pro-ultraspeed` | added  | —      | opensource |
+
 ## 2.1.4 - 2026-09-20
 
 ### Model catalog
