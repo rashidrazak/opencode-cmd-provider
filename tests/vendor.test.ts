@@ -19,6 +19,8 @@ run([
       assertEqual(vendorFamilyForModel("xiaomi/mimo-v2.5"), "mimo")
       assertEqual(vendorFamilyForModel("stepfun/Step-3.7-Flash"), "step")
       assertEqual(vendorFamilyForModel("tencent/hy3-paid"), "tencent")
+      assertEqual(vendorFamilyForModel("meituan/LongCat-2.0"), "longcat")
+      assertEqual(vendorFamilyForModel("inclusionai/ling-3.0-flash-sante:free"), "ling")
       assertEqual(vendorFamilyForModel("nvidia/nemotron-3-ultra-550b-a55b"), "nemotron")
       assertEqual(vendorFamilyForModel("thinkingmachines/inkling"), "inkling")
       assertEqual(vendorFamilyForModel("poolside/laguna-s-2.1-free"), "laguna")

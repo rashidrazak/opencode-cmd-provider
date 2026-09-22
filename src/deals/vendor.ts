@@ -14,6 +14,8 @@ const VENDOR_FAMILIES: Readonly<Record<string, string>> = {
   "xiaomi/": "mimo",
   "stepfun/": "step",
   "tencent/": "tencent",
+  "meituan/": "longcat",
+  "inclusionai/": "ling",
   "nvidia/": "nemotron",
   "thinkingmachines/": "inkling",
   "poolside/": "laguna",
