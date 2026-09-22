@@ -52,8 +52,11 @@ request.
 
 - Request bodies change only for efforts that were previously dropped; every
   value the model advertises is sent exactly as before.
-- A cross-family effort setting now has an effect on every reasoning model
-  instead of silently reverting to the provider default on some of them.
+- A cross-family effort setting now has an effect on every reasoning model that
+  advertises levels, instead of silently reverting to the provider default on
+  the families whose vocabulary it missed. A reasoning-without-efforts model is
+  unaffected by construction: it has no advertised vocabulary to snap into, so
+  it keeps letting Command Code choose the depth.
 - `tests/reasoning.test.ts` pins the snap table on synthetic vocabularies
   (it owns the mapping behavior, not upstream's current values), including
   the tie-upward rule and the `off`/non-ladder/no-levels exceptions, and
