@@ -33,7 +33,11 @@ import {
 import { resolveProviderNpm } from "../src/plugin/version.js"
 import { MODEL_DEALS } from "../src/deals/catalog.js"
 import { enrichCommandCodeModelsV2 } from "../src/deals/enrichment.js"
-import { planSummaryTool, planSummaryV2Tool } from "../src/deals/plan-summary.js"
+import {
+  planSummaryTool,
+  planSummaryV2Tool,
+  PLAN_SUMMARY_ARG_DESCRIPTION,
+} from "../src/deals/plan-summary.js"
 import { assert, assertEqual, run, withEnvVars } from "./harness.js"
 import type {
   V2ProviderEditor,
@@ -543,7 +547,7 @@ run([
       assertEqual(tool.input, {
         type: "object",
         properties: {
-          plan: { type: "string", description: "go|goat|pro|max|max20|teampro|provider" },
+          plan: { type: "string", description: PLAN_SUMMARY_ARG_DESCRIPTION },
         },
         additionalProperties: false,
       })

@@ -67,3 +67,13 @@ Five rules travel with the line:
   is added to tool output.
 - Every billing lookup already fetched `whoami` for the org scope, so the label
   costs no additional request; only a pinned plan renders a source without one.
+
+## Amendment: a pinned header says so (2026-09-20, issue #214)
+
+Rule 3's pinned summary now renders `# Command Code plan: Go (pinned)`. The
+header used to be identical to a detected plan's — only the provenance line
+below it named the pin — so an agent that pinned a plan it merely believed in
+could read its own belief back as a detection. `(pinned)` is the header's own
+claim and `unknown` never takes it, because a pin always names a plan. The
+provenance line, the no-account rule, and the no-request rule are unchanged;
+this is the header carrying the same distinction the line already made.

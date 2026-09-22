@@ -95,9 +95,49 @@ run([
         thinkingLevelMap: { high: "high", max: "max" } as Record<string, string | null>,
       }
       assertEqual(mappedReasoningEffort(model, { reasoning: "high" }), "high")
-      assertEqual(mappedReasoningEffort(model, { reasoning: "minimal" }), undefined)
+      // Out-of-vocabulary ladder levels snap to the nearest advertised one,
+      // ties upward (ADR-0019): minimal → high on a {high, max} model.
+      assertEqual(mappedReasoningEffort(model, { reasoning: "minimal" }), "high")
       assertEqual(mappedReasoningEffort(model, { reasoning: "off" }), undefined)
       assertEqual(mappedReasoningEffort(model, undefined), undefined)
+    },
+  ],
+
+  [
+    "mappedReasoningEffort snaps out-of-vocabulary levels to the nearest advertised one (ADR-0019)",
+    () => {
+      // Synthetic vocabularies — the families' real sets are generated data
+      // (Qwen 3.8: low/medium/xhigh; DeepSeek V4 and GLM: subsets of
+      // low/high/max); this test owns the snapping behavior, not upstream's
+      // current values (pricing-lint gate: tests/no-upstream-value-pins.test.ts).
+      const qwen = {
+        reasoning: true,
+        thinkingLevelMap: { low: "low", medium: "medium", xhigh: "xhigh" } as Record<
+          string,
+          string | null
+        >,
+      }
+      // Ties snap upward: high is equidistant to medium and xhigh.
+      assertEqual(mappedReasoningEffort(qwen, { reasoning: "high" }), "xhigh")
+      assertEqual(mappedReasoningEffort(qwen, { reasoning: "max" }), "xhigh")
+      assertEqual(mappedReasoningEffort(qwen, { reasoning: "minimal" }), "low")
+      const glm = {
+        reasoning: true,
+        thinkingLevelMap: { low: "low", high: "high", max: "max" } as Record<string, string | null>,
+      }
+      assertEqual(mappedReasoningEffort(glm, { reasoning: "medium" }), "high")
+      assertEqual(mappedReasoningEffort(glm, { reasoning: "xhigh" }), "max")
+      assertEqual(mappedReasoningEffort(glm, { reasoning: "minimal" }), "low")
+      const deepseek = {
+        reasoning: true,
+        thinkingLevelMap: { high: "high", max: "max" } as Record<string, string | null>,
+      }
+      assertEqual(mappedReasoningEffort(deepseek, { reasoning: "low" }), "high")
+      assertEqual(mappedReasoningEffort(deepseek, { reasoning: "medium" }), "high")
+      // Not a ladder level: dropped, not guessed.
+      assertEqual(mappedReasoningEffort(glm, { reasoning: "turbo" }), undefined)
+      // Reasoning without advertised levels: nothing to snap to.
+      assertEqual(mappedReasoningEffort({ reasoning: true }, { reasoning: "high" }), undefined)
     },
   ],
 
