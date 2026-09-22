@@ -50,6 +50,9 @@ export const MODEL_SNAPSHOT: readonly CatalogModel[] = [
   { id: "MiniMaxAI/MiniMax-M3", name: "MiniMax M3", contextLength: 1000000, contextSource: "models.md", efforts: ["low","medium","high"], cost: { input: 0.3, output: 1.2, cacheRead: 0.06, cacheWrite: 0 }, costSource: "models.md" },
   { id: "MiniMaxAI/MiniMax-M2.7", name: "MiniMax M2.7", contextLength: 200000, contextSource: "rsc", efforts: null, cost: { input: 0.3, output: 1.2, cacheRead: 0.06, cacheWrite: 0 }, costSource: "models.md" },
   { id: "MiniMaxAI/MiniMax-M2.5", name: "MiniMax M2.5", contextLength: 200000, contextSource: "models.md", efforts: null, cost: { input: 0.3, output: 1.2, cacheRead: 0.03, cacheWrite: 0 }, costSource: "models.md" },
+  { id: "xiaomi/mimo-v2.6-pro", name: "MiMo V2.6 Pro", contextLength: 1050000, contextSource: "models.md", efforts: null, cost: { input: 0.435, output: 0.87, cacheRead: 0.0036, cacheWrite: 0 }, costSource: "models.md" },
+  { id: "xiaomi/mimo-v2.6-pro-ultraspeed", name: "MiMo V2.6 Pro UltraSpeed", contextLength: 1050000, contextSource: "models.md", efforts: null, cost: { input: 4.35, output: 8.7, cacheRead: 0.036, cacheWrite: 0 }, costSource: "models.md" },
+  { id: "xiaomi/mimo-v2.6-flash", name: "MiMo V2.6 Flash", contextLength: 1050000, contextSource: "models.md", efforts: null, cost: { input: 0.14, output: 0.28, cacheRead: 0.0028, cacheWrite: 0 }, costSource: "models.md" },
   { id: "xiaomi/mimo-v2.5-pro", name: "MiMo V2.5 Pro", contextLength: 1000000, contextSource: "models.md", efforts: null, cost: { input: 0.435, output: 0.87, cacheRead: 0.0036, cacheWrite: 0 }, costSource: "models.md" },
   { id: "xiaomi/mimo-v2.5", name: "MiMo V2.5", contextLength: 1000000, contextSource: "models.md", efforts: null, cost: { input: 0.14, output: 0.28, cacheRead: 0.0028, cacheWrite: 0 }, costSource: "models.md" },
   { id: "Qwen/Qwen3.8-Omni-Flash", name: "Qwen 3.8 Omni Flash", contextLength: 1000000, contextSource: "models.md", efforts: ["low","medium","xhigh"], cost: { input: 0.15, output: 0.47, cacheRead: 0.016, cacheWrite: 0 }, costSource: "models.md" },
@@ -63,6 +66,7 @@ export const MODEL_SNAPSHOT: readonly CatalogModel[] = [
   { id: "Qwen/Qwen3.6-Max-Preview", name: "Qwen 3.6 Max Preview", contextLength: 200000, contextSource: "rsc", efforts: null, cost: { input: 1.3, output: 7.8, cacheRead: 0.26, cacheWrite: 1.63 }, costSource: "models.md" },
   { id: "Qwen/Qwen3.6-Plus", name: "Qwen 3.6 Plus", contextLength: 200000, contextSource: "rsc", efforts: null, cost: { input: 0.5, output: 3, cacheRead: 0.1, cacheWrite: 0 }, costSource: "models.md" },
   { id: "meituan/LongCat-2.0", name: "LongCat 2.0", contextLength: 1050000, contextSource: "models.md", efforts: null, cost: { input: 0.3, output: 1.2, cacheRead: 0.006, cacheWrite: 0 }, costSource: "models.md" },
+  { id: "stepfun/Step-5-Preview", name: "Step 5 Preview", contextLength: 1000000, contextSource: "models.md", efforts: ["low","medium","high"], cost: { input: 1, output: 2.7, cacheRead: 0.05, cacheWrite: 0 }, costSource: "models.md" },
   { id: "stepfun/Step-3.7-Flash", name: "Step 3.7 Flash", contextLength: 256000, contextSource: "models.md", efforts: null, cost: { input: 0.2, output: 1.15, cacheRead: 0.04, cacheWrite: 0 }, costSource: "models.md" },
   { id: "stepfun/Step-3.5-Flash", name: "Step 3.5 Flash", contextLength: 1000000, contextSource: "models.md", efforts: null, cost: { input: 0.1, output: 0.3, cacheRead: 0.02, cacheWrite: 0 }, costSource: "models.md" },
   { id: "tencent/hy3-paid", name: "Tencent Hy3", contextLength: 262000, contextSource: "models.md", efforts: null, cost: { input: 0.14, output: 0.58, cacheRead: 0.035, cacheWrite: 0 }, costSource: "models.md" },
@@ -102,4 +106,5 @@ export const MODEL_SNAPSHOT: readonly CatalogModel[] = [
   { id: "meta/muse-spark-1.3-contributor", name: "Muse Spark 1.3 Contributor", contextLength: 1050000, contextSource: "models.md", efforts: ["low","medium","high","xhigh"], cost: { input: 0.1, output: 0.2, cacheRead: 0.002, cacheWrite: 0 }, costSource: "models.md" },
   { id: "xai/grok-4.5", name: "Grok 4.5", contextLength: 500000, contextSource: "models.md", efforts: ["low","medium","high"], cost: { input: 2, output: 6, cacheRead: 0.5, cacheWrite: 0 }, costSource: "models.md" },
   { id: "xai/grok-4.6", name: "Grok 4.6", contextLength: 500000, contextSource: "models.md", efforts: ["low","medium","high","xhigh"], cost: { input: 2, output: 6, cacheRead: 0.5, cacheWrite: 0 }, costSource: "models.md" },
+  { id: "xai/grok-4.7", name: "Grok 4.7", contextLength: 500000, contextSource: "models.md", efforts: ["low","medium","high","xhigh"], cost: { input: 1.2, output: 3.6, cacheRead: 0.3, cacheWrite: 0 }, costSource: "models.md" },
 ]

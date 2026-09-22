@@ -6,10 +6,10 @@
 // parse from the CLI bundle (dist/cli.mjs). Regenerate with
 // `npm run refresh:snapshot`.
 
-export const FACTS_SOURCE_URL = "https://unpkg.com/command-code@1.58.1/dist/bundled/command-code-knowledge/reference/models.md"
-export const MODALITIES_SOURCE_URL = "https://unpkg.com/command-code@1.58.1/dist/cli.mjs"
-export const FACTS_PACKAGE_VERSION = "1.58.1"
-export const FACTS_LAST_REFRESHED = "2026-09-20"
+export const FACTS_SOURCE_URL = "https://unpkg.com/command-code@1.62.1/dist/bundled/command-code-knowledge/reference/models.md"
+export const MODALITIES_SOURCE_URL = "https://unpkg.com/command-code@1.62.1/dist/cli.mjs"
+export const FACTS_PACKAGE_VERSION = "1.62.1"
+export const FACTS_LAST_REFRESHED = "2026-09-22"
 
 export const MODEL_EFFORTS: Readonly<Record<string, readonly string[]>> = {
   "deepseek/deepseek-v4-pro": ["high","max"],
@@ -28,6 +28,7 @@ export const MODEL_EFFORTS: Readonly<Record<string, readonly string[]>> = {
   "Qwen/Qwen3.8-Max": ["low","medium","xhigh"],
   "Qwen/Qwen3.8-27B": ["low","medium","xhigh"],
   "Qwen/Qwen3.8-Flash": ["low","medium","xhigh"],
+  "stepfun/Step-5-Preview": ["low","medium","high"],
   "tencent/hy4-preview": ["low","medium","high"],
   "claude-sonnet-5": ["low","medium","high","xhigh","max"],
   "claude-sonnet-4-6": ["low","medium","high","xhigh","max"],
@@ -58,6 +59,7 @@ export const MODEL_EFFORTS: Readonly<Record<string, readonly string[]>> = {
   "meta/muse-spark-1.3-contributor": ["low","medium","high","xhigh"],
   "xai/grok-4.5": ["low","medium","high"],
   "xai/grok-4.6": ["low","medium","high","xhigh"],
+  "xai/grok-4.7": ["low","medium","high","xhigh"],
 }
 
 export const MODEL_COSTS: Readonly<
@@ -83,6 +85,9 @@ export const MODEL_COSTS: Readonly<
   "MiniMaxAI/MiniMax-M3": { input: 0.3, output: 1.2, cacheRead: 0.06, cacheWrite: 0 },
   "MiniMaxAI/MiniMax-M2.7": { input: 0.3, output: 1.2, cacheRead: 0.06, cacheWrite: 0 },
   "MiniMaxAI/MiniMax-M2.5": { input: 0.3, output: 1.2, cacheRead: 0.03, cacheWrite: 0 },
+  "xiaomi/mimo-v2.6-pro": { input: 0.435, output: 0.87, cacheRead: 0.0036, cacheWrite: 0 },
+  "xiaomi/mimo-v2.6-pro-ultraspeed": { input: 4.35, output: 8.7, cacheRead: 0.036, cacheWrite: 0 },
+  "xiaomi/mimo-v2.6-flash": { input: 0.14, output: 0.28, cacheRead: 0.0028, cacheWrite: 0 },
   "xiaomi/mimo-v2.5-pro": { input: 0.435, output: 0.87, cacheRead: 0.0036, cacheWrite: 0 },
   "xiaomi/mimo-v2.5": { input: 0.14, output: 0.28, cacheRead: 0.0028, cacheWrite: 0 },
   "Qwen/Qwen3.8-Omni-Flash": { input: 0.15, output: 0.47, cacheRead: 0.016, cacheWrite: 0 },
@@ -96,6 +101,7 @@ export const MODEL_COSTS: Readonly<
   "Qwen/Qwen3.6-Max-Preview": { input: 1.3, output: 7.8, cacheRead: 0.26, cacheWrite: 1.63 },
   "Qwen/Qwen3.6-Plus": { input: 0.5, output: 3, cacheRead: 0.1, cacheWrite: 0 },
   "meituan/LongCat-2.0": { input: 0.3, output: 1.2, cacheRead: 0.006, cacheWrite: 0 },
+  "stepfun/Step-5-Preview": { input: 1, output: 2.7, cacheRead: 0.05, cacheWrite: 0 },
   "stepfun/Step-3.7-Flash": { input: 0.2, output: 1.15, cacheRead: 0.04, cacheWrite: 0 },
   "stepfun/Step-3.5-Flash": { input: 0.1, output: 0.3, cacheRead: 0.02, cacheWrite: 0 },
   "tencent/hy3-paid": { input: 0.14, output: 0.58, cacheRead: 0.035, cacheWrite: 0 },
@@ -135,6 +141,7 @@ export const MODEL_COSTS: Readonly<
   "meta/muse-spark-1.3-contributor": { input: 0.1, output: 0.2, cacheRead: 0.002, cacheWrite: 0 },
   "xai/grok-4.5": { input: 2, output: 6, cacheRead: 0.5, cacheWrite: 0 },
   "xai/grok-4.6": { input: 2, output: 6, cacheRead: 0.5, cacheWrite: 0 },
+  "xai/grok-4.7": { input: 1.2, output: 3.6, cacheRead: 0.3, cacheWrite: 0 },
 }
 
 export const MODEL_INPUT_MODALITIES: Readonly<
@@ -185,11 +192,16 @@ export const MODEL_INPUT_MODALITIES: Readonly<
   "moonshotai/Kimi-K3": ["text","image"],
   "sakana/fugu-ultra": ["text","image"],
   "stepfun/Step-3.7-Flash": ["text","image"],
+  "stepfun/Step-5-Preview": ["text","image"],
   "thinkingmachines/inkling": ["text","image"],
   "thinkingmachines/inkling-small": ["text","image"],
   "xai/grok-4.5": ["text","image"],
   "xai/grok-4.6": ["text","image"],
+  "xai/grok-4.7": ["text","image"],
   "xiaomi/mimo-v2.5": ["text","image"],
+  "xiaomi/mimo-v2.6-flash": ["text","image"],
+  "xiaomi/mimo-v2.6-pro": ["text","image"],
+  "xiaomi/mimo-v2.6-pro-ultraspeed": ["text","image"],
   "z-ai/glm-5.3-flash": ["text","image"],
   "z-ai/glm-5.3-flashx": ["text","image"],
 }

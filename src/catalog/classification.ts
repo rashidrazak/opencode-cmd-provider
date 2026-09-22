@@ -20,7 +20,7 @@ export const CLASSIFICATION_SOURCE_URLS: ReadonlyArray<string> = [
   "https://commandcode.ai/docs/plans/pro",
 ]
 
-export const CLASSIFICATION_LAST_REFRESHED = "2026-09-20"
+export const CLASSIFICATION_LAST_REFRESHED = "2026-09-22"
 
 // Active capability overrides. Empty = upstream data is truth.
 // Every entry requires a written justification naming the upstream
@@ -93,14 +93,19 @@ export const MODEL_REASONING_CAPABILITY: Readonly<Record<string, boolean>> = {
   "sakana/fugu-ultra": true,
   "stepfun/Step-3.5-Flash": true,
   "stepfun/Step-3.7-Flash": true,
+  "stepfun/Step-5-Preview": true,
   "tencent/hy3-paid": true,
   "tencent/hy4-preview": true,
   "thinkingmachines/inkling": true,
   "thinkingmachines/inkling-small": true,
   "xai/grok-4.5": true,
   "xai/grok-4.6": true,
+  "xai/grok-4.7": true,
   "xiaomi/mimo-v2.5": false,
   "xiaomi/mimo-v2.5-pro": false,
+  "xiaomi/mimo-v2.6-flash": false,
+  "xiaomi/mimo-v2.6-pro": false,
+  "xiaomi/mimo-v2.6-pro-ultraspeed": false,
   "z-ai/glm-5.3-flash": true,
   "z-ai/glm-5.3-flashx": true,
   "zai-org/GLM-5": false,
