@@ -86,6 +86,9 @@ run([
       assertEqual(normalizePlan("go"), "go")
       assertEqual(normalizePlan("individual-goat"), "goat")
       assertEqual(normalizePlan("individual-pro-v1"), "pro")
+      // the pre-reprice Pro SKU is not the docs row (issue #162)
+      assertEqual(normalizePlan("individual-pro"), "prolegacy")
+      assertEqual(normalizePlan("prolegacy"), "prolegacy")
       assertEqual(normalizePlan("individual-max"), "max")
       assertEqual(normalizePlan("individual-ultra"), "max20")
       assertEqual(normalizePlan("team-pro"), "teampro")
@@ -107,6 +110,9 @@ run([
         ["goat", "goat"],
         ["individual-goat", "goat"],
         ["pro", "pro"],
+        ["individual-pro-v1", "pro"],
+        ["prolegacy", "prolegacy"],
+        ["individual-pro", "prolegacy"],
         ["max", "max"],
         ["max10", "max"],
         ["max20", "max20"],
@@ -196,7 +202,11 @@ run([
           "/alpha/whoami": { org: null },
           "/alpha/billing/subscriptions": { data: { status, planId: "individual-pro" } },
         })
-        assertEqual(await resolvePlan(undefined, MOCK_ENV, { fetch }), "pro", `status ${status}`)
+        assertEqual(
+          await resolvePlan(undefined, MOCK_ENV, { fetch }),
+          "prolegacy",
+          `status ${status}`,
+        )
       }
       // canceled / unknown status must not resurrect the plan it used to hold
       for (const status of ["canceled", "unpaid", "paused", undefined]) {
@@ -354,7 +364,7 @@ run([
             fetch,
           },
         ),
-        "pro",
+        "prolegacy",
       )
       assertEqual(calls[0]!.url, "http://model-base/alpha/whoami")
       // option key wins over the env key, matching resolveApiKey precedence
@@ -915,7 +925,10 @@ run([
       assert(out.includes("plan: unknown"), "must name the unknown state")
       assert(out.includes("could not be detected"), "must explain detection failed")
       assert(out.includes("pass `plan`") || out.includes("Pass `plan`"), "must offer the override")
-      assert(out.includes("go|goat|pro|max|max20|teampro|provider"), "must list valid plans")
+      assert(
+        out.includes("go|goat|pro|prolegacy|max|max20|teampro|provider"),
+        "must list valid plans",
+      )
       assert(out.includes("pricing-limits"), "must link the live table")
       assert(!out.includes("buys $"), "must not show any plan's credits")
       assert(!out.includes("| Model |"), "must not show a plan's model table")
@@ -937,6 +950,25 @@ run([
       const out = renderPlanSummary("provider", MODEL_DEALS, PLAN_CATALOG)
       assert(out.includes("Provider"), "must name the plan")
       assert(out.includes("pay-as-you-go"), "must note PAYG")
+    },
+  ],
+
+  [
+    "renderPlanSummary renders the legacy Pro SKU with its own figures (issue #162)",
+    () => {
+      const out = renderPlanSummary("prolegacy", MODEL_DEALS, PLAN_CATALOG)
+      assert(out.includes("plan: Pro (legacy)"), "must name the legacy plan")
+      assert(
+        out.includes("$15/mo buys $30 of credits; 5-hour window $9, weekly window $18."),
+        `must render the pre-reprice row, got:\n${out}`,
+      )
+      assert(!out.includes("buys $80 of credits"), "must not claim the current Pro's pool")
+      assert(!out.includes("weekly window $40"), "must not claim the current Pro's windows")
+      assert(
+        out.includes("no per-model allowances"),
+        "the docs allowances belong to the current Pro, not this SKU",
+      )
+      assert(out.includes("| Model | Deal | Rates |"), "must fall back to the deals table")
     },
   ],
 

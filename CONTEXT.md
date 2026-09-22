@@ -74,10 +74,14 @@ The deals catalog plus its enrichment (v1: `model.options.cmd`, `context_over_20
 _Avoid_: deals feature, pricing UI
 
 **Plan identity**:
-The Command Code plan an account holds (Go, GOAT, Pro, Max 10×, Max 20×,
-Team Pro, Provider), resolved from an explicit pin (the `plan` tool argument,
+The Command Code plan an account holds (Go, GOAT, Pro, Pro (legacy), Max 10×,
+Max 20×, Team Pro, Provider), resolved from an explicit pin (the `plan` tool
+argument,
 `COMMANDCODE_PLAN`, a per-call provider option) or from the account's billing
-subscription, and **unknown** when neither resolves — never a default. The
+subscription, and **unknown** when neither resolves — never a default. Pro is
+two SKUs: the current `individual-pro-v1` renders as Pro, while the
+grandfathered, pre-reprice `individual-pro` renders as Pro (legacy) with its own
+price, credits and windows (issue #162). The
 vocabulary and alias table live in Core (`src/catalog/plans.ts`); transport
 selection reads only the explicit pin, so a Go account reaches the legacy
 endpoint through the plan-gate `403` fallback — the documented

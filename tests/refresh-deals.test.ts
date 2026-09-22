@@ -364,6 +364,12 @@ run([
       )
       assert(out.includes("PLAN_CATALOG"), "must emit PLAN_CATALOG")
       assert(
+        out.includes(
+          'prolegacy: { price: 15, credits: 30, window5h: 9, windowWeek: 18, display: "Pro (legacy)" }',
+        ),
+        "must emit the legacy Pro row (issue #162)",
+      )
+      assert(
         out.includes('export const DEAL_LAST_REFRESHED = "2026-08-28"'),
         "must surface lastRefreshed",
       )
