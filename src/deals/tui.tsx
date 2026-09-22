@@ -17,6 +17,7 @@ import type { RGBA } from "@opentui/core"
 import type { Provider } from "@opencode-ai/sdk/v2"
 import type { TuiPlugin, TuiPluginApi, TuiPluginModule } from "@opencode-ai/plugin/tui"
 import { DEAL_SOURCE_URL, PLAN_CATALOG } from "./catalog.js"
+import { formatRate } from "./format.js"
 import type { PlanId } from "../catalog/plans.js"
 import type { V2TuiContext, V2TuiModel, V2TuiPluginDefinition } from "../plugin/v2-tui-types.js"
 
@@ -48,21 +49,10 @@ function tierDisplay(tier: string): string {
   return TIER_DISPLAY[tier] ?? tier
 }
 
-/**
- * Rates discounted upstream in JS (`6 × 0.6`) reach the catalog as
- * binary-float residue (`3.5999999999999996`); round it off before it hits the
- * sidebar. Upstream's published per-million rates carry at most a few
- * decimals, so `toFixed(6)` is exact for clean values and noise-only for
- * residue — the generated catalog stays a verbatim projection of the
- * captured RSC.
- */
-function rateDisplay(value: number): string {
-  return String(Number(value.toFixed(6)))
-}
-
+/** Deal rates, rounded for display (format.ts explains the residue). */
 function rateString(rates: { input?: unknown; output?: unknown }): string | undefined {
   if (typeof rates.input !== "number" || typeof rates.output !== "number") return undefined
-  return `$${rateDisplay(rates.input)}/$${rateDisplay(rates.output)} in/out`
+  return `$${formatRate(rates.input)}/$${formatRate(rates.output)} in/out`
 }
 
 /** Renders the `cmd` payload (identical on both hosts) into sidebar rows. */

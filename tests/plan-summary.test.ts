@@ -14,7 +14,7 @@ import {
   type PlanSummaryOptions,
 } from "../src/deals/plan-summary.js"
 import { normalizePlan } from "../src/catalog/plans.js"
-import { MODEL_DEALS, PLAN_CATALOG } from "../src/deals/catalog.js"
+import { MODEL_DEALS, PLAN_CATALOG, type ModelDeals } from "../src/deals/catalog.js"
 import { assert, assertEqual, run } from "./harness.js"
 
 const OFFLINE_ENV: NodeJS.ProcessEnv = {} // no key → no network attempt
@@ -948,6 +948,35 @@ run([
       assert(out.includes("no per-model allowances"), "must be honest about max")
       assert(out.includes("Deal"), "must show a deal column")
       assert(out.includes("98% off"), "must list the MiMo deal")
+    },
+  ],
+
+  [
+    "renderPlanSummary rounds binary-float residue in deal rates (issue #222)",
+    () => {
+      const deals: Readonly<Record<string, ModelDeals>> = {
+        "x/residual-was": {
+          tier: "premium",
+          discount: { pct: 40, endsAt: "2026-09-27" },
+          was: { input: 1.2, output: 3.5999999999999996, cacheRead: 0.3 },
+          now: { input: 0.72, output: 2.1599999999999997, cacheRead: 0.18 },
+          free: false,
+        },
+        "x/residual-peak": {
+          tier: "opensource",
+          peakOffPeak: {
+            peak: { input: 0.6600000000000001, output: 1.98, cacheRead: 0.022, cacheWrite: 0 },
+            offPeak: { input: 0.66, output: 1.98, cacheRead: 0.022, cacheWrite: 0 },
+            windows: "01-04 & 06-10 UTC",
+          },
+          free: false,
+        },
+      }
+      const out = renderPlanSummary("max", deals, PLAN_CATALOG)
+      assert(out.includes("was $1.2/$3.6 in/out"), `the was row must be rounded, got:\n${out}`)
+      assert(out.includes("$0.66/$1.98 peak"), `the peak row must be rounded, got:\n${out}`)
+      assert(!out.includes("3.5999999999999996"), "no raw float may reach the summary")
+      assert(!out.includes("0.6600000000000001"), "no raw float may reach the summary")
     },
   ],
 
