@@ -48,9 +48,21 @@ function tierDisplay(tier: string): string {
   return TIER_DISPLAY[tier] ?? tier
 }
 
+/**
+ * Rates discounted upstream in JS (`6 × 0.6`) reach the catalog as
+ * binary-float residue (`3.5999999999999996`); round it off before it hits the
+ * sidebar. Upstream's published per-million rates carry at most a few
+ * decimals, so `toFixed(6)` is exact for clean values and noise-only for
+ * residue — the generated catalog stays a verbatim projection of the
+ * captured RSC.
+ */
+function rateDisplay(value: number): string {
+  return String(Number(value.toFixed(6)))
+}
+
 function rateString(rates: { input?: unknown; output?: unknown }): string | undefined {
   if (typeof rates.input !== "number" || typeof rates.output !== "number") return undefined
-  return `$${rates.input}/$${rates.output} in/out`
+  return `$${rateDisplay(rates.input)}/$${rateDisplay(rates.output)} in/out`
 }
 
 /** Renders the `cmd` payload (identical on both hosts) into sidebar rows. */
