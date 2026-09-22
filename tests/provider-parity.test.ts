@@ -883,6 +883,18 @@ run([
         )
         await collect(provider.languageModel("claude-sonnet-5"), {
           prompt: [{ role: "user", content: "hi" }],
+          providerOptions: withEffort("minimal"),
+        })
+        const antSnap = calls.filter((c) => c.url.includes("/messages")).at(-1)!.body as {
+          reasoning_effort?: unknown
+        }
+        assertEqual(
+          antSnap.reasoning_effort,
+          "low",
+          "minimal snaps to the nearest advertised level on Anthropic (ADR-0019)",
+        )
+        await collect(provider.languageModel("claude-sonnet-5"), {
+          prompt: [{ role: "user", content: "hi" }],
           providerOptions: withEffort("off"),
         })
         const antOff = calls.filter((c) => c.url.includes("/messages")).at(-1)!.body as {
