@@ -250,8 +250,11 @@ export const SLUG_TO_SNAPSHOT_ID = {
   // explicitly so the map is TOTAL over the pinned set — an unpinned slug is
   // pin drift for `slugMapPinReport` to report, not a silent drop.
   "gpt-6-astra": "gpt-6-astra",
+  "gpt-6-luna": "gpt-6-luna",
+  "gpt-6-sol": "gpt-6-sol",
   "claude-fable-5-1": "claude-fable-5-1",
   "claude-fable-5": "claude-fable-5",
+  "claude-opus-5-5": "claude-opus-5-5",
   "claude-opus-5": "claude-opus-5",
   "claude-opus-4-8": "claude-opus-4-8",
   "claude-opus-4-7": "claude-opus-4-7",
