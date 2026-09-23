@@ -5,6 +5,10 @@
 // enrich the model picker, the sidebar panel, and the plan summary tool
 // without network access at runtime. Regenerate with `npm run refresh:deals`.
 //
+// PLAN_CATALOG rows are parsed from the pricing-limits usage-limits table;
+// rows the table cannot source carry their pin / carry-forward provenance
+// comment above the row (issue #229).
+//
 // Plan identity (PlanId) lives in Core — src/catalog/plans.ts — so the
 // provider transport can read an explicit plan pin without importing this
 // excisable slice (ADR-0004).
@@ -140,6 +144,11 @@ export const PLAN_CATALOG: Readonly<Record<PlanId, PlanInfo>> = {
   max: { price: 100, credits: 150, window5h: 45, windowWeek: 90, display: "Max 10×" },
   max20: { price: 200, credits: 300, window5h: 90, windowWeek: 180, display: "Max 20×" },
   teampro: { price: 40, credits: 40, window5h: 12, windowWeek: 24, display: "Team Pro" },
+  // Provider: pinned — the usage-limits table has no Provider row, because
+  // the plan is pay-as-you-go API access: no monthly credits or window
+  // caps. The $15/mo price and PAYG terms are from
+  // https://commandcode.ai/provider (the marketing table's Provider row
+  // carries the price but prose, not plan figures).
   provider: { price: 15, credits: 0, window5h: 0, windowWeek: 0, display: "Provider" },
 }
 

@@ -28,7 +28,11 @@ import { spawn } from "node:child_process"
 import { pathToFileURL } from "node:url"
 import { promisify } from "node:util"
 import { startMockCc } from "./helpers/mock-cc.js"
+import { renderedTableRsc } from "./helpers/flight-table.js"
+import { PLAN_TABLE_HEADER } from "../scripts/parse-rsc.mjs"
+import { PLAN_LABEL_TO_ID } from "../scripts/refresh-deals.mjs"
 import { snapshotIndex } from "../scripts/snapshot-index.mjs"
+import { PLAN_CATALOG } from "../src/deals/catalog.js"
 import { deriveReasoningWithoutEfforts } from "../src/provider/reasoning.js"
 import { assert, assertEqual, run } from "./harness.js"
 
@@ -110,6 +114,28 @@ function modalitiesBundle(world: WorldOptions): string {
   return `const models={${entries.join(",")}}`
 }
 
+/**
+ * The rendered usage-limits plan table the deals generator now parses out of
+ * the pricing-limits payload (issue #229). Without it the refresh aborts as a
+ * plan table shape change, so the synthetic world must carry it. Rows derive
+ * from the committed PLAN_CATALOG — the labels are the mapper keys, the
+ * figures are the shipped ones — so the replay pins no upstream value of its
+ * own.
+ */
+function planTablePayload(): string {
+  const rows = Object.entries(PLAN_LABEL_TO_ID).map(([display, id]) => {
+    const info = PLAN_CATALOG[id as keyof typeof PLAN_CATALOG]
+    return [
+      display,
+      `$$${info.price}`,
+      `$$${info.credits}`,
+      `$$${info.window5h}`,
+      `$$${info.windowWeek}`,
+    ]
+  })
+  return renderedTableRsc(PLAN_TABLE_HEADER, rows)
+}
+
 /** The three RSC pages. Deal events flip per-model `deal` fields. */
 function rscWorld({ geminiDeal = false }: WorldOptions): {
   pricing: string
@@ -156,7 +182,8 @@ function rscWorld({ geminiDeal = false }: WorldOptions): {
     planAllowanceUsd: { goat: 20, pro: 20 },
   }))
   return {
-    pricing: `2:${JSON.stringify(availability)}\n2:${JSON.stringify(compact)}\n`,
+    pricing:
+      planTablePayload() + `2:${JSON.stringify(availability)}\n2:${JSON.stringify(compact)}\n`,
     goat,
     pro: goat,
   }

@@ -15,8 +15,17 @@ import { join } from "node:path"
 import { spawn } from "node:child_process"
 import { readFileSync } from "node:fs"
 import { startMockCc } from "./helpers/mock-cc.js"
-import { extractPlanPageRsc } from "../scripts/parse-rsc.mjs"
-import { emitDealsModuleFromRsc } from "../scripts/refresh-deals.mjs"
+import { renderedTableRsc } from "./helpers/flight-table.js"
+import {
+  extractPlanPageRsc,
+  extractPlanTableRsc,
+  PLAN_TABLE_HEADER,
+} from "../scripts/parse-rsc.mjs"
+import {
+  emitDealsModuleFromRsc,
+  parsePreviousPlanRows,
+  PLAN_LABEL_TO_ID,
+} from "../scripts/refresh-deals.mjs"
 import { MODEL_SNAPSHOT } from "../src/catalog/snapshot.js"
 import { assert, assertEqual, run } from "./harness.js"
 
@@ -303,4 +312,202 @@ run([
       assert(ds.includes("peakOffPeak"), "DeepSeek V4 Flash must carry peakOffPeak")
     },
   ],
+  [
+    "refresh-deals: a plan table row upstream adds is a pending report, never a silent drop (issue #229)",
+    async () => {
+      const dir = await mkdtemp(join(tmpdir(), "cc-refresh-plan-add-"))
+      const out = join(dir, "catalog.ts")
+      const cells = fixturePlanCells()
+      const index = cells.findIndex((row) => PLAN_LABEL_TO_ID[row[0]] !== undefined)
+      assert(index >= 0, "the committed fixture must carry at least one mapped plan row")
+      const target = cells[index]
+      const targetId = PLAN_LABEL_TO_ID[target[0]]
+      // Bump the target row's price in the synthetic payload so the emitted
+      // value proves the synthetic table (not the fixture's own, later table)
+      // was the parsed source.
+      const bumped = [target[0], "$$3", target[2], target[3], target[4]]
+      const pricing =
+        renderedTableRsc(PLAN_TABLE_HEADER, [
+          ...cells.slice(0, index),
+          bumped,
+          ...cells.slice(index + 1),
+          ["Ultra Pro", "$$99", "$$999", "$$49", "$$98"],
+        ]) + RSC_PRICING
+      const mock = await startMockCc({ rscPricing: pricing, rscGoat: RSC_GOAT, rscPro: RSC_PRO })
+      try {
+        const result = await runScript(
+          ["scripts/refresh-deals.mjs", "--out", out, "--allow-partial"],
+          {
+            ...process.env,
+            COMMANDCODE_RSC_PRICING_URL: `${mock.url}/docs/resources/pricing-limits`,
+            COMMANDCODE_RSC_GOAT_URL: `${mock.url}/docs/plans/goat`,
+            COMMANDCODE_RSC_PRO_URL: `${mock.url}/docs/plans/pro`,
+          },
+        )
+        assertEqual(result.status, 0, result.stderr || result.stdout)
+        assert(
+          result.stdout.includes("plan table pending"),
+          `an unmapped table row must be reported, got: ${result.stdout}`,
+        )
+        assert(
+          result.stdout.includes("Ultra Pro"),
+          `the pending report must name the row, got: ${result.stdout}`,
+        )
+        const contents = await readFile(out, "utf-8")
+        assertEqual(
+          parsePreviousPlanRows(contents).get(targetId).price,
+          3,
+          "the emitted row must come from the parsed table",
+        )
+        assert(
+          !contents.includes("Ultra Pro"),
+          "an unmapped table row must not be emitted under a guessed id",
+        )
+        assert(
+          !contents.includes("Carried forward"),
+          "no row may be marked carried forward when every PlanId has a source",
+        )
+      } finally {
+        await mock.close()
+        await rm(dir, { recursive: true, force: true })
+      }
+    },
+  ],
+  [
+    "refresh-deals: a plan row upstream removes is carried forward and reported, never dropped (issue #229)",
+    async () => {
+      const dir = await mkdtemp(join(tmpdir(), "cc-refresh-plan-remove-"))
+      const out = join(dir, "catalog.ts")
+      const env = (mock) => ({
+        ...process.env,
+        COMMANDCODE_RSC_PRICING_URL: `${mock.url}/docs/resources/pricing-limits`,
+        COMMANDCODE_RSC_GOAT_URL: `${mock.url}/docs/plans/goat`,
+        COMMANDCODE_RSC_PRO_URL: `${mock.url}/docs/plans/pro`,
+      })
+      const args = ["scripts/refresh-deals.mjs", "--out", out, "--allow-partial"]
+      let baseline
+      {
+        // First run: the committed fixture, writing the baseline catalog.
+        const mock = await startMockCc({
+          rscPricing: RSC_PRICING,
+          rscGoat: RSC_GOAT,
+          rscPro: RSC_PRO,
+        })
+        try {
+          const result = await runScript(args, env(mock))
+          assertEqual(result.status, 0, result.stderr || result.stdout)
+          baseline = parsePreviousPlanRows(await readFile(out, "utf-8"))
+          assert(baseline.size > 0, "the baseline run must emit plan rows")
+        } finally {
+          await mock.close()
+        }
+      }
+      // Second run: a table that no longer carries one mapped row. The
+      // generator must report it, carry the previous row forward (the out
+      // file is the baseline), and keep every other row table-sourced.
+      const cells = fixturePlanCells()
+      const dropped = cells.find((row) => PLAN_LABEL_TO_ID[row[0]] !== undefined)
+      assert(dropped, "the committed fixture must carry a mapped plan row")
+      const droppedId = PLAN_LABEL_TO_ID[dropped[0]]
+      const pricing =
+        renderedTableRsc(
+          PLAN_TABLE_HEADER,
+          cells.filter((row) => row !== dropped),
+        ) + RSC_PRICING
+      const mock = await startMockCc({ rscPricing: pricing, rscGoat: RSC_GOAT, rscPro: RSC_PRO })
+      try {
+        const result = await runScript(args, env(mock))
+        assertEqual(result.status, 0, result.stderr || result.stdout)
+        assert(
+          result.stdout.includes("plan table pending"),
+          `a removed plan row must be reported, got: ${result.stdout}`,
+        )
+        assert(
+          result.stdout.includes(droppedId),
+          `the pending report must name ${droppedId}, got: ${result.stdout}`,
+        )
+        const contents = await readFile(out, "utf-8")
+        assert(
+          contents.includes("Carried forward"),
+          "the emitted row must be marked carried forward",
+        )
+        const after = parsePreviousPlanRows(contents)
+        assert(after.has(droppedId), `${droppedId} must still be emitted (never a silent row drop)`)
+        assertEqual(
+          after.get(droppedId),
+          baseline.get(droppedId),
+          "the carried-forward row must keep the last table-sourced values",
+        )
+        for (const row of cells) {
+          const id = PLAN_LABEL_TO_ID[row[0]]
+          if (id === undefined || id === droppedId) continue
+          assertEqual(after.get(id), baseline.get(id), `${id} must stay table-sourced`)
+        }
+      } finally {
+        await mock.close()
+        await rm(dir, { recursive: true, force: true })
+      }
+    },
+  ],
+  [
+    "refresh-deals: a plan table shape change fails loudly and writes nothing (issue #229)",
+    async () => {
+      const dir = await mkdtemp(join(tmpdir(), "cc-refresh-plan-shape-"))
+      const out = join(dir, "catalog.ts")
+      // The real table header, renamed: the parser must refuse it (a parser
+      // shape change is loud — ADR-0008) rather than fall back to the
+      // empty-catalog path or a default.
+      const pricing = RSC_PRICING.replace('"Your cost"', '"Cost"')
+      const mock = await startMockCc({ rscPricing: pricing, rscGoat: RSC_GOAT, rscPro: RSC_PRO })
+      try {
+        const result = await runScript(
+          ["scripts/refresh-deals.mjs", "--out", out, "--allow-partial"],
+          {
+            ...process.env,
+            COMMANDCODE_RSC_PRICING_URL: `${mock.url}/docs/resources/pricing-limits`,
+            COMMANDCODE_RSC_GOAT_URL: `${mock.url}/docs/plans/goat`,
+            COMMANDCODE_RSC_PRO_URL: `${mock.url}/docs/plans/pro`,
+          },
+        )
+        assert(
+          result.status !== 0,
+          `a plan table shape change must fail loudly, got status ${result.status}`,
+        )
+        assert(
+          result.stderr.includes("plan table shape change"),
+          `stderr must name the shape change, got: ${result.stderr}`,
+        )
+        let wrote = true
+        try {
+          await readFile(out, "utf-8")
+        } catch {
+          wrote = false
+        }
+        assert(!wrote, "no catalog may be written on a plan table shape change")
+      } finally {
+        await mock.close()
+        await rm(dir, { recursive: true, force: true })
+      }
+    },
+  ],
 ])
+
+// The committed fixture's plan rows as raw flight cells — derived, never
+// re-typed, so an upstream repricing moves the fixture and this helper
+// together.
+function fixturePlanCells(): string[][] {
+  const rows = extractPlanTableRsc(RSC_PRICING) as Array<{
+    display: string
+    price: number
+    credits: number
+    window5h: number
+    windowWeek: number
+  }>
+  return rows.map((row) => [
+    row.display,
+    `$$${row.price}`,
+    `$$${row.credits}`,
+    `$$${row.window5h}`,
+    `$$${row.windowWeek}`,
+  ])
+}

@@ -21,15 +21,17 @@
 import { readFileSync } from "node:fs"
 import { extractPlanPageRsc, extractPricingLimitsRsc } from "../scripts/parse-rsc.mjs"
 import {
+  buildPlanRows,
   buildRscInputs,
   discountFor,
   emitDealsModuleFromRsc,
   missingDealsModelsFromRsc,
   modelDealEntry,
+  parsePreviousPlanRows,
   peakOffPeakFor,
 } from "../scripts/refresh-deals.mjs"
 import { snapshotIndex } from "../scripts/snapshot-index.mjs"
-import { assert, assertEqual, run } from "./harness.js"
+import { assert, assertEqual, run, throws } from "./harness.js"
 
 const RSC_PRICING = readFileSync(
   new URL("./fixtures/rsc-pricing-limits.txt", import.meta.url),
@@ -532,4 +534,126 @@ run([
       assert(covered > 50, `covered must be > 50, got ${covered}`)
     },
   ],
+  [
+    "buildPlanRows resolves the vocabulary order from table, then pin, then carry-forward (synthetic)",
+    () => {
+      // Synthetic PlanIds/rows: the semantics are test-owned, so upstream can
+      // rename, reprice, add, or remove plan rows without reddening this test.
+      const order = ["a", "b", "c"]
+      const pins = { b: { row: planRow("Bee", 2, 20, 2, 4), note: ["Bee is pinned"] } }
+      const labelToId = { Aye: "a" }
+      const previousRows = new Map([["c", planRow("Cee", 3, 30, 3, 6)]])
+      const { rows, unmatched, carriedForward, missing } = buildPlanRows({
+        order,
+        pins,
+        labelToId,
+        previousRows,
+        tableRows: [planRow("Aye", 1, 10, 1, 2), planRow("Zed", 9, 90, 9, 18)],
+      })
+      assertEqual([...rows.keys()], ["a", "b", "c"], "rows follow the vocabulary order")
+      assertEqual(rows.get("a"), { row: planRow("Aye", 1, 10, 1, 2) })
+      assertEqual(rows.get("b"), { row: planRow("Bee", 2, 20, 2, 4), note: ["Bee is pinned"] })
+      assertEqual(rows.get("c"), {
+        row: planRow("Cee", 3, 30, 3, 6),
+        note: [
+          "Carried forward: the docs usage-limits table no longer carries this",
+          "plan, so these are its last table-sourced values. Re-pin the row here",
+          "or prune the PlanId (issue #229).",
+        ],
+      })
+      assertEqual(carriedForward, ["c"], "the carried-forward PlanId is reported")
+      assertEqual(missing, [], "every PlanId resolved")
+      assertEqual(
+        unmatched.map((row) => row.display),
+        ["Zed"],
+        "the unknown row is reported",
+      )
+    },
+  ],
+  [
+    "buildPlanRows lets the live table win over a pin (synthetic)",
+    () => {
+      const { rows } = buildPlanRows({
+        order: ["a"],
+        pins: { a: { row: planRow("Pinned", 1, 1, 1, 1), note: ["stale pin"] } },
+        labelToId: { Aye: "a" },
+        tableRows: [planRow("Aye", 7, 70, 7, 14)],
+      })
+      assertEqual(rows.get("a"), { row: planRow("Aye", 7, 70, 7, 14) })
+    },
+  ],
+  [
+    "buildPlanRows keeps a PlanId with no source in `missing` (loud in the refresh) (synthetic)",
+    () => {
+      const { missing, carriedForward } = buildPlanRows({
+        order: ["a"],
+        pins: {},
+        labelToId: {},
+        tableRows: [],
+      })
+      assertEqual(missing, ["a"])
+      assertEqual(carriedForward, [])
+    },
+  ],
+  [
+    "buildPlanRows refuses a mapping or pin outside the vocabulary order (synthetic)",
+    () => {
+      throws(
+        () =>
+          buildPlanRows({
+            order: ["a"],
+            pins: {},
+            labelToId: { Aye: "b" },
+            tableRows: [planRow("Aye", 1, 1, 1, 1)],
+          }),
+        /not in PLAN_ID_ORDER/,
+      )
+      throws(
+        () => buildPlanRows({ order: ["a"], pins: { b: { row: planRow("Bee", 1, 1, 1, 1) } } }),
+        /not in PLAN_ID_ORDER/,
+      )
+      throws(
+        () =>
+          buildPlanRows({
+            order: ["a"],
+            pins: {},
+            labelToId: { Aye: "a", Aye2: "a" },
+            tableRows: [planRow("Aye", 1, 1, 1, 1), planRow("Aye2", 2, 2, 2, 2)],
+          }),
+        /two table rows/,
+      )
+    },
+  ],
+  [
+    "parsePreviousPlanRows reads back emitted PLAN_CATALOG rows (synthetic)",
+    () => {
+      const text = [
+        "export const PLAN_CATALOG: Readonly<Record<PlanId, PlanInfo>> = {",
+        '  go: { price: 1, credits: 10, window5h: 3, windowWeek: 6, display: "Go" },',
+        "  // a note line is skipped",
+        '  prolegacy: { price: 15, credits: 30, window5h: 9, windowWeek: 18, display: "Pro (legacy)" },',
+        "}",
+      ].join("\n")
+      assertEqual(
+        [...parsePreviousPlanRows(text).entries()],
+        [
+          ["go", planRow("Go", 1, 10, 3, 6)],
+          ["prolegacy", planRow("Pro (legacy)", 15, 30, 9, 18)],
+        ],
+      )
+      assertEqual([...parsePreviousPlanRows("").entries()], [], "no rows in empty text")
+    },
+  ],
 ])
+
+// A synthetic plan row (test-owned values; see the synthetic-record note at
+// the top of this file).
+function planRow(
+  display: string,
+  price: number,
+  credits: number,
+  window5h: number,
+  windowWeek: number,
+) {
+  return { display, price, credits, window5h, windowWeek }
+}

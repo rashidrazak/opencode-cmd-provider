@@ -6,15 +6,25 @@
 // enrichment (the core picker entry and sidebar render regardless) instead
 // of blocking the refresh (issue #129). The free-flag agreement between
 // the deals catalog and the facts zero-cost table stays pinned.
+//
+// The fixture-backed PLAN_CATALOG gate (issue #229) lives here too: the
+// committed RSC fixture's usage-limits table is the page the cron sees, so
+// every plan row it carries must match the emitted catalog, and every pinned
+// row must match its pin — a hand edit cannot drift from upstream.
 import { readFileSync } from "node:fs"
 import { MODEL_SNAPSHOT } from "../src/catalog/snapshot.js"
 import { MODEL_COSTS } from "../src/catalog/facts.js"
-import { MODEL_DEALS } from "../src/deals/catalog.js"
+import { MODEL_DEALS, PLAN_CATALOG } from "../src/deals/catalog.js"
 import { enrichCommandCodeModels } from "../src/deals/enrichment.js"
 import { isFreeModelCost } from "../src/provider/pricing.js"
-import { extractPlanPageRsc } from "../scripts/parse-rsc.mjs"
+import { extractPlanPageRsc, extractPlanTableRsc } from "../scripts/parse-rsc.mjs"
+import { PLAN_ID_ORDER, PLAN_PINS, PLAN_LABEL_TO_ID } from "../scripts/refresh-deals.mjs"
 import { assert, assertEqual, run } from "./harness.js"
 
+const RSC_PRICING = readFileSync(
+  new URL("./fixtures/rsc-pricing-limits.txt", import.meta.url),
+  "utf-8",
+)
 const RSC_GOAT = readFileSync(new URL("./fixtures/rsc-goat.txt", import.meta.url), "utf-8")
 const RSC_PRO = readFileSync(new URL("./fixtures/rsc-pro.txt", import.meta.url), "utf-8")
 
@@ -112,6 +122,76 @@ run([
       assertEqual(cmd.free, false)
       assertEqual(cmd.allowance, { goat: 20, pro: 30 })
       assert(cmd.peakOffPeak, "vision must have peakOffPeak")
+    },
+  ],
+
+  [
+    "every plan row the docs usage-limits table carries matches the emitted PLAN_CATALOG (issue #229)",
+    () => {
+      // The fixture is re-captured by the daily cron and the catalog is
+      // regenerated from it, so this is a join between the page the cron
+      // sees and the shipped rows: a hand edit to a table-sourced row (or a
+      // generator regression) fails here instead of drifting silently. The
+      // reverse direction stays tolerant on purpose — a table row outside the
+      // PlanId vocabulary is a refresh-time `plan table pending` report, not
+      // a red suite (#132).
+      const rows = extractPlanTableRsc(RSC_PRICING) as Array<{
+        display: string
+        price: number
+        credits: number
+        window5h: number
+        windowWeek: number
+      }>
+      for (const row of rows) {
+        const id = PLAN_LABEL_TO_ID[row.display]
+        if (id === undefined) continue
+        const shipped = PLAN_CATALOG[id as keyof typeof PLAN_CATALOG]
+        assert(shipped, `the docs table carries "${row.display}" but PLAN_CATALOG has no ${id} row`)
+        assertEqual(
+          {
+            price: shipped.price,
+            credits: shipped.credits,
+            window5h: shipped.window5h,
+            windowWeek: shipped.windowWeek,
+            display: shipped.display,
+          },
+          {
+            price: row.price,
+            credits: row.credits,
+            window5h: row.window5h,
+            windowWeek: row.windowWeek,
+            display: row.display,
+          },
+          `PLAN_CATALOG.${id} must match the docs usage-limits table`,
+        )
+      }
+    },
+  ],
+
+  [
+    "PLAN_CATALOG carries exactly the plan vocabulary, in PLAN_ID_ORDER (issue #229)",
+    () => {
+      // The generated module is a Record<PlanId, PlanInfo>, so a missing or
+      // extra row is also a typecheck failure — this pins the emission order
+      // (stable refresh diffs) and that no PlanId was silently dropped.
+      assertEqual(Object.keys(PLAN_CATALOG), PLAN_ID_ORDER)
+    },
+  ],
+
+  [
+    "pinned plan rows match their PLAN_PINS entries (issue #229)",
+    () => {
+      // prolegacy and provider are the only hand-typed rows; each carries a
+      // provenance note in the emitted comment. This gate keeps the generated
+      // module from being hand-edited away from the pin.
+      for (const [id, pin] of Object.entries(PLAN_PINS)) {
+        assertEqual(
+          PLAN_CATALOG[id as keyof typeof PLAN_CATALOG],
+          pin.row,
+          `PLAN_CATALOG.${id} must match its PLAN_PINS row`,
+        )
+        assert(Array.isArray(pin.note) && pin.note.length > 0, `${id} must carry a provenance note`)
+      }
     },
   ],
 ])
