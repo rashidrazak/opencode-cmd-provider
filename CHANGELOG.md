@@ -1,3 +1,104 @@
+## 2.1.6 - 2026-09-23
+
+**Highlight — the Deals surfaces stop aging wrong, and a grandfathered Pro
+account stops reading as the current one.** Qwen 3.7 Max's launch deal expired
+on 2026-06-22, but the sidebar and `cmd_plan_summary` both kept interpolating a
+live `50% off until <endsAt>` straight from the catalog; the ended/active
+reading is now made once, in `src/deals/format.ts`, so a past date renders
+`50% off (ended 2026-06-22)` — the named day itself stays live, because
+upstream expires at 23:59:59Z of it
+([#226](https://github.com/rashidrazak/opencode-cmd-provider/pull/226)).
+Separately, the docs plan table and the CLI credits map were describing two
+different Pro SKUs, not disagreeing: `individual-pro` is the pre-reprice plan
+kept for grandfathered subscribers and `individual-pro-v1` the current Pro, and
+the alias table collapsed both onto the current row — so a legacy account was
+rendered the current tier's price, pool and windows. `individual-pro` now
+normalizes to a `prolegacy` plan id carrying the archived row, and renders no
+per-model allowance table because the docs allowances describe the current tier
+([#227](https://github.com/rashidrazak/opencode-cmd-provider/pull/227),
+ADR-0011, refs
+[#162](https://github.com/rashidrazak/opencode-cmd-provider/issues/162)). The
+rest of the release lands the catalog refreshed on 2026-09-23 — three new
+models from `command-code` 1.64.0.
+
+### Fixes
+
+- **An expired deal reads as ended on both Deals surfaces**
+  ([#226](https://github.com/rashidrazak/opencode-cmd-provider/pull/226)): the
+  sidebar and `cmd_plan_summary` share one presentation concern in
+  `src/deals/format.ts`; a past ISO `endsAt` renders
+  `50% off (ended 2026-06-22)`, the named day stays live, and a non-ISO value
+  keeps the historic phrasing. `was`/`now` are untouched — they describe what
+  is billed — and the generated catalog stays a verbatim projection of the
+  captured fixture (issue
+  [#90](https://github.com/rashidrazak/opencode-cmd-provider/issues/90)).
+- **A legacy Pro account renders the legacy plan row**
+  ([#227](https://github.com/rashidrazak/opencode-cmd-provider/pull/227),
+  ADR-0011, refs
+  [#162](https://github.com/rashidrazak/opencode-cmd-provider/issues/162)):
+  `individual-pro` normalizes to a new `prolegacy` plan id carrying the
+  archived $15/mo row ($30 credits, 5h $9 / weekly $18), `individual-pro-v1`
+  keeps `pro`, and the pin lists (`cmd_plan_summary` schema,
+  `COMMANDCODE_PLAN`, `docs/TECHNICAL.md`) name it. The archived row is
+  hand-typed with a provenance comment because its only remaining source is
+  the docs table's 2026-08-03 Wayback capture; the generate-or-gate follow-up
+  from [#162](https://github.com/rashidrazak/opencode-cmd-provider/issues/162)
+  stays open.
+- **The models-page parser reads a struck list price in front of Free**
+  ([#228](https://github.com/rashidrazak/opencode-cmd-provider/pull/228)): the
+  page grew the `<s>$0.042</s>Free` cell shape on 2026-09-22 and
+  `parseRateCell` threw on it, taking the live-fetch classification seam down
+  with it; the shape now parses as `{ price: 0, crossed }` and the next
+  refresh captures the page instead of failing on it. No runtime behavior
+  changes.
+
+### Model catalog
+
+## Model catalog
+
+- **FACTS_PACKAGE_VERSION**: `1.62.1` → `1.64.0` — the refresh reads the newer
+  CLI bundle's `models.md`; the table below carries what moved.
+- **FACTS_LAST_REFRESHED**: `2026-09-22` → `2026-09-23`
+
+| Model             | Change | Before | After                         |
+| ----------------- | ------ | ------ | ----------------------------- |
+| `claude-opus-5-5` | added  | —      | Claude Opus 5.5 · 1000000 ctx |
+| `gpt-6-luna`      | added  | —      | GPT-6 Luna · 1050000 ctx      |
+| `gpt-6-sol`       | added  | —      | GPT-6 Sol · 1050000 ctx       |
+
+### API divergence
+
+- Listing API matches package membership
+
+### Pinned slug map (1)
+
+- `jev`: models-page slug not in the pinned map (docs-ahead; page evidence
+  skipped)
+
+### Reasoning classification
+
+## Reasoning classification
+
+- **CLASSIFICATION_LAST_REFRESHED**: `2026-09-22` → `2026-09-23`
+
+| Model             | Change | Before | After                                         |
+| ----------------- | ------ | ------ | --------------------------------------------- |
+| `claude-opus-5-5` | new    | —      | efforts model (low, medium, high, xhigh, max) |
+| `gpt-6-luna`      | new    | —      | efforts model (low, medium, high, xhigh, max) |
+| `gpt-6-sol`       | new    | —      | efforts model (low, medium, high, xhigh, max) |
+
+### Deals intelligence
+
+## Deals intelligence
+
+- **DEAL_LAST_REFRESHED**: `2026-09-22` → `2026-09-23`
+
+| Model             | Change | Before | After      |
+| ----------------- | ------ | ------ | ---------- |
+| `claude-opus-5-5` | added  | —      | premium    |
+| `gpt-6-luna`      | added  | —      | opensource |
+| `gpt-6-sol`       | added  | —      | premium    |
+
 ## 2.1.5 - 2026-09-22
 
 **Highlight — GLM-5.3 answers stream as one block again, and an effort the
