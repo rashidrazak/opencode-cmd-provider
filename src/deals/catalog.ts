@@ -52,6 +52,7 @@ export const MODEL_DEALS: Readonly<Record<string, ModelDeals>> = {
   "claude-opus-4-7": { tier: "premium", benchmark: {"intelligence":40.7}, free: false, allowance: {"goat":20,"pro":20} },
   "claude-opus-4-8": { tier: "premium", benchmark: {"intelligence":42}, free: false, allowance: {"goat":20,"pro":20} },
   "claude-opus-5": { tier: "premium", benchmark: {"intelligence":50.7,"tokPerSec":59.6}, free: false, allowance: {"goat":20,"pro":20} },
+  "claude-opus-5-5": { tier: "premium", free: false, allowance: {"goat":20,"pro":20} },
   "claude-sonnet-4-6": { tier: "premium", benchmark: {"intelligence":30.5}, free: false, allowance: {"goat":20,"pro":20} },
   "claude-sonnet-5": { tier: "premium", benchmark: {"intelligence":38.4,"tokPerSec":87.5}, free: false, allowance: {"goat":20,"pro":20} },
   "deepseek/deepseek-v4-flash": { tier: "opensource", benchmark: {"intelligence":34.5,"tokPerSec":236.4}, peakOffPeak: {"peak":{"input":0.3,"output":1.2,"cacheRead":0.006,"cacheWrite":0},"offPeak":{"input":0.15,"output":0.6,"cacheRead":0.003,"cacheWrite":0},"windows":"01–04 & 06–10 UTC, Mon–Fri"}, free: false, allowance: {"goat":60,"pro":70} },
@@ -73,6 +74,8 @@ export const MODEL_DEALS: Readonly<Record<string, ModelDeals>> = {
   "gpt-5.6-sol": { tier: "opensource", benchmark: {"intelligence":47.1,"tokPerSec":69.2}, overContext: {"input":10,"output":45,"cacheRead":1,"cacheWrite":12.5}, free: false, allowance: {"goat":70,"pro":80} },
   "gpt-5.6-terra": { tier: "premium", benchmark: {"intelligence":42.3,"tokPerSec":115.5}, overContext: {"input":4,"output":18,"cacheRead":0.4,"cacheWrite":5}, free: false, allowance: {"goat":20,"pro":20} },
   "gpt-6-astra": { tier: "premium", benchmark: {"intelligence":52.8,"tokPerSec":64.2}, overContext: {"input":20,"output":75,"cacheRead":2,"cacheWrite":25}, free: false, allowance: {"goat":20,"pro":20} },
+  "gpt-6-luna": { tier: "opensource", overContext: {"input":0.2,"output":0.75,"cacheRead":0.02,"cacheWrite":0.25}, free: false, allowance: {"goat":20,"pro":30} },
+  "gpt-6-sol": { tier: "premium", overContext: {"input":4,"output":15,"cacheRead":0.4,"cacheWrite":5}, free: false, allowance: {"goat":20,"pro":20} },
   "inclusionai/ling-3.0-flash-sante:free": { tier: "opensource", free: true },
   "meituan/LongCat-2.0": { tier: "opensource", benchmark: {"intelligence":19.7}, free: false, allowance: {"goat":50,"pro":60} },
   "meta/muse-spark-1.1": { tier: "premium", benchmark: {"intelligence":34.3}, free: false, allowance: {"goat":20,"pro":20} },
@@ -141,5 +144,5 @@ export const PLAN_CATALOG: Readonly<Record<PlanId, PlanInfo>> = {
 }
 
 export const DEAL_SOURCE_URL = "https://commandcode.ai/docs/resources/pricing-limits"
-export const DEAL_LAST_REFRESHED = "2026-09-22"
+export const DEAL_LAST_REFRESHED = "2026-09-23"
 export const DEAL_PACKAGE_VERSION = "docs"

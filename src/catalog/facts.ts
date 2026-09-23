@@ -6,10 +6,10 @@
 // parse from the CLI bundle (dist/cli.mjs). Regenerate with
 // `npm run refresh:snapshot`.
 
-export const FACTS_SOURCE_URL = "https://unpkg.com/command-code@1.62.1/dist/bundled/command-code-knowledge/reference/models.md"
-export const MODALITIES_SOURCE_URL = "https://unpkg.com/command-code@1.62.1/dist/cli.mjs"
-export const FACTS_PACKAGE_VERSION = "1.62.1"
-export const FACTS_LAST_REFRESHED = "2026-09-22"
+export const FACTS_SOURCE_URL = "https://unpkg.com/command-code@1.64.0/dist/bundled/command-code-knowledge/reference/models.md"
+export const MODALITIES_SOURCE_URL = "https://unpkg.com/command-code@1.64.0/dist/cli.mjs"
+export const FACTS_PACKAGE_VERSION = "1.64.0"
+export const FACTS_LAST_REFRESHED = "2026-09-23"
 
 export const MODEL_EFFORTS: Readonly<Record<string, readonly string[]>> = {
   "deepseek/deepseek-v4-pro": ["high","max"],
@@ -34,10 +34,13 @@ export const MODEL_EFFORTS: Readonly<Record<string, readonly string[]>> = {
   "claude-sonnet-4-6": ["low","medium","high","xhigh","max"],
   "claude-fable-5-1": ["low","medium","high","xhigh","max"],
   "claude-fable-5": ["low","medium","high","xhigh","max"],
+  "claude-opus-5-5": ["low","medium","high","xhigh","max"],
   "claude-opus-5": ["low","medium","high","xhigh","max"],
   "claude-opus-4-8": ["low","medium","high","xhigh","max"],
   "claude-opus-4-7": ["low","medium","high","xhigh","max"],
   "gpt-6-astra": ["low","medium","high","xhigh","max"],
+  "gpt-6-sol": ["low","medium","high","xhigh","max"],
+  "gpt-6-luna": ["low","medium","high","xhigh","max"],
   "gpt-5.6-sol": ["low","medium","high","xhigh","max"],
   "gpt-5.6-terra": ["low","medium","high","xhigh","max"],
   "gpt-5.6-luna": ["low","medium","high","xhigh","max"],
@@ -115,11 +118,14 @@ export const MODEL_COSTS: Readonly<
   "claude-sonnet-4-6": { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
   "claude-fable-5-1": { input: 10, output: 50, cacheRead: 0.25, cacheWrite: 12.5 },
   "claude-fable-5": { input: 10, output: 50, cacheRead: 1, cacheWrite: 12.5 },
+  "claude-opus-5-5": { input: 4, output: 20, cacheRead: 0.2, cacheWrite: 5 },
   "claude-opus-5": { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 },
   "claude-opus-4-8": { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 },
   "claude-opus-4-7": { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 },
   "claude-haiku-4-5-20251001": { input: 1, output: 5, cacheRead: 0.1, cacheWrite: 1.25 },
   "gpt-6-astra": { input: 10, output: 50, cacheRead: 1, cacheWrite: 12.5 },
+  "gpt-6-sol": { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 },
+  "gpt-6-luna": { input: 0.1, output: 0.5, cacheRead: 0.01, cacheWrite: 0.125 },
   "gpt-5.6-sol": { input: 5, output: 30, cacheRead: 0.5, cacheWrite: 6.25 },
   "gpt-5.6-terra": { input: 2, output: 12, cacheRead: 0.2, cacheWrite: 2.5 },
   "gpt-5.6-luna": { input: 0.2, output: 1.2, cacheRead: 0.02, cacheWrite: 0.25 },
@@ -162,6 +168,7 @@ export const MODEL_INPUT_MODALITIES: Readonly<
   "claude-opus-4-7": ["text","image"],
   "claude-opus-4-8": ["text","image"],
   "claude-opus-5": ["text","image"],
+  "claude-opus-5-5": ["text","image"],
   "claude-sonnet-4-6": ["text","image"],
   "claude-sonnet-5": ["text","image"],
   "deepseek/deepseek-v4-flash-vision-exp": ["text","image"],
@@ -180,6 +187,8 @@ export const MODEL_INPUT_MODALITIES: Readonly<
   "gpt-5.6-sol": ["text","image"],
   "gpt-5.6-terra": ["text","image"],
   "gpt-6-astra": ["text","image"],
+  "gpt-6-luna": ["text","image"],
+  "gpt-6-sol": ["text","image"],
   "meta/muse-spark-1.1": ["text","image"],
   "meta/muse-spark-1.2": ["text","image"],
   "meta/muse-spark-1.2-contributor": ["text","image"],
