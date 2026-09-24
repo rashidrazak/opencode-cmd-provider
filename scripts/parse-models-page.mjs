@@ -325,6 +325,7 @@ export const SLUG_TO_SNAPSHOT_ID = {
   "qwen3-8-max": "Qwen/Qwen3.8-Max",
   "qwen3-8-max-0902": "Qwen/Qwen3.8-Max-0902",
   "qwen3-8-omni-flash": "Qwen/Qwen3.8-Omni-Flash",
+  "space-bunny-alpha": "stealth/space-bunny-alpha",
   "step-3-5-flash": "stepfun/Step-3.5-Flash",
   "step-3-7-flash": "stepfun/Step-3.7-Flash",
   "step-5-preview": "stepfun/Step-5-Preview",

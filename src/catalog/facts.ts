@@ -6,10 +6,10 @@
 // parse from the CLI bundle (dist/cli.mjs). Regenerate with
 // `npm run refresh:snapshot`.
 
-export const FACTS_SOURCE_URL = "https://unpkg.com/command-code@1.64.0/dist/bundled/command-code-knowledge/reference/models.md"
-export const MODALITIES_SOURCE_URL = "https://unpkg.com/command-code@1.64.0/dist/cli.mjs"
-export const FACTS_PACKAGE_VERSION = "1.64.0"
-export const FACTS_LAST_REFRESHED = "2026-09-23"
+export const FACTS_SOURCE_URL = "https://unpkg.com/command-code@1.65.0/dist/bundled/command-code-knowledge/reference/models.md"
+export const MODALITIES_SOURCE_URL = "https://unpkg.com/command-code@1.65.0/dist/cli.mjs"
+export const FACTS_PACKAGE_VERSION = "1.65.0"
+export const FACTS_LAST_REFRESHED = "2026-09-24"
 
 export const MODEL_EFFORTS: Readonly<Record<string, readonly string[]>> = {
   "deepseek/deepseek-v4-pro": ["high","max"],
@@ -30,6 +30,7 @@ export const MODEL_EFFORTS: Readonly<Record<string, readonly string[]>> = {
   "Qwen/Qwen3.8-Flash": ["low","medium","xhigh"],
   "stepfun/Step-5-Preview": ["low","medium","high"],
   "tencent/hy4-preview": ["low","medium","high"],
+  "stealth/space-bunny-alpha": ["low","medium","high"],
   "claude-sonnet-5": ["low","medium","high","xhigh","max"],
   "claude-sonnet-4-6": ["low","medium","high","xhigh","max"],
   "claude-fable-5-1": ["low","medium","high","xhigh","max"],
@@ -114,6 +115,7 @@ export const MODEL_COSTS: Readonly<
   "thinkingmachines/inkling-small": { input: 0.5, output: 1.2, cacheRead: 0.1, cacheWrite: 0 },
   "poolside/laguna-s-2.1-free": { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
   "inclusionai/ling-3.0-flash-sante:free": { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+  "stealth/space-bunny-alpha": { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
   "claude-sonnet-5": { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 },
   "claude-sonnet-4-6": { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
   "claude-fable-5-1": { input: 10, output: 50, cacheRead: 0.25, cacheWrite: 12.5 },
@@ -200,6 +202,7 @@ export const MODEL_INPUT_MODALITIES: Readonly<
   "moonshotai/Kimi-K2.7-Code-Highspeed": ["text","image"],
   "moonshotai/Kimi-K3": ["text","image"],
   "sakana/fugu-ultra": ["text","image"],
+  "stealth/space-bunny-alpha": ["text","image"],
   "stepfun/Step-3.7-Flash": ["text","image"],
   "stepfun/Step-5-Preview": ["text","image"],
   "thinkingmachines/inkling": ["text","image"],
