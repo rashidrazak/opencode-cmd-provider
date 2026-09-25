@@ -1,3 +1,34 @@
+## 2.1.8 - 2026-09-25
+
+### Model catalog
+
+## Model catalog
+
+- **FACTS_LAST_REFRESHED**: `2026-09-24` → `2026-09-25`
+
+| Model                    | Change  | Before                                                 | After                                                   |
+| ------------------------ | ------- | ------------------------------------------------------ | ------------------------------------------------------- |
+| `stepfun/Step-3.5-Flash` | context | Step 3.5 Flash · 1000000 ctx                           | Step 3.5 Flash · 262000 ctx                             |
+| `stepfun/Step-3.5-Flash` | pricing | input 0.1 / output 0.3 / cacheRead 0.02 / cacheWrite 0 | input 0.09 / output 0.3 / cacheRead 0.02 / cacheWrite 0 |
+
+### API divergence
+
+- Listing API matches package membership
+
+### Pinned slug map (1)
+
+- `jev`: models-page slug not in the pinned map (docs-ahead; page evidence skipped)
+
+### Deals intelligence
+
+## Deals intelligence
+
+- **DEAL_LAST_REFRESHED**: `2026-09-24` → `2026-09-25`
+
+| Model                    | Change    | Before            | After             |
+| ------------------------ | --------- | ----------------- | ----------------- |
+| `xiaomi/mimo-v2.6-flash` | allowance | goat: 67, pro: 77 | goat: 20, pro: 30 |
+
 ## 2.1.7 - 2026-09-24
 
 ### Model catalog
