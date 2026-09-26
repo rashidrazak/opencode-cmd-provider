@@ -1,3 +1,44 @@
+## 2.1.9 - 2026-09-26
+
+### Model catalog
+
+## Model catalog
+
+- **FACTS_LAST_REFRESHED**: `2026-09-25` → `2026-09-26`
+
+| Model                  | Change | Before | After                     |
+| ---------------------- | ------ | ------ | ------------------------- |
+| `stealth/pixel-canary` | added  | —      | Pixel Canary · 262000 ctx |
+
+### API divergence
+
+- Listing API matches package membership
+
+### Pinned slug map (2)
+
+- `jev`: models-page slug not in the pinned map (docs-ahead; page evidence skipped)
+- `pixel-canary`: models-page slug not in the pinned map (docs-ahead; page evidence skipped)
+
+### Reasoning classification
+
+## Reasoning classification
+
+- **CLASSIFICATION_LAST_REFRESHED**: `2026-09-25` → `2026-09-26`
+
+| Model                  | Change | Before | After                              |
+| ---------------------- | ------ | ------ | ---------------------------------- |
+| `stealth/pixel-canary` | new    | —      | efforts model (low, medium, xhigh) |
+
+### Deals intelligence
+
+## Deals intelligence
+
+- **DEAL_LAST_REFRESHED**: `2026-09-25` → `2026-09-26`
+
+| Model                  | Change | Before | After             |
+| ---------------------- | ------ | ------ | ----------------- |
+| `stealth/pixel-canary` | added  | —      | opensource (free) |
+
 ## 2.1.8 - 2026-09-25
 
 ### Model catalog
