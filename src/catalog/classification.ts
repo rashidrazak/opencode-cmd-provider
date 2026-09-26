@@ -20,7 +20,7 @@ export const CLASSIFICATION_SOURCE_URLS: ReadonlyArray<string> = [
   "https://commandcode.ai/docs/plans/pro",
 ]
 
-export const CLASSIFICATION_LAST_REFRESHED = "2026-09-25"
+export const CLASSIFICATION_LAST_REFRESHED = "2026-09-26"
 
 // Active capability overrides. Empty = upstream data is truth.
 // Every entry requires a written justification naming the upstream
@@ -94,6 +94,7 @@ export const MODEL_REASONING_CAPABILITY: Readonly<Record<string, boolean>> = {
   "Qwen/Qwen3.8-Max-0902": true,
   "Qwen/Qwen3.8-Omni-Flash": true,
   "sakana/fugu-ultra": true,
+  "stealth/pixel-canary": true,
   "stealth/space-bunny-alpha": true,
   "stepfun/Step-3.5-Flash": true,
   "stepfun/Step-3.7-Flash": true,
