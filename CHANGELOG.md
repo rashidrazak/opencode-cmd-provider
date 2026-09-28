@@ -1,3 +1,19 @@
+## 2.1.10 - 2026-09-28
+
+### Models page parser
+
+- Upstream dropped the `Tok/s` column from the models page table: rows (and the header) are now 8 cells, `Caps` moved from index 8 to 7, and the four rate columns each shifted one left.
+- `scripts/parse-models-page.mjs` moved to the 8-cell grammar; the committed page fixture was re-captured and the synthetic page fixtures in the parser, ladder, and replay tests were updated.
+- `pixel-canary` pinned to `stealth/pixel-canary` (membership-backed page slug — its page evidence is no longer skipped by the pending report).
+
+### API divergence
+
+- Listing API matches package membership
+
+### Pinned slug map (1)
+
+- `jev`: models-page slug not in the pinned map (docs-ahead; page evidence skipped)
+
 ## 2.1.9 - 2026-09-26
 
 ### Model catalog
