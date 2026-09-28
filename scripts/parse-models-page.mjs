@@ -317,6 +317,7 @@ export const SLUG_TO_SNAPSHOT_ID = {
   "muse-spark-1-3": "meta/muse-spark-1.3",
   "muse-spark-1-3-contributor": "meta/muse-spark-1.3-contributor",
   "nemotron-3-ultra-550b-a55b": "nvidia/nemotron-3-ultra-550b-a55b",
+  "pixel-canary": "stealth/pixel-canary",
   "qwen3-6-max-preview": "Qwen/Qwen3.6-Max-Preview",
   "qwen3-6-plus": "Qwen/Qwen3.6-Plus",
   "qwen3-7-flash": "Qwen/Qwen3.7-Flash",
