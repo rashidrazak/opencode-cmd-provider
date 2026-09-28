@@ -208,13 +208,13 @@ function modelsPageHtml(world: WorldOptions): string {
       const slug = id.includes("/") ? id.split("/").pop() : id
       return `<tr>
 <td><a href="/models/${slug}">${name}</a></td>
-<td><span>1M</span></td><td>52.0</td><td>—</td>
+<td><span>1M</span></td><td>52.0</td>
 <td><span>$1</span></td><td><span>$2</span></td><td><span>$0.1</span></td><td><span>—</span></td>
 <td><button type="button" aria-label="Capabilities: Text input, Vision, Reasoning"></button></td>
 </tr>`
     })
     .join("\n")
-  return `<table><thead><tr><th>Model</th><th>Context</th><th>Intelligence</th><th>Tok/s</th><th>Input</th><th>Output</th><th>Cache read</th><th>Cache write</th><th>Caps</th></tr></thead><tbody>${rows}</tbody></table>`
+  return `<table><thead><tr><th>Model</th><th>Context</th><th>Intelligence</th><th>Input</th><th>Output</th><th>Cache read</th><th>Cache write</th><th>Caps</th></tr></thead><tbody>${rows}</tbody></table>`
 }
 
 // ---------------------------------------------------------------------------
