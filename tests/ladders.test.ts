@@ -198,8 +198,8 @@ run([
       // slug — the page row never decides membership.)
       const MODEL = "gpt-5.4"
       const modelsPage =
-        `<table><thead><tr><th>Model</th><th>Context</th><th>Intelligence</th><th>Tok/s</th><th>Input</th><th>Output</th><th>Cache read</th><th>Cache write</th><th>Caps</th></tr></thead><tbody>` +
-        `<tr><td><a href="/models/gpt-5-4">GPT-5.4</a></td><td><span>1M</span></td><td>52</td><td>—</td><td><span>$7</span></td><td><span>$14</span></td><td><span>$0.7</span></td><td><span>—</span></td><td><button type="button" aria-label="Capabilities: Text input"></button></td></tr>` +
+        `<table><thead><tr><th>Model</th><th>Context</th><th>Intelligence</th><th>Input</th><th>Output</th><th>Cache read</th><th>Cache write</th><th>Caps</th></tr></thead><tbody>` +
+        `<tr><td><a href="/models/gpt-5-4">GPT-5.4</a></td><td><span>1M</span></td><td>52</td><td><span>$7</span></td><td><span>$14</span></td><td><span>$0.7</span></td><td><span>—</span></td><td><button type="button" aria-label="Capabilities: Text input"></button></td></tr>` +
         `</tbody></table>`
       const dir = await mkdtemp(join(tmpdir(), "cc-ladders2-"))
       const out = join(dir, "snapshot.ts")
@@ -256,9 +256,9 @@ run([
       // the live page carried five unpinned slugs).
       const MODEL = "gpt-5.4"
       const modelsPage =
-        `<table><thead><tr><th>Model</th><th>Context</th><th>Intelligence</th><th>Tok/s</th><th>Input</th><th>Output</th><th>Cache read</th><th>Cache write</th><th>Caps</th></tr></thead><tbody>` +
-        `<tr><td><a href="/models/gpt-5-4">GPT-5.4</a></td><td><span>1M</span></td><td>52</td><td>—</td><td><span>$7</span></td><td><span>$14</span></td><td><span>$0.7</span></td><td><span>—</span></td><td><button type="button" aria-label="Capabilities: Text input"></button></td></tr>` +
-        `<tr><td><a href="/models/brand-new-model">Brand New Model</a></td><td><span>1M</span></td><td>60</td><td>—</td><td><span>$1</span></td><td><span>$2</span></td><td><span>$0.1</span></td><td><span>—</span></td><td><button type="button" aria-label="Capabilities: Text input, Reasoning"></button></td></tr>` +
+        `<table><thead><tr><th>Model</th><th>Context</th><th>Intelligence</th><th>Input</th><th>Output</th><th>Cache read</th><th>Cache write</th><th>Caps</th></tr></thead><tbody>` +
+        `<tr><td><a href="/models/gpt-5-4">GPT-5.4</a></td><td><span>1M</span></td><td>52</td><td><span>$7</span></td><td><span>$14</span></td><td><span>$0.7</span></td><td><span>—</span></td><td><button type="button" aria-label="Capabilities: Text input"></button></td></tr>` +
+        `<tr><td><a href="/models/brand-new-model">Brand New Model</a></td><td><span>1M</span></td><td>60</td><td><span>$1</span></td><td><span>$2</span></td><td><span>$0.1</span></td><td><span>—</span></td><td><button type="button" aria-label="Capabilities: Text input, Reasoning"></button></td></tr>` +
         `</tbody></table>`
       const dir = await mkdtemp(join(tmpdir(), "cc-ladders-pin-"))
       const out = join(dir, "snapshot.ts")
@@ -506,8 +506,8 @@ run([
       // entry (the runtime advertises image input).
       const MODEL = "gpt-5.4"
       const modelsPage =
-        `<table><thead><tr><th>Model</th><th>Context</th><th>Intelligence</th><th>Tok/s</th><th>Input</th><th>Output</th><th>Cache read</th><th>Cache write</th><th>Caps</th></tr></thead><tbody>` +
-        `<tr><td><a href="/models/gpt-5-4">GPT-5.4</a></td><td><span>1M</span></td><td>52</td><td>—</td><td><span>$1</span></td><td><span>$2</span></td><td><span>$0.1</span></td><td><span>—</span></td><td><button type="button" aria-label="Capabilities: Text input, Vision"></button></td></tr>` +
+        `<table><thead><tr><th>Model</th><th>Context</th><th>Intelligence</th><th>Input</th><th>Output</th><th>Cache read</th><th>Cache write</th><th>Caps</th></tr></thead><tbody>` +
+        `<tr><td><a href="/models/gpt-5-4">GPT-5.4</a></td><td><span>1M</span></td><td>52</td><td><span>$1</span></td><td><span>$2</span></td><td><span>$0.1</span></td><td><span>—</span></td><td><button type="button" aria-label="Capabilities: Text input, Vision"></button></td></tr>` +
         `</tbody></table>`
       const dir = await mkdtemp(join(tmpdir(), "cc-ladders-vision-"))
       const out = join(dir, "snapshot.ts")

@@ -21,8 +21,10 @@
 // through the existing peak/off-peak and over-context fields (no second band
 // parser is built — the bands stay in the RSC path, issue #129).
 //
-// Cell grammar (verified against the live page 2026-09-05):
-//   - header: Model | Context | Intelligence | Tok/s | Input | Output |
+// Cell grammar (verified against the live page 2026-09-28; upstream
+// dropped the Tok/s column between the 2026-09-26 and 2026-09-28 captures —
+// the table is 8 cells now, everything after Intelligence shifted one left):
+//   - header: Model | Context | Intelligence | Input | Output |
 //     Cache read | Cache write | Caps
 //   - name cell: `<a href="/models/<slug>">Name</a>` — extract the clean
 //     display name from the link text ONLY (discount badges, off-peak
@@ -150,9 +152,9 @@ export function parseModelsPage(html) {
         `could not parse models page: a row after the header has no model link (${cleanText(nameCell).slice(0, 60) || "<empty name cell>"})`,
       )
     }
-    if (cells.length < 9) {
+    if (cells.length < 8) {
       throw new Error(
-        `could not parse models page: row for "${cleanText(nameCell).slice(0, 60)}" has ${cells.length} cells, expected 9`,
+        `could not parse models page: row for "${cleanText(nameCell).slice(0, 60)}" has ${cells.length} cells, expected 8`,
       )
     }
     const slug = href[1]
@@ -160,7 +162,7 @@ export function parseModelsPage(html) {
     const name = link ? cleanText(link[1]) : cleanText(nameCell)
     const contextRaw = cleanText(cells[1])
     const context = contextRaw === "—" || contextRaw === "-" ? null : contextRaw
-    const capsLabel = cells[8].match(/aria-label="([^"]+)"/)?.[1]
+    const capsLabel = cells[7].match(/aria-label="([^"]+)"/)?.[1]
     if (!capsLabel) {
       throw new Error(`could not parse models page: row ${name} has no caps aria-label`)
     }
@@ -169,10 +171,10 @@ export function parseModelsPage(html) {
     const crossed = { input: null, output: null }
     let banded = false
     const COLUMNS = [
-      [4, "input"],
-      [5, "output"],
-      [6, "cacheRead"],
-      [7, "cacheWrite"],
+      [3, "input"],
+      [4, "output"],
+      [5, "cacheRead"],
+      [6, "cacheWrite"],
     ]
     for (const [index, key] of COLUMNS) {
       const parsed = parseRateCell(cells[index])
@@ -183,10 +185,10 @@ export function parseModelsPage(html) {
     }
     if (banded) {
       const bandLabel =
+        cells[3].match(/aria-label="([^"]*context price bands)"/)?.[1] ??
         cells[4].match(/aria-label="([^"]*context price bands)"/)?.[1] ??
         cells[5].match(/aria-label="([^"]*context price bands)"/)?.[1] ??
-        cells[6].match(/aria-label="([^"]*context price bands)"/)?.[1] ??
-        cells[7].match(/aria-label="([^"]*context price bands)"/)?.[1]
+        cells[6].match(/aria-label="([^"]*context price bands)"/)?.[1]
       notes.push(
         `models-page: ${name} — banded pricing (${bandLabel ?? "footnote marker"}); base rate shipped, verify against RSC peak/off-peak and over-context fields`,
       )
@@ -315,6 +317,7 @@ export const SLUG_TO_SNAPSHOT_ID = {
   "muse-spark-1-3": "meta/muse-spark-1.3",
   "muse-spark-1-3-contributor": "meta/muse-spark-1.3-contributor",
   "nemotron-3-ultra-550b-a55b": "nvidia/nemotron-3-ultra-550b-a55b",
+  "pixel-canary": "stealth/pixel-canary",
   "qwen3-6-max-preview": "Qwen/Qwen3.6-Max-Preview",
   "qwen3-6-plus": "Qwen/Qwen3.6-Plus",
   "qwen3-7-flash": "Qwen/Qwen3.7-Flash",

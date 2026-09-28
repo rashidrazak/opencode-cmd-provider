@@ -21,16 +21,17 @@ const LIVE_FIXTURE = join(import.meta.dirname, "fixtures", "models-page.html")
 
 // Synthetic models-page fixture — minimal but faithful to the live cell
 // grammar (name link, context, price cells incl. band footnote markers,
-// struck deal prices, "Free", "—", caps aria-label).
+// struck deal prices, "Free", "—", caps aria-label). Eight cells: upstream
+// dropped the Tok/s column (live shape verified 2026-09-28).
 const PAGE = `<html><body><table>
 <thead><tr>
-<th>Model</th><th>Context</th><th>Intelligence</th><th>Tok/s</th>
+<th>Model</th><th>Context</th><th>Intelligence</th>
 <th>Input</th><th>Output</th><th>Cache read</th><th>Cache write</th><th>Caps</th>
 </tr></thead>
 <tbody>
 <tr>
 <td><a href="/models/gpt-6-astra">GPT-6 Astra</a></td>
-<td><span>1.1M</span></td><td>not yet scored</td><td>—</td>
+<td><span>1.1M</span></td><td>not yet scored</td>
 <td><span>$10.00<button type="button" aria-label="GPT-6 Astra: 2 context price bands">+<!-- -->1</button></span></td>
 <td><span>$50.00<button type="button" aria-label="GPT-6 Astra: 2 context price bands">+<!-- -->1</button></span></td>
 <td><span>$1.00<button type="button" aria-label="GPT-6 Astra: 2 context price bands">+<!-- -->1</button></span></td>
@@ -39,19 +40,19 @@ const PAGE = `<html><body><table>
 </tr>
 <tr>
 <td><a href="/models/claude-haiku-4-5">Claude Haiku 4.5</a></td>
-<td><span>200K</span></td><td>52.0</td><td>—</td>
+<td><span>200K</span></td><td>52.0</td>
 <td><span>$1.00</span></td><td><span>$5.00</span></td><td><span>$0.10</span></td><td><span>$1.25</span></td>
 <td><button type="button" aria-label="Capabilities: Text input, Vision"></button></td>
 </tr>
 <tr>
 <td><a href="/models/muse-spark-1-2-contributor">Muse Spark 1.2 Contributor</a><a href="https://commandcode.ai/docs/resources/pricing-limits#muse-spark-1.2-contributor" aria-label="Free — view deal details">FREE</a></td>
-<td><span>1M</span></td><td>52.0</td><td>—</td>
+<td><span>1M</span></td><td>52.0</td>
 <td><span><s>$0.20</s>$0.10</span></td><td><span><s>$0.40</s>$0.20</span></td><td><span>$0.002</span></td><td><span>—</span></td>
 <td><button type="button" aria-label="Capabilities: Text input, Vision, Reasoning"></button></td>
 </tr>
 <tr>
 <td><a href="/models/laguna-s-2-1-free">Laguna S 2.1</a><a href="#" aria-label="Free — view deal details">FREE</a></td>
-<td><span>256K</span></td><td>52.0</td><td>—</td>
+<td><span>256K</span></td><td>52.0</td>
 <td><span>Free</span></td><td><span>Free</span></td><td><span>Free</span></td><td><span>—</span></td>
 <td><button type="button" aria-label="Capabilities: Text input"></button></td>
 </tr>
@@ -282,7 +283,7 @@ run([
       // clean name must come from the link text only.
       const html = `<table><tr>
 <td><a href="/models/deepseek-v4-pro">DeepSeek V4 Pro (latest)</a><button type="button" aria-label="Off-peak shown (17h/day) · peak $1.32 / $3.96 01–04 &amp; 06–10 UTC"></button></td>
-<td><span>1M</span></td><td>56.0</td><td>—</td>
+<td><span>1M</span></td><td>56.0</td>
 <td><span>$0.66</span></td><td><span>$1.98</span></td><td><span>$0.022</span></td><td><span>—</span></td>
 <td><button type="button" aria-label="Capabilities: Text input, Reasoning"></button></td>
 </tr></table>`
@@ -335,7 +336,7 @@ run([
         const combo = combos[i % 4]
         return `<tr>
 <td><a href="/models/${slug}">Model ${i}</a></td>
-<td><span>${i % 2 ? "1M" : "256K"}</span></td><td>52.0</td><td>—</td>
+<td><span>${i % 2 ? "1M" : "256K"}</span></td><td>52.0</td>
 <td><span>$1</span></td><td><span>$2</span></td><td><span>$0.1</span></td><td><span>—</span></td>
 <td><button type="button" aria-label="${combo}"></button></td>
 </tr>`
@@ -356,7 +357,7 @@ run([
 
       // A fifth label fails loudly through the full page parser.
       const badRow = `<tr>
-<td><a href="/models/x">X</a></td><td><span>1M</span></td><td>52</td><td>—</td>
+<td><a href="/models/x">X</a></td><td><span>1M</span></td><td>52</td>
 <td><span>$1</span></td><td><span>$2</span></td><td><span>$0.1</span></td><td><span>—</span></td>
 <td><button type="button" aria-label="Capabilities: Text input, Vision, Reasoning, Audio input"></button></td>
 </tr>`
@@ -369,7 +370,7 @@ run([
     async () => {
       // Upstream value moves must surface as refresh diffs, never red
       // tests — so this asserts *shape* over the real captured page, not
-      // values: rows parse with the full 9-cell shape, the Caps bits are
+      // values: rows parse with the full 8-cell shape, the Caps bits are
       // within the four combos, and slugs known to the pinned map resolve.
       // A NEW slug (upstream added a model after the map was pinned) is
       // reported as a pending note, not a failure — enrichment must never
