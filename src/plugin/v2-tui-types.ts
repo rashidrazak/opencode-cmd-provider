@@ -15,9 +15,13 @@
 // `@opencode/theme@2.0.3` (`dist/tui/types.d.ts`), except the theme slice,
 // which spans the `@opencode/theme@2.0.8` `text.default`/`text.subdued` →
 // `text.base`/`text.muted` rename (see V2TuiThemeText) because the supported
-// v2.0.x line includes both spellings. Bumping the supported v2 line means
-// re-deriving these from the published packages — tests/tui-deals-panel pins
-// the parts we depend on.
+// v2.0.x line includes both spellings, and the provider/integration slices the
+// usage credential resolver reads (`@opencode/client@2.0.3`'s `ProviderInfo`,
+// `IntegrationInfo` and `ConnectionInfo`; re-checked against `2.0.18`, where
+// the credential connection gained an unused `method` field — the members
+// declared here are common to the whole line). Bumping the supported v2 line
+// means re-deriving these from the published packages — tests/tui-deals-panel
+// and tests/tui-credential pin the parts we depend on.
 import type { RGBA } from "@opentui/core"
 
 /**
@@ -114,6 +118,52 @@ export interface V2TuiModel {
 }
 
 /**
+ * `Connection.Info`'s env arm: a named environment variable the Host reads.
+ * This is the only branch of the Host's connection resolution the v2 TUI can
+ * resolve — the value lives in the environment both processes share.
+ */
+export interface V2TuiIntegrationEnvConnection {
+  readonly type: "env"
+  readonly name: string
+}
+
+/** `Connection.Info`'s credential arm: a value in the Host's credential store. */
+export interface V2TuiIntegrationCredentialConnection {
+  readonly type: "credential"
+  readonly id: string
+  readonly label: string
+}
+
+/**
+ * `Connection.Info` — where the Host's active credential lives. The Host
+ * projects `connections` in its own resolution order (stored credentials
+ * first, then the env methods whose variable is set), and
+ * `connection.active()` is `[0]`.
+ */
+export type V2TuiIntegrationConnection =
+  V2TuiIntegrationEnvConnection | V2TuiIntegrationCredentialConnection
+
+/**
+ * `Integration.Info` slice: the record `connection.active()` resolves for a
+ * provider's `integrationID`. `connections` is that resolution's candidate
+ * list, already in Host order.
+ */
+export interface V2TuiIntegration {
+  readonly id: string
+  readonly name: string
+  readonly connections: readonly V2TuiIntegrationConnection[]
+}
+
+/**
+ * `Provider.Info` slice: the record that ties a provider to the integration
+ * whose connection unlocks it (our registration writes `commandcode`).
+ */
+export interface V2TuiProvider {
+  readonly id: string
+  readonly integrationID?: string | undefined
+}
+
+/**
  * The v2 TUI context. `ui.slot` claims a place in the slot tree and returns the
  * release function; `data` is the host's live client-local store — reads are
  * reactive, so the claim's `render` is re-invoked when the selected model
@@ -131,6 +181,13 @@ export interface V2TuiContext {
     readonly location: {
       readonly model: {
         list(): readonly V2TuiModel[] | undefined
+      }
+      /** The records `connection.active()` resolves the credential through. */
+      readonly provider: {
+        list(): readonly V2TuiProvider[] | undefined
+      }
+      readonly integration: {
+        list(): readonly V2TuiIntegration[] | undefined
       }
     }
   }
