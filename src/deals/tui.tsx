@@ -2,8 +2,9 @@
 // src/deals/tui.tsx — TUI plugin: "Command Code" deals section in the session
 // sidebar. Renders deal details from the picked model's enriched `cmd`
 // (produced by the server plugin's config hook on v1 and its provider transform
-// on v2). Renders nothing when the model has no deals data — zero sidebar
-// noise.
+// on v2). Every Command Code model gets the full fixed row set — a row the
+// model has no data for reads `N/A` instead of vanishing. Models from other
+// providers get nothing: the panel's visibility gate is the provider id.
 //
 // Two hosts, two TUI contracts (ADR-0010), one default export:
 //   v1  `{ id, tui(api) }`        — `api.slots.register({ slots: { sidebar_content } })`
@@ -19,7 +20,19 @@ import type { TuiPlugin, TuiPluginApi, TuiPluginModule } from "@opencode-ai/plug
 import { DEAL_SOURCE_URL, PLAN_CATALOG } from "./catalog.js"
 import { discountLabel, formatRate, todayIso } from "./format.js"
 import type { PlanId } from "../catalog/plans.js"
-import type { V2TuiContext, V2TuiModel, V2TuiPluginDefinition } from "../plugin/v2-tui-types.js"
+import type {
+  V2TuiContext,
+  V2TuiModel,
+  V2TuiPluginDefinition,
+  V2TuiTheme,
+} from "../plugin/v2-tui-types.js"
+
+type CmdRates = {
+  input?: unknown
+  output?: unknown
+  cacheRead?: unknown
+  cacheWrite?: unknown
+}
 
 type Cmd = {
   unavailable?: unknown
@@ -28,13 +41,62 @@ type Cmd = {
   allowance?: Record<string, unknown> | undefined
   discount?: { pct?: unknown; endsAt?: unknown } | undefined
   benchmark?: { intelligence?: unknown; tokPerSec?: unknown } | undefined
-  peakOffPeak?: { windows?: unknown } | undefined
+  peakOffPeak?: { peak?: CmdRates; offPeak?: CmdRates; windows?: unknown } | undefined
+  contextTiers?: Array<{ label?: unknown; context?: unknown; rates?: CmdRates }> | undefined
   was?: { input?: unknown; output?: unknown } | undefined
   now?: { input?: unknown; output?: unknown } | undefined
 }
 
-/** One rendered sidebar line: `[label, value]`, or `[message, ""]` for a banner. */
-export type DealsRow = [string, string]
+/**
+ * One model-cost record as the hosts' model catalogs shape it: v1 keeps one
+ * record per model, v2 an array of context tiers whose untiered entry is the
+ * base price. The panel reads it for the `Rates` fallback when the payload
+ * publishes no band.
+ */
+type CmdCost = {
+  tier?: unknown
+  input?: unknown
+  output?: unknown
+  cache?: { read?: unknown; write?: unknown } | undefined
+}
+
+/** The v1 panel's model slice: the host's provider options plus its cost. */
+type V1Model = { options?: { cmd?: Record<string, unknown> }; cost?: CmdCost | undefined }
+
+/** The v2 panel's model slice: `settings` (v2's options rename) plus cost. */
+type V2PanelModel = {
+  settings?: Readonly<Record<string, unknown>>
+  cost?: readonly CmdCost[] | undefined
+}
+
+/**
+ * One rendered sidebar line. `[label, value]` renders as `label: value`; an
+ * empty value renders the label bare and emphasized (`[text, ""]` — the
+ * unavailable banner; `[text, "", "heading"]` — a segment heading, underlined
+ * as well); `[text, "", "value"]` renders a bare muted line with no emphasis
+ * (a rate-values line or the `Peak Windows` label); `["", ""]` is the blank
+ * line between segments.
+ */
+export type DealsRow = [label: string, value: string, kind?: "heading" | "value"]
+
+/** Value of a row the model has nothing to say about. */
+const NA = "N/A"
+
+/** Provider id both hosts register under — the panel's visibility gate. */
+const PROVIDER_ID = "commandcode"
+
+/**
+ * Plans the Allowance segment hides. Pro (legacy) and Provider keep their
+ * catalog rows and their allowance data — the payload still carries them for
+ * the plan-summary tool and the transport — but they are never rendered as
+ * panel rows.
+ */
+const HIDDEN_ALLOWANCE_PLANS: ReadonlySet<PlanId> = new Set(["prolegacy", "provider"])
+
+/** Every rendered allowance row, in PLAN_CATALOG declaration order (go → teampro). */
+const PLAN_IDS = (Object.keys(PLAN_CATALOG) as PlanId[]).filter(
+  (plan) => !HIDDEN_ALLOWANCE_PLANS.has(plan),
+)
 
 function planDisplay(plan: string): string {
   return PLAN_CATALOG[plan as PlanId]?.display ?? plan
@@ -55,98 +117,211 @@ function rateString(rates: { input?: unknown; output?: unknown }): string | unde
   return `$${formatRate(rates.input)}/$${formatRate(rates.output)} in/out`
 }
 
-/** Renders the `cmd` payload (identical on both hosts) into sidebar rows. */
-function cmdRows(cmd: Cmd | undefined, today: string): DealsRow[] {
-  if (!cmd) return []
-  if (cmd.unavailable === true) {
-    return [
-      [`Deals unavailable — ${DEAL_SOURCE_URL}`, ""],
-      ["Tier", "—"],
-      ["Intelligence", "—"],
-      ["Tok/s", "—"],
-    ]
+function rateDisplay(rates: { input?: unknown; output?: unknown } | undefined): string {
+  if (!rates) return NA
+  return rateString(rates) ?? NA
+}
+
+function benchmarkDisplay(benchmark: Cmd["benchmark"], key: "intelligence" | "tokPerSec"): string {
+  const value = benchmark?.[key]
+  return typeof value === "number" ? String(value) : NA
+}
+
+/** A band's four rates as the values line: `$in | $out | $cacheRead | $cacheWrite`. */
+function rateValues(rates: CmdRates | undefined): string {
+  if (
+    !rates ||
+    typeof rates.input !== "number" ||
+    typeof rates.output !== "number" ||
+    typeof rates.cacheRead !== "number" ||
+    typeof rates.cacheWrite !== "number"
+  ) {
+    return NA
   }
+  return `$${formatRate(rates.input)} | $${formatRate(rates.output)} | $${formatRate(rates.cacheRead)} | $${formatRate(rates.cacheWrite)}`
+}
+
+/** The column-label line a rate band (or the price fallback) prints. */
+const RATE_COLUMNS = "in | out | cache r | w"
+
+/**
+ * The `Rates` segment body: published bands (time-of-day and/or context
+ * windows) as label/value blocks — `Peak: in | out | cache r | w` over its
+ * pipe-separated values — the `Peak Windows` schedule as its own block, and,
+ * when no band is published, the model's own price (the host model cost every
+ * model record carries) in the same two-line shape. Blank lines separate the
+ * blocks.
+ */
+function ratesRows(c: Cmd, base: CmdRates | undefined): DealsRow[] {
   const rows: DealsRow[] = []
-  if (typeof cmd.tier === "string") rows.push(["Tier", tierDisplay(cmd.tier)])
-  if (cmd.free === true) rows.push(["Status", "FREE"])
-  if (cmd.allowance) {
-    for (const [plan, value] of Object.entries(cmd.allowance)) {
-      if (typeof value === "number") rows.push([`${planDisplay(plan)} allowance`, `$${value}/mo`])
+  const band = (name: string, rates: CmdRates | undefined) => {
+    if (rows.length > 0) rows.push(["", ""])
+    rows.push([name, RATE_COLUMNS])
+    rows.push([rateValues(rates), "", "value"])
+  }
+  const tod = c.peakOffPeak
+  if (tod) {
+    band("Peak", tod.peak)
+    band("Off-peak", tod.offPeak)
+    if (typeof tod.windows === "string") {
+      rows.push(["", ""])
+      rows.push(["Peak Windows", "", "value"])
+      rows.push([tod.windows, "", "value"])
     }
   }
-  if (cmd.discount && typeof cmd.discount.pct === "number") {
-    rows.push([
-      "Deal",
-      discountLabel(
-        cmd.discount.pct,
-        typeof cmd.discount.endsAt === "string" ? cmd.discount.endsAt : undefined,
-        today,
-      ),
-    ])
+  if (Array.isArray(c.contextTiers)) {
+    for (const tier of c.contextTiers) {
+      const label =
+        typeof tier.context === "string" && tier.context !== ""
+          ? tier.context
+          : typeof tier.label === "string" && tier.label !== ""
+            ? tier.label
+            : undefined
+      if (label === undefined) continue
+      band(label, tier.rates)
+    }
   }
-  const was = cmd.was ? rateString(cmd.was) : undefined
-  const now = cmd.now ? rateString(cmd.now) : undefined
-  if (was) rows.push(["Was", was])
-  if (now) rows.push(["Now", now])
-  if (cmd.benchmark) {
-    rows.push([
-      "Intelligence",
-      typeof cmd.benchmark.intelligence === "number" ? String(cmd.benchmark.intelligence) : "—",
-    ])
-    rows.push([
-      "Tok/s",
-      typeof cmd.benchmark.tokPerSec === "number" ? String(cmd.benchmark.tokPerSec) : "—",
-    ])
-  }
-  if (cmd.peakOffPeak) {
-    rows.push([
-      "Rates",
-      `peak/off-peak${typeof cmd.peakOffPeak.windows === "string" ? ` (${cmd.peakOffPeak.windows})` : ""}`,
-    ])
+  if (rows.length === 0) {
+    rows.push([RATE_COLUMNS, "", "value"])
+    rows.push([rateValues(base), "", "value"])
   }
   return rows
 }
 
 /**
- * v1 model entry: the config hook's enrichment writes the model's provider
- * options into `options.cmd` (both for auto-registered and declared models).
+ * Renders the `cmd` payload (identical on both hosts) into sidebar rows,
+ * segmented: tier/status, an `Allowance` heading over one row per rendered
+ * plan, a `Rates` heading over the published bands (or the model's actual
+ * price), then an `Other Information` heading over the deal/benchmark rows —
+ * blank lines between segments. The row set is fixed: every row renders for
+ * every Command Code model, and a row the payload says nothing about reads
+ * `N/A`. An unavailable catalog leads with the banner and reads `N/A` on every
+ * row — no half-trusted values behind it.
  */
-export function dealsRows(
-  model: { options?: { cmd?: Record<string, unknown> } } | undefined,
-  today: string = todayIso(),
-): DealsRow[] {
-  return cmdRows(model?.options?.cmd as Cmd | undefined, today)
+function cmdRows(cmd: Cmd | undefined, base: CmdRates | undefined, today: string): DealsRow[] {
+  const unavailable = cmd?.unavailable === true
+  const c: Cmd = unavailable ? {} : (cmd ?? {})
+  const rows: DealsRow[] = []
+  if (unavailable) {
+    rows.push([`Deals unavailable — ${DEAL_SOURCE_URL}`, ""])
+  }
+  rows.push(["Tier", typeof c.tier === "string" ? tierDisplay(c.tier) : NA])
+  rows.push(["Status", c.free === true ? "FREE" : c.free === false ? "Paid" : NA])
+  rows.push(["", ""])
+  rows.push(["Allowance", "", "heading"])
+  for (const plan of PLAN_IDS) {
+    const value = c.allowance?.[plan]
+    rows.push([planDisplay(plan), typeof value === "number" ? `$${value}/mo` : NA])
+  }
+  rows.push(["", ""])
+  rows.push(["Rates", "", "heading"])
+  rows.push(...ratesRows(c, base))
+  rows.push(["", ""])
+  rows.push(["Other Information", "", "heading"])
+  rows.push([
+    "Deal",
+    c.discount && typeof c.discount.pct === "number"
+      ? discountLabel(
+          c.discount.pct,
+          typeof c.discount.endsAt === "string" ? c.discount.endsAt : undefined,
+          today,
+        )
+      : NA,
+  ])
+  rows.push(["Was", rateDisplay(c.was)])
+  rows.push(["Now", rateDisplay(c.now)])
+  rows.push(["Intelligence", benchmarkDisplay(c.benchmark, "intelligence")])
+  rows.push(["Tok/s", benchmarkDisplay(c.benchmark, "tokPerSec")])
+  return rows
+}
+
+/**
+ * Normalizes a host model-cost record to the four-rate payload shape. Fields
+ * stay `unknown` — `rateValues` validates, so a half-shaped record reads `N/A`,
+ * never `$undefined`.
+ */
+function baseRates(cost: CmdCost | undefined): CmdRates | undefined {
+  if (!cost) return undefined
+  return {
+    input: cost.input,
+    output: cost.output,
+    cacheRead: cost.cache?.read,
+    cacheWrite: cost.cache?.write,
+  }
+}
+
+/**
+ * v1 panel lookup: the selected model record, gated to Command Code. Any other
+ * provider resolves to undefined — the panel stays hidden. A Command Code model
+ * the host cannot resolve falls back to an empty record, so the panel renders
+ * the full all-N/A row set rather than disappearing.
+ */
+export function v1ModelFor(
+  providers: readonly Provider[],
+  selected: { id: string; providerID: string } | undefined,
+): V1Model | undefined {
+  if (!selected || selected.providerID !== PROVIDER_ID) return undefined
+  const model = providers.find((provider) => provider.id === selected.providerID)?.models[
+    selected.id
+  ]
+  return model ?? {}
+}
+
+/**
+ * v1 model entry: the config hook's enrichment writes the model's provider
+ * options into `options.cmd` (both for auto-registered and declared models),
+ * and the host's own model cost feeds the `Rates` fallback for models whose
+ * payload publishes no band. An undefined model (no selected model to speak
+ * of) yields no rows — the panel's visibility gate; a resolvable model with no
+ * `cmd` payload yields the full all-N/A row set.
+ */
+export function dealsRows(model: V1Model | undefined, today: string = todayIso()): DealsRow[] {
+  if (!model) return []
+  return cmdRows(model.options?.cmd as Cmd | undefined, baseRates(model.cost), today)
+}
+
+/**
+ * v2 panel lookup: resolves the session's selected model in the v2 model
+ * catalog (`data.location.model`), gated to Command Code. v2 reads the selected
+ * model from the session record (`model.id`/`model.providerID`). A non-Command
+ * Code selection resolves to undefined (panel hidden); a Command Code model
+ * missing from the catalog falls back to an empty record, so the panel renders
+ * the full all-N/A row set.
+ */
+export function v2ModelFor(
+  data: V2TuiContext["data"],
+  sessionID: string,
+): V2PanelModel | undefined {
+  const current = data.session.get(sessionID)?.model
+  if (!current || current.providerID !== PROVIDER_ID) return undefined
+  return (
+    data.location.model
+      .list()
+      ?.find(
+        (candidate: V2TuiModel) =>
+          candidate.providerID === current.providerID && candidate.id === current.id,
+      ) ?? {}
+  )
 }
 
 /**
  * v2 model entry: v2 renamed the model's provider-option bag to `settings`
- * (ADR-0010), which is where `enrichCommandCodeModelsV2` writes `cmd`.
+ * (ADR-0010), which is where `enrichCommandCodeModelsV2` writes `cmd`. The
+ * model-cost array's untiered entry is the base price behind the `Rates`
+ * fallback (tiered entries are the over-context bands the payload already
+ * publishes). Gates identically to `dealsRows`: undefined model → no rows, no
+ * payload → all-N/A.
  */
 export function dealsRowsV2(
-  model: { settings?: Readonly<Record<string, unknown>> } | undefined,
+  model: V2PanelModel | undefined,
   today: string = todayIso(),
 ): DealsRow[] {
-  return cmdRows(model?.settings?.["cmd"] as Cmd | undefined, today)
+  if (!model) return []
+  const base = model.cost?.find((entry) => entry.tier === undefined)
+  return cmdRows(model.settings?.["cmd"] as Cmd | undefined, baseRates(base), today)
 }
 
 const id = "commandcode.deals"
-
-/**
- * Resolves the session's selected model in the v2 model catalog. v2 reads the
- * selected model from the session record (`model.id`/`model.providerID`) and the
- * catalog from `data.location.model` — the v2 counterpart of v1's
- * `state.session` × `state.provider` lookup.
- */
-export function v2ModelFor(data: V2TuiContext["data"], sessionID: string): V2TuiModel | undefined {
-  const current = data.session.get(sessionID)?.model
-  if (!current) return undefined
-  return data.location.model
-    .list()
-    ?.find(
-      (candidate: V2TuiModel) =>
-        candidate.providerID === current.providerID && candidate.id === current.id,
-    )
-}
 
 /** The panel itself, shared by both hosts: rows in, theme colours in. */
 function DealsPanel(props: { rows: () => DealsRow[]; text: () => RGBA; textMuted: () => RGBA }) {
@@ -157,7 +332,25 @@ function DealsPanel(props: { rows: () => DealsRow[]; text: () => RGBA; textMuted
           <b>Command Code</b>
         </text>
         <For each={props.rows()}>
-          {(row) => <text fg={props.textMuted()}>{row[1] ? `${row[0]}: ${row[1]}` : row[0]}</text>}
+          {(row) =>
+            row[0] === "" ? (
+              <text> </text>
+            ) : row[2] === "value" ? (
+              <text fg={props.textMuted()}>{row[0]}</text>
+            ) : row[1] === "" ? (
+              <text fg={props.text()}>
+                {row[2] === "heading" ? (
+                  <b>
+                    <u>{row[0]}</u>
+                  </b>
+                ) : (
+                  <b>{row[0]}</b>
+                )}
+              </text>
+            ) : (
+              <text fg={props.textMuted()}>{`${row[0]}: ${row[1]}`}</text>
+            )
+          }
         </For>
       </box>
     </Show>
@@ -168,12 +361,9 @@ function DealsPanelV1(props: { api: TuiPluginApi; session_id: string }) {
   // Mid-session model switches update the session record (`session.updated`
   // reconciles it into the sync store), so reading `session.model` reactively
   // is enough — no event subscription needed.
-  const model = createMemo(() => {
-    const current = props.api.state.session.get(props.session_id)?.model
-    if (!current) return undefined
-    return props.api.state.provider.find((provider: Provider) => provider.id === current.providerID)
-      ?.models[current.id]
-  })
+  const model = createMemo(() =>
+    v1ModelFor(props.api.state.provider, props.api.state.session.get(props.session_id)?.model),
+  )
   return (
     <DealsPanel
       rows={() => dealsRows(model())}
@@ -183,16 +373,31 @@ function DealsPanelV1(props: { api: TuiPluginApi; session_id: string }) {
   )
 }
 
+/**
+ * The panel's two text colours, across the v2 theme rename (see
+ * `V2TuiThemeText`): `base`/`muted` on `@opencode/theme@2.0.8`+,
+ * `default`/`subdued` on 2.0.3–2.0.7. Reading only one spelling would hand
+ * the renderer `undefined` on the hosts exposing the other, and `undefined`
+ * paints as the terminal default — the plain white sidebar on v2.0.8+.
+ */
+export function v2ThemeColors(theme: V2TuiTheme): { text: RGBA; muted: RGBA } {
+  const text = theme.text
+  return "base" in text
+    ? { text: text.base, muted: text.muted }
+    : { text: text.default, muted: text.subdued }
+}
+
 function DealsPanelV2(props: { ctx: V2TuiContext; sessionID: string }) {
   // Same idea as v1 against the v2 data store: `data` is the host's live
   // client-local state, so reading the session's model and the model catalog
   // inside the memo re-renders the panel when either changes.
   const model = createMemo(() => v2ModelFor(props.ctx.data, props.sessionID))
+  const colors = () => v2ThemeColors(props.ctx.theme)
   return (
     <DealsPanel
       rows={() => dealsRowsV2(model())}
-      text={() => props.ctx.theme.text.default}
-      textMuted={() => props.ctx.theme.text.subdued}
+      text={() => colors().text}
+      textMuted={() => colors().muted}
     />
   )
 }

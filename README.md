@@ -118,12 +118,21 @@ opencode run --model commandcode/claude-sonnet-5 "hello"
 ### The Command Code sidebar
 
 While a session uses a `[CMD]` model, the sidebar shows a **Command Code**
-section for that model:
+section for that model, split into segments:
 
-- your plan tier and monthly allowances
-- benchmark scores (intelligence, tokens/second)
-- current deals and `was`/`now` rates
-- peak / off-peak windows
+- tier and status
+- an **Allowance** section listing the Go, GOAT, Pro, Max 10×, Max 20× and
+  Team Pro monthly allowances
+- a **Rates** section with the published rate bands — peak/off-peak for
+  time-of-day pricing (DeepSeek) and context-window tiers (OpenAI, Grok, Qwen) —
+  each band showing input, output, cache-read and cache-write rates per million
+  tokens, plus the peak windows; a model with no published band shows its
+  actual per-million price instead
+- an **Other Information** section with benchmark scores (intelligence,
+  tokens/second), current deals and `was`/`now` rates
+
+Every row is always shown: when a model has nothing for a row, its value reads
+`N/A` instead of the row disappearing.
 
 Toggle the sidebar with `ctrl+x b`. Switch to a model that isn't from Command
 Code and the section disappears — there is nothing to show for other providers.

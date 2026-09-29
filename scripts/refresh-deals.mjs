@@ -95,6 +95,55 @@ export function peakOffPeakFor(record) {
   }
 }
 
+/** One published context band's four rates (cache fields default to 0). */
+function tierRatesFor(tier) {
+  if (!tier || typeof tier.rates !== "object") return undefined
+  const input = num(tier.rates.input)
+  const output = num(tier.rates.output)
+  if (input === undefined || output === undefined) return undefined
+  return {
+    input,
+    output,
+    cacheRead: num(tier.rates.cacheRead) ?? 0,
+    cacheWrite: num(tier.rates.cacheWrite) ?? 0,
+  }
+}
+
+/**
+ * Published context-window rate bands (docs `tiers[]`: `Standard` /
+ * `Long context` / `Extended n`, each with its `context` threshold text).
+ * Emitted only when the model prices more than one band differently —
+ * MiniMax M3's >512K band is byte-identical to its ≤512K band, so the
+ * whole field is omitted as noise. A band missing its numeric input/output
+ * pair drops the whole field (never a half-shaped tier list).
+ */
+export function contextTiersFor(record) {
+  const tiers = Array.isArray(record.tiers) ? record.tiers : []
+  if (tiers.length <= 1) return undefined
+  const bands = []
+  for (const tier of tiers) {
+    const rates = tierRatesFor(tier)
+    if (!rates) return undefined
+    const label = typeof tier.label === "string" && tier.label !== "" ? tier.label : undefined
+    const context =
+      typeof tier.context === "string" && tier.context !== "" ? tier.context : undefined
+    bands.push({
+      ...(label !== undefined ? { label } : {}),
+      ...(context !== undefined ? { context } : {}),
+      rates,
+    })
+  }
+  const first = bands[0].rates
+  const distinct = bands.some(
+    (band) =>
+      band.rates.input !== first.input ||
+      band.rates.output !== first.output ||
+      band.rates.cacheRead !== first.cacheRead ||
+      band.rates.cacheWrite !== first.cacheWrite,
+  )
+  return distinct ? bands : undefined
+}
+
 export function modelDealEntry(record) {
   const tier =
     record.category === "premium"
@@ -103,6 +152,7 @@ export function modelDealEntry(record) {
         ? "opensource"
         : undefined
   const free = record.deal?.free === true || record.deal?.discountPercent === 100
+  const contextTiers = contextTiersFor(record)
   const tiers = Array.isArray(record.tiers) ? record.tiers : []
   const first = tiers[0]
   const now = ratesFor(first)
@@ -117,25 +167,7 @@ export function modelDealEntry(record) {
     ...(free ? { free: true } : {}),
     ...(benchmarkFor(record) ? { benchmark: benchmarkFor(record) } : {}),
     ...(peakOffPeakFor(record) ? { peakOffPeak: peakOffPeakFor(record) } : {}),
-  }
-  if (tiers.length > 1) {
-    const longTier = tiers[tiers.length - 1]
-    const base = ratesFor(longTier)
-    if (base) {
-      const cacheWrite = num(longTier.rates?.cacheWrite) ?? 0
-      const over = { ...base, cacheWrite }
-      const differsFromNow =
-        !now ||
-        over.input !== now.input ||
-        over.output !== now.output ||
-        over.cacheRead !== now.cacheRead
-      const hasCacheWrite = over.cacheWrite !== 0
-      if (differsFromNow || hasCacheWrite) {
-        // Only emit when long-context rates are distinct — MiniMax M3's
-        // >512K tier is byte-identical to its ≤512K tier, so we omit it.
-        entry.overContext = over
-      }
-    }
+    ...(contextTiers ? { contextTiers } : {}),
   }
   if (!entry.free && free === false) {
     // non-free models always get the explicit flag so the shape is stable
@@ -424,8 +456,8 @@ export function buildDealsModule({
     "  now?: { input: number; output: number; cacheRead: number }",
     "  /** Time-varying rates (DeepSeek V4 peak/off-peak). */",
     "  peakOffPeak?: { peak: DealRates; offPeak: DealRates; windows: string }",
-    "  /** Higher-context tier rates (docs: MiniMax M3 >512K). */",
-    "  overContext?: DealRates",
+    "  /** Context-window rate bands, published order (docs: Standard/Long context tiers). */",
+    "  contextTiers?: Array<{ label?: string; context?: string; rates: DealRates }>",
     "  benchmark?: { intelligence?: number; tokPerSec?: number }",
     '  tier?: "opensource" | "premium"',
     "  free: boolean",
