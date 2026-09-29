@@ -21,7 +21,7 @@
 // tests never touch the network.
 import { z } from "zod"
 import { MODEL_COSTS } from "../catalog/facts.js"
-import { normalizePlan, type PlanId } from "../catalog/plans.js"
+import { normalizePlan, PLAN_BEARING_SUBSCRIPTION_STATUSES, type PlanId } from "../catalog/plans.js"
 import { getApiBase } from "../env.js"
 import {
   resolveApiKeyWithSource,
@@ -45,14 +45,6 @@ const PLAN_DISPLAY: Record<PlanId, string> = {
   teampro: "Team Pro",
   provider: "Provider",
 }
-
-/**
- * Subscription statuses that still identify a plan, mirroring the official
- * Command Code CLI's own billing client. Any other status — canceled, unpaid,
- * or one upstream adds later — resolves to unknown rather than reusing a plan
- * the account no longer holds.
- */
-const PLAN_BEARING_SUBSCRIPTION_STATUSES = new Set(["active", "trialing", "past_due"])
 
 /** Abort budget for each billing lookup request. */
 const LOOKUP_TIMEOUT_MS = 5000
