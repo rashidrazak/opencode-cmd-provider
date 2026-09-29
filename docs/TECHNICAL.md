@@ -195,6 +195,53 @@ surfaces in two places:
   `Deals unavailable` banner with every row reading `N/A` and the tool says no
   deal data is bundled. Core (models, auth, streaming) is unaffected.
 
+### Live usage segment
+
+The sidebar's `Usage` segment (issue #241) reads the same billing API the
+official CLI's `/usage` overlay reads, one request per leg, each with a
+5-second abort budget and each failing on its own — a flaky leg drops only the
+rows it feeds:
+
+- `GET /alpha/whoami?limits=1` — the org scope for team accounts
+- `GET /alpha/billing/subscriptions[?orgId=]` — plan identity and the billing
+  period
+- `GET /alpha/billing/credits[?orgId=]` — the 5-hour and weekly windows and
+  the monthly credit pool
+- `GET /alpha/usage/summary[?orgId=][&since=<currentPeriodStart>]` — the
+  cycle's requests, tokens and spend
+
+The credential those reads use is resolved by the TUI host itself, per half
+(issue #243, [ADR-0020](adr/0020-tui-host-credential-for-usage.md)):
+
+- **v1 TUI:** the `commandcode` provider record the TUI state already holds
+  (the structural `options.apiKey ?? key` read), falling back to its own
+  `client.provider.list()` when the record carries neither at runtime.
+- **v2 TUI:** the provider's `integrationID` → the client-local integration
+  record → its active connection; only the `env` branch is reachable, reading
+  `process.env[name]` for the connection's own variable.
+- **Below both:** the package ladder — `COMMANDCODE_API_KEY`, then the legacy
+  auth files, keeping the file label as provenance.
+
+Nothing resolving means zero requests and the one-line notice
+`Usage needs COMMANDCODE_API_KEY — set it to see live limits`; a resolved rung
+renders its muted `via …` provenance line. A credential stored only in
+OpenCode's v2 credential store is unreachable from the TUI host — its value
+never leaves the host's own connection resolution — so a store-only account
+sees that notice, and the mixed case (a stored credential plus a live
+`COMMANDCODE_API_KEY`) shows the environment account's figures labelled
+`via COMMANDCODE_API_KEY`, never a guessed account's numbers.
+
+The refresh is event-driven, never polled (issue #245): **4 requests on
+mount** (whoami → subscriptions → credits → summary; the whoami org scope is
+cached for the panel's lifetime, and the subscription record is re-read only
+once its period has ended or it is over an hour old), **2 per throttled
+refresh** (credits + summary, triggered by a completed turn in the watched
+session at most once every five minutes — in-cooldown signals coalesce into
+one trailing refresh), and **zero while idle** — a 30-second local clock
+redraws the countdowns with no network and confirms each window roll with at
+most one refresh. A failed chain backs off 5 → 10 → 20 → 30 minutes while the
+last-good snapshot stays on screen; a success resets the ladder.
+
 ## Reasoning support
 
 Reasoning metadata derives from the generated classification module
@@ -570,3 +617,4 @@ Both e2e scripts are excluded from `npm test`.
 | [0017](adr/0017-plan-summary-provenance-line.md)               | The plan summary renders the account and the credential rung              |
 | [0018](adr/0018-usage-is-not-a-terminal.md)                    | A usage report is not by itself a terminal on the OpenAI dialect          |
 | [0019](adr/0019-out-of-vocabulary-efforts-snap.md)             | An unadvertised reasoning effort snaps to the nearest advertised level    |
+| [0020](adr/0020-tui-host-credential-for-usage.md)              | The TUI host resolves its own usage credential, per half                  |

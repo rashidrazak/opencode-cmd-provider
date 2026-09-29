@@ -10,7 +10,7 @@ This plugin connects OpenCode to Command Code and adds every Command Code model
 to the model picker, so you can use your Go, GOAT, Pro, Max 10×, Max 20×,
 Provider, Team, or Enterprise plan from OpenCode. It also adds a **Command
 Code** section to the session sidebar with your plan's allowances, benchmarks,
-and current deals.
+current deals, and live usage.
 
 > **Disclaimer:** This is an unofficial, community-maintained integration. It is
 > not affiliated with, endorsed by, or supported by Command Code. You need your
@@ -130,6 +130,11 @@ section for that model, split into segments:
   actual per-million price instead
 - an **Other Information** section with benchmark scores (intelligence,
   tokens/second), current deals and `was`/`now` rates
+- a **Usage** section with live 5-hour, weekly and monthly usage plus the
+  current cycle's requests, tokens and spend, read from your Command Code
+  account and refreshed as you work (never polled); on OpenCode v2, a key kept
+  only inside OpenCode cannot be read by the sidebar — set
+  `COMMANDCODE_API_KEY` to see live limits
 
 Every row is always shown: when a model has nothing for a row, its value reads
 `N/A` instead of the row disappearing.
