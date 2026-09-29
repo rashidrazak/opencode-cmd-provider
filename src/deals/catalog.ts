@@ -59,11 +59,13 @@ export const MODEL_DEALS: Readonly<Record<string, ModelDeals>> = {
   "claude-opus-5-5": { tier: "premium", benchmark: {"intelligence":57.6}, free: false, allowance: {"goat":20,"pro":20} },
   "claude-sonnet-4-6": { tier: "premium", benchmark: {"intelligence":30.1}, free: false, allowance: {"goat":20,"pro":20} },
   "claude-sonnet-5": { tier: "premium", benchmark: {"intelligence":38.2,"tokPerSec":82.8}, free: false, allowance: {"goat":20,"pro":20} },
+  "claude-sonnet-5-5": { tier: "opensource", free: false, allowance: {"goat":10,"pro":20} },
   "deepseek/deepseek-v4-flash": { tier: "opensource", benchmark: {"intelligence":34.3}, peakOffPeak: {"peak":{"input":0.3,"output":1.2,"cacheRead":0.006,"cacheWrite":0},"offPeak":{"input":0.15,"output":0.6,"cacheRead":0.003,"cacheWrite":0},"windows":"01–04 & 06–10 UTC, Mon–Fri"}, free: false, allowance: {"goat":60,"pro":70} },
   "deepseek/deepseek-v4-flash-fast": { tier: "opensource", free: false, allowance: {"goat":20,"pro":30} },
   "deepseek/deepseek-v4-flash-vision-exp": { tier: "opensource", benchmark: {"intelligence":34.8,"tokPerSec":228.7}, peakOffPeak: {"peak":{"input":0.3,"output":1.2,"cacheRead":0.006,"cacheWrite":0},"offPeak":{"input":0.15,"output":0.6,"cacheRead":0.003,"cacheWrite":0},"windows":"01–04 & 06–10 UTC, Mon–Fri"}, free: false, allowance: {"goat":20,"pro":30} },
   "deepseek/deepseek-v4-pro": { tier: "opensource", benchmark: {"intelligence":36,"tokPerSec":78.6}, peakOffPeak: {"peak":{"input":1.32,"output":3.96,"cacheRead":0.044,"cacheWrite":0},"offPeak":{"input":0.66,"output":1.98,"cacheRead":0.022,"cacheWrite":0},"windows":"01–04 & 06–10 UTC, Mon–Fri"}, free: false, allowance: {"goat":20,"pro":30} },
   "deepseek/deepseek-v4.1-flash": { tier: "opensource", benchmark: {"intelligence":39.5,"tokPerSec":237.4}, peakOffPeak: {"peak":{"input":0.3,"output":1.2,"cacheRead":0.006,"cacheWrite":0},"offPeak":{"input":0.15,"output":0.6,"cacheRead":0.003,"cacheWrite":0},"windows":"01–04 & 06–10 UTC, Mon–Fri"}, free: false, allowance: {"goat":60,"pro":70} },
+  "deepseek/deepseek-v4.1-flash-fast": { tier: "opensource", peakOffPeak: {"peak":{"input":0.32,"output":1.16,"cacheRead":0.032,"cacheWrite":0},"offPeak":{"input":0.16,"output":0.58,"cacheRead":0.016,"cacheWrite":0},"windows":"01–04 & 06–10 UTC, Mon–Fri"}, free: false, allowance: {"goat":60,"pro":70} },
   "google/gemini-3.1-flash-lite": { tier: "premium", benchmark: {"intelligence":15.6}, free: false, allowance: {"goat":20,"pro":20} },
   "google/gemini-3.5-flash": { tier: "premium", benchmark: {"intelligence":32.6}, free: false, allowance: {"goat":20,"pro":20} },
   "google/gemini-3.5-flash-lite": { tier: "premium", benchmark: {"intelligence":22.2,"tokPerSec":370}, free: false, allowance: {"goat":20,"pro":20} },
@@ -119,7 +121,7 @@ export const MODEL_DEALS: Readonly<Record<string, ModelDeals>> = {
   "thinkingmachines/inkling-small": { tier: "opensource", benchmark: {"intelligence":27.8,"tokPerSec":230.2}, free: false, allowance: {"goat":20,"pro":30} },
   "xai/grok-4.5": { tier: "opensource", benchmark: {"intelligence":38.8}, free: false, allowance: {"goat":20,"pro":30} },
   "xai/grok-4.6": { tier: "opensource", benchmark: {"intelligence":44.3,"tokPerSec":70.3}, overContext: {"input":4,"output":12,"cacheRead":1,"cacheWrite":0}, free: false, allowance: {"goat":20,"pro":30} },
-  "xai/grok-4.7": { tier: "premium", discount: {"pct":40,"endsAt":"2026-09-27"}, was: {"input":2,"output":6,"cacheRead":0.5}, now: {"input":1.2,"output":3.5999999999999996,"cacheRead":0.3}, benchmark: {"intelligence":46.4,"tokPerSec":50.4}, free: false, allowance: {"goat":35,"pro":45} },
+  "xai/grok-4.7": { tier: "premium", benchmark: {"intelligence":46.4,"tokPerSec":50.4}, overContext: {"input":4,"output":12,"cacheRead":1,"cacheWrite":0}, free: false, allowance: {"goat":20,"pro":30} },
   "xiaomi/mimo-v2.5": { tier: "opensource", discount: {"pct":98}, was: {"input":0.8,"output":4,"cacheRead":0.16}, now: {"input":0.14,"output":0.28,"cacheRead":0.0028}, benchmark: {"intelligence":25.2,"tokPerSec":39.5}, free: false, allowance: {"goat":30,"pro":40} },
   "xiaomi/mimo-v2.5-pro": { tier: "opensource", discount: {"pct":99}, was: {"input":2,"output":6,"cacheRead":0.4}, now: {"input":0.435,"output":0.87,"cacheRead":0.0036}, benchmark: {"intelligence":26,"tokPerSec":50.4}, free: false, allowance: {"goat":20,"pro":30} },
   "xiaomi/mimo-v2.6-flash": { tier: "opensource", free: false, allowance: {"goat":20,"pro":30} },
@@ -135,7 +137,7 @@ export const MODEL_DEALS: Readonly<Record<string, ModelDeals>> = {
 }
 
 export const PLAN_CATALOG: Readonly<Record<PlanId, PlanInfo>> = {
-  go: { price: 1, credits: 10, window5h: 3, windowWeek: 6, display: "Go" },
+  go: { price: 1, credits: 10, window5h: 2, windowWeek: 5, display: "Go" },
   goat: { price: 10, credits: 70, window5h: 14, windowWeek: 35, display: "GOAT" },
   pro: { price: 20, credits: 80, window5h: 16, windowWeek: 40, display: "Pro" },
   // Legacy Pro: the docs table's row before the Aug 2026 repricing, kept
@@ -155,5 +157,5 @@ export const PLAN_CATALOG: Readonly<Record<PlanId, PlanInfo>> = {
 }
 
 export const DEAL_SOURCE_URL = "https://commandcode.ai/docs/resources/pricing-limits"
-export const DEAL_LAST_REFRESHED = "2026-09-28"
+export const DEAL_LAST_REFRESHED = "2026-09-29"
 export const DEAL_PACKAGE_VERSION = "docs"
