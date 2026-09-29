@@ -14,6 +14,11 @@ const PROVIDER_ID = "commandcode"
 /** Context threshold of the over-200k rate tier, keyed `context_over_200k` in v1. */
 const OVER_CONTEXT_TIER_SIZE = 200_000
 
+/** The highest published context band's rates — the over-context cost tier. */
+function longContextRates(deals: ModelDeals) {
+  return deals.contextTiers?.at(-1)?.rates
+}
+
 export function enrichCommandCodeModels(
   config: Config,
   deals: Readonly<Record<string, ModelDeals>> = MODEL_DEALS,
@@ -39,16 +44,16 @@ export function enrichCommandCodeModels(
       model.options ??= {}
       model.options["cmd"] = buildCmdOptions(entry)
     }
-    if (entry.overContext && model.cost?.["context_over_200k"] === undefined) {
-      const c = entry.overContext
+    const over = longContextRates(entry)
+    if (over && model.cost?.["context_over_200k"] === undefined) {
       // Only the higher-context tier is carried here; the SDK `cost` type
       // requires base input/output, so the unset branch is cast.
       model.cost ??= {} as never
       model.cost["context_over_200k"] = {
-        input: c.input,
-        output: c.output,
-        cache_read: c.cacheRead,
-        cache_write: c.cacheWrite,
+        input: over.input,
+        output: over.output,
+        cache_read: over.cacheRead,
+        cache_write: over.cacheWrite,
       }
     }
   }
@@ -65,7 +70,7 @@ export function buildCmdOptions(deals: ModelDeals): Record<string, unknown> {
   if (deals.now !== undefined) out.now = deals.now
   if (deals.benchmark !== undefined) out.benchmark = deals.benchmark
   if (deals.peakOffPeak !== undefined) out.peakOffPeak = deals.peakOffPeak
-  if (deals.overContext !== undefined) out.overContext = deals.overContext
+  if (deals.contextTiers !== undefined) out.contextTiers = deals.contextTiers
   out.free = deals.free
   return out
 }
@@ -106,13 +111,13 @@ export function enrichCommandCodeModelsV2(
         model.settings ??= {}
         model.settings["cmd"] = buildCmdOptions(entry)
       }
-      if (entry.overContext !== undefined && !hasOverContextTier(model)) {
-        const c = entry.overContext
+      const over = longContextRates(entry)
+      if (over !== undefined && !hasOverContextTier(model)) {
         model.cost.push({
           tier: { type: "context", size: OVER_CONTEXT_TIER_SIZE },
-          input: c.input,
-          output: c.output,
-          cache: { read: c.cacheRead, write: c.cacheWrite },
+          input: over.input,
+          output: over.output,
+          cache: { read: over.cacheRead, write: over.cacheWrite },
         })
       }
     })

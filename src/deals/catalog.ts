@@ -42,8 +42,8 @@ export interface ModelDeals {
   now?: { input: number; output: number; cacheRead: number }
   /** Time-varying rates (DeepSeek V4 peak/off-peak). */
   peakOffPeak?: { peak: DealRates; offPeak: DealRates; windows: string }
-  /** Higher-context tier rates (docs: MiniMax M3 >512K). */
-  overContext?: DealRates
+  /** Context-window rate bands, published order (docs: Standard/Long context tiers). */
+  contextTiers?: Array<{ label?: string; context?: string; rates: DealRates }>
   benchmark?: { intelligence?: number; tokPerSec?: number }
   tier?: "opensource" | "premium"
   free: boolean
@@ -76,12 +76,12 @@ export const MODEL_DEALS: Readonly<Record<string, ModelDeals>> = {
   "gpt-5.4": { tier: "premium", benchmark: {"intelligence":39}, free: false, allowance: {"goat":20,"pro":20} },
   "gpt-5.4-mini": { tier: "premium", benchmark: {"intelligence":24.1}, free: false, allowance: {"goat":20,"pro":20} },
   "gpt-5.5": { tier: "premium", benchmark: {"intelligence":38.4}, free: false, allowance: {"goat":20,"pro":20} },
-  "gpt-5.6-luna": { tier: "opensource", benchmark: {"intelligence":37.3,"tokPerSec":140.7}, overContext: {"input":0.4,"output":1.8,"cacheRead":0.04,"cacheWrite":0.5}, free: false, allowance: {"goat":20,"pro":30} },
-  "gpt-5.6-sol": { tier: "opensource", benchmark: {"intelligence":47,"tokPerSec":63.8}, overContext: {"input":10,"output":45,"cacheRead":1,"cacheWrite":12.5}, free: false, allowance: {"goat":70,"pro":80} },
-  "gpt-5.6-terra": { tier: "premium", benchmark: {"intelligence":42.1,"tokPerSec":90.3}, overContext: {"input":4,"output":18,"cacheRead":0.4,"cacheWrite":5}, free: false, allowance: {"goat":20,"pro":20} },
-  "gpt-6-astra": { tier: "premium", benchmark: {"intelligence":52.7,"tokPerSec":57.9}, overContext: {"input":20,"output":75,"cacheRead":2,"cacheWrite":25}, free: false, allowance: {"goat":20,"pro":20} },
-  "gpt-6-luna": { tier: "opensource", benchmark: {"intelligence":37.3,"tokPerSec":154.5}, overContext: {"input":0.2,"output":0.75,"cacheRead":0.02,"cacheWrite":0.25}, free: false, allowance: {"goat":20,"pro":30} },
-  "gpt-6-sol": { tier: "premium", benchmark: {"intelligence":47.5,"tokPerSec":116.3}, overContext: {"input":4,"output":15,"cacheRead":0.4,"cacheWrite":5}, free: false, allowance: {"goat":20,"pro":20} },
+  "gpt-5.6-luna": { tier: "opensource", benchmark: {"intelligence":37.3,"tokPerSec":140.7}, contextTiers: [{"label":"Standard","context":"≤ 272K","rates":{"input":0.2,"output":1.2,"cacheRead":0.02,"cacheWrite":0.25}},{"label":"Long context","context":"> 272K","rates":{"input":0.4,"output":1.8,"cacheRead":0.04,"cacheWrite":0.5}}], free: false, allowance: {"goat":20,"pro":30} },
+  "gpt-5.6-sol": { tier: "opensource", benchmark: {"intelligence":47,"tokPerSec":63.8}, contextTiers: [{"label":"Standard","context":"≤ 272K","rates":{"input":5,"output":30,"cacheRead":0.5,"cacheWrite":6.25}},{"label":"Long context","context":"> 272K","rates":{"input":10,"output":45,"cacheRead":1,"cacheWrite":12.5}}], free: false, allowance: {"goat":70,"pro":80} },
+  "gpt-5.6-terra": { tier: "premium", benchmark: {"intelligence":42.1,"tokPerSec":90.3}, contextTiers: [{"label":"Standard","context":"≤ 272K","rates":{"input":2,"output":12,"cacheRead":0.2,"cacheWrite":2.5}},{"label":"Long context","context":"> 272K","rates":{"input":4,"output":18,"cacheRead":0.4,"cacheWrite":5}}], free: false, allowance: {"goat":20,"pro":20} },
+  "gpt-6-astra": { tier: "premium", benchmark: {"intelligence":52.7,"tokPerSec":57.9}, contextTiers: [{"label":"Standard","context":"≤ 272K","rates":{"input":10,"output":50,"cacheRead":1,"cacheWrite":12.5}},{"label":"Long context","context":"> 272K","rates":{"input":20,"output":75,"cacheRead":2,"cacheWrite":25}}], free: false, allowance: {"goat":20,"pro":20} },
+  "gpt-6-luna": { tier: "opensource", benchmark: {"intelligence":37.3,"tokPerSec":154.5}, contextTiers: [{"label":"Standard","context":"≤ 272K","rates":{"input":0.1,"output":0.5,"cacheRead":0.01,"cacheWrite":0.125}},{"label":"Long context","context":"> 272K","rates":{"input":0.2,"output":0.75,"cacheRead":0.02,"cacheWrite":0.25}}], free: false, allowance: {"goat":20,"pro":30} },
+  "gpt-6-sol": { tier: "premium", benchmark: {"intelligence":47.5,"tokPerSec":116.3}, contextTiers: [{"label":"Standard","context":"≤ 272K","rates":{"input":2,"output":10,"cacheRead":0.2,"cacheWrite":2.5}},{"label":"Long context","context":"> 272K","rates":{"input":4,"output":15,"cacheRead":0.4,"cacheWrite":5}}], free: false, allowance: {"goat":20,"pro":20} },
   "inclusionai/ling-3.0-flash-sante:free": { tier: "opensource", free: true },
   "meituan/LongCat-2.0": { tier: "opensource", benchmark: {"intelligence":19.1}, free: false, allowance: {"goat":50,"pro":60} },
   "meta/muse-spark-1.1": { tier: "premium", benchmark: {"intelligence":33.7}, free: false, allowance: {"goat":20,"pro":20} },
@@ -100,10 +100,10 @@ export const MODEL_DEALS: Readonly<Record<string, ModelDeals>> = {
   "nvidia/nemotron-3-ultra-550b-a55b": { tier: "opensource", benchmark: {"intelligence":22.9,"tokPerSec":159.3}, free: false, allowance: {"goat":20,"pro":30} },
   "poolside/laguna-s-2.1-free": { tier: "opensource", free: true },
   "Qwen/Qwen3.6-Max-Preview": { tier: "opensource", benchmark: {"intelligence":28.4}, free: false, allowance: {"goat":20,"pro":30} },
-  "Qwen/Qwen3.6-Plus": { tier: "opensource", benchmark: {"intelligence":27}, overContext: {"input":2,"output":6,"cacheRead":0.2,"cacheWrite":0}, free: false, allowance: {"goat":33,"pro":43} },
-  "Qwen/Qwen3.7-Flash": { tier: "opensource", overContext: {"input":0.2,"output":0.8,"cacheRead":0.04,"cacheWrite":0.25}, free: false, allowance: {"goat":20,"pro":30} },
+  "Qwen/Qwen3.6-Plus": { tier: "opensource", benchmark: {"intelligence":27}, contextTiers: [{"label":"Standard","context":"≤ 256K","rates":{"input":0.5,"output":3,"cacheRead":0.1,"cacheWrite":0}},{"label":"Long context","context":"> 256K","rates":{"input":2,"output":6,"cacheRead":0.2,"cacheWrite":0}}], free: false, allowance: {"goat":33,"pro":43} },
+  "Qwen/Qwen3.7-Flash": { tier: "opensource", contextTiers: [{"label":"Standard","context":"≤ 32K","rates":{"input":0.03,"output":0.13,"cacheRead":0.006,"cacheWrite":0.038}},{"label":"Extended 1","context":"≤ 256K","rates":{"input":0.1,"output":0.4,"cacheRead":0.02,"cacheWrite":0.125}},{"label":"Long context","context":"> 256K","rates":{"input":0.2,"output":0.8,"cacheRead":0.04,"cacheWrite":0.25}}], free: false, allowance: {"goat":20,"pro":30} },
   "Qwen/Qwen3.7-Max": { tier: "opensource", discount: {"pct":50,"endsAt":"2026-06-22"}, was: {"input":5,"output":15,"cacheRead":1}, now: {"input":2.5,"output":7.5,"cacheRead":0.5}, benchmark: {"intelligence":29.5}, free: false, allowance: {"goat":33,"pro":43} },
-  "Qwen/Qwen3.7-Plus": { tier: "opensource", benchmark: {"intelligence":25.2,"tokPerSec":61.9}, overContext: {"input":1.2,"output":4.8,"cacheRead":0.24,"cacheWrite":1.5}, free: false, allowance: {"goat":33,"pro":43} },
+  "Qwen/Qwen3.7-Plus": { tier: "opensource", benchmark: {"intelligence":25.2,"tokPerSec":61.9}, contextTiers: [{"label":"Standard","context":"≤ 256K","rates":{"input":0.4,"output":1.6,"cacheRead":0.08,"cacheWrite":0.5}},{"label":"Long context","context":"> 256K","rates":{"input":1.2,"output":4.8,"cacheRead":0.24,"cacheWrite":1.5}}], free: false, allowance: {"goat":33,"pro":43} },
   "Qwen/Qwen3.8-27B": { tier: "opensource", benchmark: {"intelligence":33.7,"tokPerSec":46.5}, free: false, allowance: {"goat":70,"pro":80} },
   "Qwen/Qwen3.8-Flash": { tier: "opensource", free: false, allowance: {"goat":20,"pro":30} },
   "Qwen/Qwen3.8-Max": { tier: "opensource", benchmark: {"intelligence":40.2}, free: false, allowance: {"goat":20,"pro":30} },
@@ -120,8 +120,8 @@ export const MODEL_DEALS: Readonly<Record<string, ModelDeals>> = {
   "thinkingmachines/inkling": { tier: "opensource", benchmark: {"intelligence":25,"tokPerSec":109.2}, free: false, allowance: {"goat":20,"pro":30} },
   "thinkingmachines/inkling-small": { tier: "opensource", benchmark: {"intelligence":27.8,"tokPerSec":230.2}, free: false, allowance: {"goat":20,"pro":30} },
   "xai/grok-4.5": { tier: "opensource", benchmark: {"intelligence":38.8}, free: false, allowance: {"goat":20,"pro":30} },
-  "xai/grok-4.6": { tier: "opensource", benchmark: {"intelligence":44.3,"tokPerSec":70.3}, overContext: {"input":4,"output":12,"cacheRead":1,"cacheWrite":0}, free: false, allowance: {"goat":20,"pro":30} },
-  "xai/grok-4.7": { tier: "premium", benchmark: {"intelligence":46.4,"tokPerSec":50.4}, overContext: {"input":4,"output":12,"cacheRead":1,"cacheWrite":0}, free: false, allowance: {"goat":20,"pro":30} },
+  "xai/grok-4.6": { tier: "opensource", benchmark: {"intelligence":44.3,"tokPerSec":70.3}, contextTiers: [{"label":"Standard","context":"≤ 200K","rates":{"input":2,"output":6,"cacheRead":0.5,"cacheWrite":0}},{"label":"Long context","context":"> 200K","rates":{"input":4,"output":12,"cacheRead":1,"cacheWrite":0}}], free: false, allowance: {"goat":20,"pro":30} },
+  "xai/grok-4.7": { tier: "premium", benchmark: {"intelligence":46.4,"tokPerSec":50.4}, contextTiers: [{"label":"Standard","context":"≤ 200K","rates":{"input":2,"output":6,"cacheRead":0.5,"cacheWrite":0}},{"label":"Long context","context":"> 200K","rates":{"input":4,"output":12,"cacheRead":1,"cacheWrite":0}}], free: false, allowance: {"goat":20,"pro":30} },
   "xiaomi/mimo-v2.5": { tier: "opensource", discount: {"pct":98}, was: {"input":0.8,"output":4,"cacheRead":0.16}, now: {"input":0.14,"output":0.28,"cacheRead":0.0028}, benchmark: {"intelligence":25.2,"tokPerSec":39.5}, free: false, allowance: {"goat":30,"pro":40} },
   "xiaomi/mimo-v2.5-pro": { tier: "opensource", discount: {"pct":99}, was: {"input":2,"output":6,"cacheRead":0.4}, now: {"input":0.435,"output":0.87,"cacheRead":0.0036}, benchmark: {"intelligence":26,"tokPerSec":50.4}, free: false, allowance: {"goat":20,"pro":30} },
   "xiaomi/mimo-v2.6-flash": { tier: "opensource", free: false, allowance: {"goat":20,"pro":30} },

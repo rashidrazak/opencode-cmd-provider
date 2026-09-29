@@ -690,15 +690,15 @@ run([
       const draft = new Map<string, ProviderRecord>()
       const editor = providerEditor(draft)
       registerModels(editor)
-      const overContextId = Object.entries(MODEL_DEALS).find(
-        ([, entry]) => entry.overContext !== undefined,
+      const contextTierId = Object.entries(MODEL_DEALS).find(
+        ([, entry]) => entry.contextTiers !== undefined,
       )?.[0]
-      assert(overContextId, "the Deals catalog must carry an over-context rate")
-      editor.models.update(PROVIDER_ID, overContextId, (model) => {
+      assert(contextTierId, "the Deals catalog must carry context tiers")
+      editor.models.update(PROVIDER_ID, contextTierId, (model) => {
         model.settings = { cmd: { declared: true } }
       })
       enrichCommandCodeModelsV2(editor)
-      const model = draft.get(PROVIDER_ID)?.models.get(overContextId)
+      const model = draft.get(PROVIDER_ID)?.models.get(contextTierId)
       assertEqual(model?.settings?.["cmd"], { declared: true })
       assertEqual(model?.cost.filter((entry) => entry.tier?.size === 200_000).length, 1)
     },

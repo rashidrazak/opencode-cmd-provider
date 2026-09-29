@@ -150,8 +150,16 @@ surfaces in two places:
 
 - **Sidebar panel** (`src/deals/tui.tsx`): the server half writes the payload to
   the model's provider options — v1 `options.cmd`, v2 `settings.cmd` — and the
-  panel renders tier, allowances, benchmark (intelligence, tok/s), `was`/`now`
-  rates, and peak/off-peak windows for the session's selected model.
+  panel renders in segmented rows for the session's selected model: tier/status,
+  an `Allowance` heading over one row per plan, then the deal/benchmark rows
+  (`Deal`, `Was`, `Now`, `Intelligence`, `Tok/s`), blank lines between segments.
+  The tail closes with a **`Rates`** section: the published time-of-day bands
+  (`Peak`, `Off-peak`, `Windows`) and/or context-window bands labeled by their
+  published thresholds (`≤ 272K`, `> 272K`, …), each rate row carrying
+  in/out/cache-read/cache-write per-million rates; a model with neither keeps a
+  plain `Rates: N/A` row. The row set is fixed: every Command Code model shows
+  every row, with `N/A` for rows the payload says nothing about, and a selected
+  model from any other provider hides the panel.
 - **`cmd_plan_summary` tool**: plan-aware allowances and deal rates for
   estimating monthly request counts. It resolves the plan from
   `GET /alpha/billing/subscriptions`, org-scoped through `/alpha/whoami`, using
@@ -179,8 +187,8 @@ surfaces in two places:
   [Legacy wire version and temperature](#legacy-wire-version-and-temperature)).
 - **Visible degradation:** when the bundled Deals catalog is empty (upstream
   fetch failed or the RSC shape changed), the sidebar shows a
-  `Deals unavailable` banner with placeholder rows and the tool says no deal data
-  is bundled. Core (models, auth, streaming) is unaffected.
+  `Deals unavailable` banner with every row reading `N/A` and the tool says no
+  deal data is bundled. Core (models, auth, streaming) is unaffected.
 
 ## Reasoning support
 

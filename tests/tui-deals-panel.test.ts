@@ -1,12 +1,74 @@
 // tests/tui-deals-panel.test.ts — deals sidebar panel data extraction and the
 // two host contracts (v1 `tui(api)` slot map, v2 `setup(context)` slot claim).
-import plugin, { dealsRows, dealsRowsV2, v2ModelFor } from "../src/deals/tui.js"
+import plugin, { dealsRows, dealsRowsV2, v1ModelFor, v2ModelFor } from "../src/deals/tui.js"
+import type { DealsRow } from "../src/deals/tui.js"
+import type { Provider } from "@opencode-ai/sdk/v2"
 import type { V2TuiContext, V2TuiSlotClaim } from "../src/plugin/v2-tui-types.js"
 import { assertEqual, assert, run } from "./harness.js"
 
+const NA = "N/A"
+
+/** PLAN_CATALOG display names — the plan rows under the Allowance heading. */
+const PLAN_LABELS = [
+  "Go",
+  "GOAT",
+  "Pro",
+  "Pro (legacy)",
+  "Max 10×",
+  "Max 20×",
+  "Team Pro",
+  "Provider",
+]
+
+/** The rows after the allowance segment: deal and benchmark data. */
+const TAIL_LABELS = ["Deal", "Was", "Now", "Intelligence", "Tok/s"]
+
+/** The placeholder a model with no rate bands renders: a blank line, then `Rates: N/A`. */
+const NO_RATES: DealsRow[] = [
+  ["", ""],
+  ["Rates", NA],
+]
+
+/**
+ * The fixed segmented shape: Tier/Status, a blank line, the `Allowance` heading
+ * over one row per plan, a blank line, then the deal/benchmark rows and the
+ * rate block (`rates`, defaulting to the plain `Rates: N/A` row) — every value
+ * from `values` (or `N/A`).
+ */
+function fixedRows(values: Record<string, string>, rates: DealsRow[] = NO_RATES): DealsRow[] {
+  const valueRow = (label: string): DealsRow => [label, values[label] ?? NA]
+  return [
+    valueRow("Tier"),
+    valueRow("Status"),
+    ["", ""],
+    ["Allowance", "", "heading"],
+    ...PLAN_LABELS.map(valueRow),
+    ["", ""],
+    ...TAIL_LABELS.map(valueRow),
+    ...rates,
+  ]
+}
+
+/**
+ * Pins the whole fixed row set — banner first when the Deals catalog is
+ * unavailable — so every label appears exactly once, in segment order.
+ */
+function assertFixedRows(
+  rows: DealsRow[],
+  values: Record<string, string>,
+  options: { banner?: string; rates?: DealsRow[] } = {},
+): void {
+  const expected = fixedRows(values, options.rates)
+  if (options.banner !== undefined) expected.unshift([options.banner, ""])
+  assertEqual(rows, expected)
+}
+
+const row = (rows: DealsRow[], label: string): DealsRow | undefined =>
+  rows.find(([key]) => key === label)
+
 run([
   [
-    "extracts rows from a model with full deals data",
+    "renders the full fixed row set for a model with full deals data",
     () => {
       const rows = dealsRows(
         {
@@ -24,16 +86,78 @@ run([
         },
         "2026-09-22",
       )
-      assertEqual(rows, [
-        ["Tier", "Premium"],
-        ["GOAT allowance", "$40/mo"],
-        ["Pro allowance", "$60/mo"],
-        ["Deal", "50% off until 2026-12-31"],
-        ["Was", "$1.5/$7.5 in/out"],
-        ["Now", "$0.75/$3.75 in/out"],
-        ["Intelligence", "56"],
-        ["Tok/s", "339"],
+      assertFixedRows(rows, {
+        Tier: "Premium",
+        Status: "Paid",
+        GOAT: "$40/mo",
+        Pro: "$60/mo",
+        Deal: "50% off until 2026-12-31",
+        Was: "$1.5/$7.5 in/out",
+        Now: "$0.75/$3.75 in/out",
+        Intelligence: "56",
+        "Tok/s": "339",
+      })
+    },
+  ],
+
+  [
+    "segments the panel: Tier/Status, blank, Allowance heading + plans, blank, deal rows, blank, Rates",
+    () => {
+      const rows = dealsRows({
+        options: { cmd: { allowance: { goat: 20 }, free: false } },
+      })
+      assertEqual(rows.slice(0, 4), [
+        ["Tier", NA],
+        ["Status", "Paid"],
+        ["", ""],
+        ["Allowance", "", "heading"],
       ])
+      assertEqual(rows.slice(4, 12), [
+        ["Go", NA],
+        ["GOAT", "$20/mo"],
+        ["Pro", NA],
+        ["Pro (legacy)", NA],
+        ["Max 10×", NA],
+        ["Max 20×", NA],
+        ["Team Pro", NA],
+        ["Provider", NA],
+      ])
+      assertEqual(rows.slice(12), [
+        ["", ""],
+        ["Deal", NA],
+        ["Was", NA],
+        ["Now", NA],
+        ["Intelligence", NA],
+        ["Tok/s", NA],
+        ["", ""],
+        ["Rates", NA],
+      ])
+    },
+  ],
+
+  [
+    "renders every row even with nothing in the payload — N/A for all",
+    () => {
+      // A Command Code model the catalog has no deals entry for: the panel
+      // stays visible, every row reads N/A.
+      assertFixedRows(dealsRows({ options: {} }), {})
+      assertFixedRows(dealsRows({ options: { cmd: {} } }), {})
+      // `free: false` is data, not absence: the Status row reads Paid.
+      assertFixedRows(dealsRows({ options: { cmd: { free: false } } }), { Status: "Paid" })
+      // No model at all (no selected model to speak of) is the panel's gate.
+      assertEqual(dealsRows(undefined), [])
+    },
+  ],
+
+  [
+    "Status reads FREE for free models, Unknown renders N/A",
+    () => {
+      assertEqual(row(dealsRows({ options: { cmd: { free: true } } }), "Status"), [
+        "Status",
+        "FREE",
+      ])
+      // A missing/unknown free flag has nothing to report.
+      assertEqual(row(dealsRows({ options: { cmd: {} } }), "Status"), ["Status", NA])
     },
   ],
 
@@ -56,11 +180,9 @@ run([
         },
         "2026-09-22",
       )
-      assertEqual(rows, [
-        ["Deal", "40% off until 2026-09-27"],
-        ["Was", "$2/$6 in/out"],
-        ["Now", "$1.2/$3.6 in/out"],
-      ])
+      assertEqual(row(rows, "Deal"), ["Deal", "40% off until 2026-09-27"])
+      assertEqual(row(rows, "Was"), ["Was", "$2/$6 in/out"])
+      assertEqual(row(rows, "Now"), ["Now", "$1.2/$3.6 in/out"])
     },
   ],
 
@@ -78,38 +200,47 @@ run([
         now: { input: 3, output: 9 },
         free: false,
       }
-      const dealRow = (today: string) => dealsRows({ options: { cmd } }, today)[0]
+      const dealRow = (today: string) => row(dealsRows({ options: { cmd } }, today), "Deal")
       assertEqual(dealRow("2026-04-30"), ["Deal", "25% off until 2026-05-01"])
       // The named day is still a live deal: upstream expires at 23:59:59Z of it.
       assertEqual(dealRow("2026-05-01"), ["Deal", "25% off until 2026-05-01"])
       assertEqual(dealRow("2026-05-02"), ["Deal", "25% off (ended 2026-05-01)"])
-      assertEqual(dealsRows({ options: { cmd } }, "2026-05-02"), [
-        ["Deal", "25% off (ended 2026-05-01)"],
-        ["Was", "$4/$12 in/out"],
-        ["Now", "$3/$9 in/out"],
+      assertEqual(row(dealsRows({ options: { cmd } }, "2026-05-02"), "Was"), [
+        "Was",
+        "$4/$12 in/out",
+      ])
+      assertEqual(row(dealsRows({ options: { cmd } }, "2026-05-02"), "Now"), [
+        "Now",
+        "$3/$9 in/out",
       ])
       // v2's surface shares the one rule (the host split is ADR-0010's, not
       // the formatter's).
       assertEqual(
-        dealsRowsV2(
-          { settings: { cmd: { discount: { pct: 25, endsAt: "2026-05-01" }, free: false } } },
-          "2026-05-02",
+        row(
+          dealsRowsV2(
+            { settings: { cmd: { discount: { pct: 25, endsAt: "2026-05-01" }, free: false } } },
+            "2026-05-02",
+          ),
+          "Deal",
         ),
-        [["Deal", "25% off (ended 2026-05-01)"]],
+        ["Deal", "25% off (ended 2026-05-01)"],
       )
       // A non-ISO `endsAt` has no date to compare and keeps the historic
       // phrasing. No catalog entry carries one today (a free deal yields no
       // `discount` object at all), so this pins the pass-through only.
       assertEqual(
-        dealsRows(
-          {
-            options: {
-              cmd: { discount: { pct: 50, endsAt: "while capacity lasts" }, free: false },
+        row(
+          dealsRows(
+            {
+              options: {
+                cmd: { discount: { pct: 50, endsAt: "while capacity lasts" }, free: false },
+              },
             },
-          },
-          "2026-05-02",
+            "2026-05-02",
+          ),
+          "Deal",
         ),
-        [["Deal", "50% off until while capacity lasts"]],
+        ["Deal", "50% off until while capacity lasts"],
       )
     },
   ],
@@ -126,10 +257,8 @@ run([
           },
         },
       })
-      assertEqual(rows, [
-        ["Was", "$0.435/$0.87 in/out"],
-        ["Now", "$1.2/$3.6 in/out"],
-      ])
+      assertEqual(row(rows, "Was"), ["Was", "$0.435/$0.87 in/out"])
+      assertEqual(row(rows, "Now"), ["Now", "$1.2/$3.6 in/out"])
     },
   ],
 
@@ -139,12 +268,12 @@ run([
       const rows = dealsRows({
         options: { cmd: { tier: "opensource", free: false } },
       })
-      assertEqual(rows, [["Tier", "Open Source"]])
+      assertEqual(row(rows, "Tier"), ["Tier", "Open Source"])
     },
   ],
 
   [
-    "handles free models and peak/off-peak",
+    "handles free models and peak/off-peak windows",
     () => {
       const rows = dealsRows({
         options: {
@@ -154,43 +283,150 @@ run([
           },
         },
       })
-      assertEqual(rows, [
-        ["Status", "FREE"],
-        ["Rates", "peak/off-peak (01-04 & 06-10 UTC)"],
-      ])
+      assertEqual(row(rows, "Status"), ["Status", "FREE"])
+      assertEqual(row(rows, "Rates"), ["Rates", "", "heading"])
+      assertEqual(row(rows, "Peak"), ["Peak", NA])
+      assertEqual(row(rows, "Off-peak"), ["Off-peak", NA])
+      assertEqual(row(rows, "Windows"), ["Windows", "01-04 & 06-10 UTC"])
+      // A free model has no allowances: every plan row reads N/A rather than
+      // vanishing.
+      for (const plan of PLAN_LABELS) {
+        assertEqual(row(rows, plan), [plan, NA])
+      }
     },
   ],
 
   [
-    "shows the section for every commandcode model — tier and benchmark are enough",
+    "renders the peak/off-peak bands with all four rates and the windows",
     () => {
-      const rows = dealsRows({
-        options: {
-          cmd: {
-            tier: "premium",
-            benchmark: { intelligence: 24.1, tokPerSec: 101.1 },
-            free: false,
+      assertFixedRows(
+        dealsRows({
+          options: {
+            cmd: {
+              free: false,
+              peakOffPeak: {
+                peak: { input: 0.32, output: 1.16, cacheRead: 0.032, cacheWrite: 0 },
+                offPeak: { input: 0.16, output: 0.58, cacheRead: 0.016, cacheWrite: 0 },
+                windows: "01–04 & 06–10 UTC, Mon–Fri",
+              },
+            },
           },
+        }),
+        { Status: "Paid" },
+        {
+          rates: [
+            ["", ""],
+            ["Rates", "", "heading"],
+            ["Peak", "$0.32/$1.16/$0.032/$0 in/out/cache"],
+            ["Off-peak", "$0.16/$0.58/$0.016/$0 in/out/cache"],
+            ["Windows", "01–04 & 06–10 UTC, Mon–Fri"],
+          ],
         },
-      })
-      assertEqual(rows, [
-        ["Tier", "Premium"],
-        ["Intelligence", "24.1"],
-        ["Tok/s", "101.1"],
-      ])
+      )
     },
   ],
 
   [
-    "returns an empty list when there is no cmd data",
+    "renders every context-window band under Rates",
     () => {
-      assertEqual(dealsRows({ options: {} }), [])
-      assertEqual(dealsRows(undefined), [])
-      assertEqual(dealsRows({ options: { cmd: { free: false } } }), [])
+      assertFixedRows(
+        dealsRows({
+          options: {
+            cmd: {
+              free: false,
+              contextTiers: [
+                {
+                  label: "Standard",
+                  context: "≤ 272K",
+                  rates: { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 },
+                },
+                {
+                  label: "Long context",
+                  context: "> 272K",
+                  rates: { input: 4, output: 15, cacheRead: 0.4, cacheWrite: 5 },
+                },
+              ],
+            },
+          },
+        }),
+        { Status: "Paid" },
+        {
+          rates: [
+            ["", ""],
+            ["Rates", "", "heading"],
+            ["≤ 272K", "$2/$10/$0.2/$2.5 in/out/cache"],
+            ["> 272K", "$4/$15/$0.4/$5 in/out/cache"],
+          ],
+        },
+      )
     },
   ],
+
   [
-    "handles discount without endsAt and tier case-insensitive",
+    "Rates merges both band types; malformed rows read N/A and labelless bands are skipped",
+    () => {
+      assertFixedRows(
+        dealsRows({
+          options: {
+            cmd: {
+              free: false,
+              peakOffPeak: { peak: { input: 1 }, windows: "01–04" },
+              contextTiers: [
+                { rates: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 } },
+                { context: "≤ 32K", rates: { input: 0.03, output: 0.13 } },
+              ],
+            },
+          },
+        }),
+        { Status: "Paid" },
+        {
+          rates: [
+            ["", ""],
+            ["Rates", "", "heading"],
+            ["Peak", NA],
+            ["Off-peak", NA],
+            ["Windows", "01–04"],
+            ["≤ 32K", NA],
+          ],
+        },
+      )
+    },
+  ],
+
+  [
+    "renders the full row set for every commandcode model — tier and benchmark are enough",
+    () => {
+      assertFixedRows(
+        dealsRows({
+          options: {
+            cmd: {
+              tier: "premium",
+              benchmark: { intelligence: 24.1, tokPerSec: 101.1 },
+              free: false,
+            },
+          },
+        }),
+        {
+          Tier: "Premium",
+          Status: "Paid",
+          Intelligence: "24.1",
+          "Tok/s": "101.1",
+        },
+      )
+    },
+  ],
+
+  [
+    "a half-filled benchmark renders the missing metric as N/A",
+    () => {
+      const rows = dealsRows({ options: { cmd: { benchmark: { intelligence: 24.1 } } } })
+      assertEqual(row(rows, "Intelligence"), ["Intelligence", "24.1"])
+      assertEqual(row(rows, "Tok/s"), ["Tok/s", NA])
+    },
+  ],
+
+  [
+    "handles discount without endsAt",
     () => {
       const rows = dealsRows({
         options: {
@@ -201,58 +437,64 @@ run([
           },
         },
       })
-      assertEqual(rows, [
-        ["Tier", "Premium"],
-        ["Deal", "50% off"],
-      ])
+      assertEqual(row(rows, "Tier"), ["Tier", "Premium"])
+      assertEqual(row(rows, "Deal"), ["Deal", "50% off"])
     },
   ],
+
   [
-    "renders allowance for teampro via PLAN_CATALOG display",
+    "renders every plan row under the Allowance heading, N/A for unlisted plans",
     () => {
       const rows = dealsRows({
         options: {
           cmd: {
-            allowance: { teampro: 40 },
+            allowance: { goat: 40, teampro: 40 },
             free: false,
           },
         },
       })
-      assertEqual(rows, [["Team Pro allowance", "$40/mo"]])
+      assertFixedRows(rows, {
+        Status: "Paid",
+        GOAT: "$40/mo",
+        "Team Pro": "$40/mo",
+      })
+      // The row set is the catalog's plan vocabulary — unknown keys are not rows.
+      const unknown = dealsRows({ options: { cmd: { allowance: { custom: 5 }, free: false } } })
+      assertFixedRows(unknown, { Status: "Paid" })
     },
   ],
+
   [
-    "shows unavailable banner with placeholders when catalog is empty",
+    "shows the unavailable banner with the full N/A row set when catalog is empty",
     () => {
-      const rows = dealsRows({ options: { cmd: { unavailable: true } } })
-      assertEqual(rows, [
-        ["Deals unavailable — https://commandcode.ai/docs/resources/pricing-limits", ""],
-        ["Tier", "—"],
-        ["Intelligence", "—"],
-        ["Tok/s", "—"],
-      ])
+      assertFixedRows(
+        dealsRows({ options: { cmd: { unavailable: true } } }),
+        {},
+        {
+          banner: unavailable(),
+        },
+      )
     },
   ],
+
   [
     "unavailable takes precedence over normal deal data",
     () => {
-      const rows = dealsRows({
-        options: {
-          cmd: {
-            unavailable: true,
-            tier: "premium",
-            allowance: { goat: 40 },
-            benchmark: { intelligence: 56 },
-            free: false,
+      assertFixedRows(
+        dealsRows({
+          options: {
+            cmd: {
+              unavailable: true,
+              tier: "premium",
+              allowance: { goat: 40 },
+              benchmark: { intelligence: 56 },
+              free: false,
+            },
           },
-        },
-      })
-      assertEqual(rows, [
-        ["Deals unavailable — https://commandcode.ai/docs/resources/pricing-limits", ""],
-        ["Tier", "—"],
-        ["Intelligence", "—"],
-        ["Tok/s", "—"],
-      ])
+        }),
+        {},
+        { banner: unavailable() },
+      )
     },
   ],
 
@@ -272,23 +514,32 @@ run([
         benchmark: { intelligence: 56, tokPerSec: 339 },
         free: false,
       }
-      assertEqual(dealsRowsV2({ settings: { cmd } }), [
-        ["Tier", "Premium"],
-        ["Pro allowance", "$60/mo"],
-        ["Intelligence", "56"],
-        ["Tok/s", "339"],
-      ])
+      assertFixedRows(dealsRowsV2({ settings: { cmd } }), {
+        Tier: "Premium",
+        Status: "Paid",
+        Pro: "$60/mo",
+        Intelligence: "56",
+        "Tok/s": "339",
+      })
       // v1's bag is not v2's bag: an `options.cmd` payload must not render.
-      assertEqual(dealsRowsV2({ settings: { options: { cmd } } }), [])
+      const v1Bag = dealsRowsV2({ settings: { options: { cmd } } })
+      assertFixedRows(v1Bag, {})
+      // A v2 model without a payload still renders the full N/A row set.
+      assertFixedRows(dealsRowsV2({}), {})
       assertEqual(dealsRowsV2(undefined), [])
-      assertEqual(dealsRowsV2({ settings: { cmd: { free: false } } }), [])
     },
   ],
   [
-    "v2: model lookup resolves the session's selected model in the catalog",
+    "v2: model lookup resolves the selected Command Code model and hides other providers",
     () => {
+      const cmd = { tier: "premium", free: false }
       const models = [
-        { id: "claude-sonnet-5", modelID: "claude-sonnet-5", providerID: "commandcode" },
+        {
+          id: "claude-sonnet-5",
+          modelID: "claude-sonnet-5",
+          providerID: "commandcode",
+          settings: { cmd },
+        },
         { id: "gpt-6", modelID: "gpt-6", providerID: "opencode" },
       ]
       const data = (model?: { id: string; providerID: string }) =>
@@ -297,12 +548,16 @@ run([
           location: { model: { list: () => models } },
         }) as unknown as V2TuiContext["data"]
 
-      assertEqual(
-        v2ModelFor(data({ id: "claude-sonnet-5", providerID: "commandcode" }), "ses_1")?.modelID,
-        "claude-sonnet-5",
-      )
-      // A provider/id mismatch (or an unknown session) renders nothing.
-      assertEqual(v2ModelFor(data({ id: "gpt-6", providerID: "commandcode" }), "ses_1"), undefined)
+      const found = v2ModelFor(data({ id: "claude-sonnet-5", providerID: "commandcode" }), "ses_1")
+      assertEqual(found?.settings?.["cmd"], cmd)
+      // Selecting another provider's model hides the panel.
+      assertEqual(v2ModelFor(data({ id: "gpt-6", providerID: "opencode" }), "ses_1"), undefined)
+      // A Command Code model missing from the catalog still renders the full
+      // N/A row set rather than disappearing.
+      const missing = v2ModelFor(data({ id: "new-model", providerID: "commandcode" }), "ses_1")
+      assertEqual(missing, {})
+      assertFixedRows(dealsRowsV2(missing), {})
+      // An unknown session renders nothing.
       assertEqual(
         v2ModelFor(
           {
@@ -313,6 +568,26 @@ run([
         ),
         undefined,
       )
+    },
+  ],
+  [
+    "v1: model lookup resolves the selected Command Code model and hides other providers",
+    () => {
+      const cmd = { tier: "premium", free: false }
+      const providers = [
+        { id: "commandcode", models: { "claude-sonnet-5": { options: { cmd } } } },
+        { id: "opencode", models: { "gpt-6": {} } },
+      ] as unknown as readonly Provider[]
+      const found = v1ModelFor(providers, { id: "claude-sonnet-5", providerID: "commandcode" })
+      assertEqual(found?.options?.["cmd"], cmd)
+      // Selecting another provider's model hides the panel.
+      assertEqual(v1ModelFor(providers, { id: "gpt-6", providerID: "opencode" }), undefined)
+      assertEqual(v1ModelFor(providers, undefined), undefined)
+      // A Command Code model missing from the provider record still renders the
+      // full N/A row set rather than disappearing.
+      const missing = v1ModelFor(providers, { id: "new-model", providerID: "commandcode" })
+      assertEqual(missing, {})
+      assertFixedRows(dealsRows(missing), {})
     },
   ],
   [
@@ -365,3 +640,8 @@ run([
     },
   ],
 ])
+
+/** The banner row the panel leads with when the Deals catalog is empty. */
+function unavailable(): string {
+  return "Deals unavailable — https://commandcode.ai/docs/resources/pricing-limits"
+}

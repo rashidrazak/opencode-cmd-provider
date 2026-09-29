@@ -214,12 +214,11 @@ run([
     },
   ],
   [
-    "modelDealEntry: a record with two tiers of different rates emits overContext (synthetic)",
+    "modelDealEntry: a record with two tiers of different rates emits contextTiers (synthetic)",
     () => {
       // The Qwen 3.6 Plus test used to cover this against the live
-      // RSC. The synthetic version below owns the values: a
-      // short-context tier at the regular rate plus a long-context
-      // tier with different rates triggers `overContext`.
+      // RSC. The synthetic version below owns the values: two bands of
+      // published context-window rates are surfaced in order.
       const rec = {
         id: "Qwen/Qwen3.6-Plus",
         category: "opensource",
@@ -232,17 +231,20 @@ run([
       assertEqual(modelDealEntry(rec), {
         tier: "opensource",
         benchmark: { intelligence: 40.5 },
-        overContext: { input: 2, output: 6, cacheRead: 0.2, cacheWrite: 0 },
+        contextTiers: [
+          { rates: { input: 0.5, output: 3, cacheRead: 0.1, cacheWrite: 0 } },
+          { rates: { input: 2, output: 6, cacheRead: 0.2, cacheWrite: 0 } },
+        ],
         free: false,
       })
     },
   ],
   [
-    "modelDealEntry: a record with two identical tiers suppresses overContext (synthetic)",
+    "modelDealEntry: a record with two identical tiers suppresses contextTiers (synthetic)",
     () => {
       // The cron hit this case on 2026-08-29 (MiniMax M3): the
       // long-context tier is byte-identical to the short-context
-      // tier, so overContext is dropped (no useful information).
+      // tier, so contextTiers is dropped (no useful information).
       const rec = {
         id: "MiniMaxAI/MiniMax-M3",
         category: "opensource",
@@ -253,7 +255,7 @@ run([
         ],
       }
       const entry = modelDealEntry(rec)
-      assertEqual(entry.overContext, undefined, "identical tier must suppress overContext")
+      assertEqual(entry.contextTiers, undefined, "identical tier must suppress contextTiers")
       assertEqual(entry.discount, { pct: 50 })
     },
   ],
@@ -328,7 +330,7 @@ run([
       assertEqual(entry.now, undefined)
       assertEqual(entry.benchmark, undefined)
       assertEqual(entry.peakOffPeak, undefined)
-      assertEqual(entry.overContext, undefined)
+      assertEqual(entry.contextTiers, undefined)
       assertEqual(entry.tier, undefined)
     },
   ],
@@ -391,10 +393,14 @@ run([
           out.includes("allowance"),
         "MiniMax M3 must carry discount+benchmark+allowance",
       )
-      // overContext must be present for Qwen 3.7 Plus etc, absent for MiniMax identical tier
+      // contextTiers must be present for Qwen 3.7 Plus etc, absent for MiniMax identical tier
       assert(
-        out.includes("Qwen/Qwen3.7-Plus") && out.includes("overContext"),
-        "Qwen 3.7 Plus must have overContext",
+        out.includes("Qwen/Qwen3.7-Plus") && out.includes("contextTiers"),
+        "Qwen 3.7 Plus must have contextTiers",
+      )
+      assert(
+        out.includes('"context":"≤ 256K"') && out.includes('"context":"> 256K"'),
+        "contextTiers must carry the published threshold text",
       )
       // count entries: should be 60+ from merged goat + pro slug records
       const entries = (out.match(/": \{ /g) ?? []).length

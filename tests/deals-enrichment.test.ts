@@ -19,7 +19,18 @@ const DEALS: Readonly<Record<string, ModelDeals>> = {
       offPeak: { input: 0.66, output: 1.98, cacheRead: 0.022, cacheWrite: 0 },
       windows: "01-04 & 06-10 UTC",
     },
-    overContext: { input: 0.3, output: 1.2, cacheRead: 0.06, cacheWrite: 0 },
+    contextTiers: [
+      {
+        label: "Standard",
+        context: "≤ 272K",
+        rates: { input: 1, output: 5, cacheRead: 0.1, cacheWrite: 1 },
+      },
+      {
+        label: "Long context",
+        context: "> 272K",
+        rates: { input: 0.3, output: 1.2, cacheRead: 0.06, cacheWrite: 0 },
+      },
+    ],
     benchmark: { intelligence: 56, tokPerSec: 339 },
     tier: "premium",
     free: false,
@@ -74,7 +85,18 @@ run([
             offPeak: { input: 0.66, output: 1.98, cacheRead: 0.022, cacheWrite: 0 },
             windows: "01-04 & 06-10 UTC",
           },
-          overContext: { input: 0.3, output: 1.2, cacheRead: 0.06, cacheWrite: 0 },
+          contextTiers: [
+            {
+              label: "Standard",
+              context: "≤ 272K",
+              rates: { input: 1, output: 5, cacheRead: 0.1, cacheWrite: 1 },
+            },
+            {
+              label: "Long context",
+              context: "> 272K",
+              rates: { input: 0.3, output: 1.2, cacheRead: 0.06, cacheWrite: 0 },
+            },
+          ],
           benchmark: { intelligence: 56, tokPerSec: 339 },
           tier: "premium",
           free: false,

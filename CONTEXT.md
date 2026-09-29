@@ -58,7 +58,8 @@ Per-model pricing intelligence extracted from the Command Code docs' React
 Server Components (RSC) stream (`pricing-limits`, `plans/goat`, `plans/pro`
 pages with an `rsc: 1` header): tier (`Open Source`/`Premium`),
 benchmarks (intelligence, tok/s), deal discounts (`was`/`now` rates), peak/off-peak
-windows, and GOAT/Pro monthly allowances. Bundled in `src/deals/catalog.ts`
+rates, context-window rate bands, and GOAT/Pro monthly allowances. Bundled in
+`src/deals/catalog.ts`
 and regenerated via `npm run refresh:deals` (live, with 5xx/network fallback
 to the committed `tests/fixtures/rsc-*.txt` fixtures and loud 4xx failure;
 offline via `-- --fixtures`).

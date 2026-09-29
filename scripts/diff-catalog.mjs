@@ -16,7 +16,7 @@
 //
 //   - `deals` — the per-model deal intelligence (MODEL_DEALS). An entry
 //     is a `ModelDeals` (allowance/discount/was/now/peakOffPeak/
-//     overContext/benchmark/tier/free). We surface added/removed models
+//     contextTiers/benchmark/tier/free). We surface added/removed models
 //     and the per-field changes (allowance, discount.pct, discount.endsAt,
 //     tier, free, plus the numeric rate fields). The DEAL_LAST_REFRESHED
 //     date is also surfaced (top-level field on `src/deals/catalog.ts`).
@@ -46,7 +46,7 @@ import { readFile } from "node:fs/promises"
  * @property {{input:number, output:number, cacheRead:number}=} was
  * @property {{input:number, output:number, cacheRead:number}=} now
  * @property {{peak:{input:number,output:number,cacheRead:number,cacheWrite:number},offPeak:{input:number,output:number,cacheRead:number,cacheWrite:number},windows:string}=} peakOffPeak
- * @property {{input:number,output:number,cacheRead:number,cacheWrite:number}=} overContext
+ * @property {Array<{label?:string, context?:string, rates:{input:number,output:number,cacheRead:number,cacheWrite:number}}>=} contextTiers
  * @property {{intelligence?:number,tokPerSec?:number}=} benchmark
  * @property {"opensource"|"premium"=} tier
  * @property {boolean} free
@@ -228,6 +228,22 @@ function peakOffPeakString(pop) {
     : `peak ${peakStr} · off-peak ${offStr}`
 }
 
+function contextTiersString(tiers) {
+  if (!Array.isArray(tiers)) return "—"
+  return tiers
+    .map((tier) => {
+      const t = /** @type {Record<string, unknown>} */ (tier)
+      const label =
+        typeof t.context === "string" && t.context !== ""
+          ? t.context
+          : typeof t.label === "string" && t.label !== ""
+            ? t.label
+            : "tier"
+      return `${label} ${dealRatesString(t.rates)}`
+    })
+    .join(" · ")
+}
+
 // ---------------------------------------------------------------------------
 // Markdown table rendering. Tables are the release-notes contract (issue:
 // "the auto-release must state which models were added, removed, and
@@ -405,7 +421,11 @@ function dealsChangeRows(beforeIndex, afterIndex) {
       ["discount", discountString(before.discount), discountString(after.discount)],
       ["allowance", allowanceString(before.allowance), allowanceString(after.allowance)],
       ["peakOffPeak", peakOffPeakString(before.peakOffPeak), peakOffPeakString(after.peakOffPeak)],
-      ["overContext", dealRatesString(before.overContext), dealRatesString(after.overContext)],
+      [
+        "contextTiers",
+        contextTiersString(before.contextTiers),
+        contextTiersString(after.contextTiers),
+      ],
       ["benchmark", benchmarkString(before.benchmark), benchmarkString(after.benchmark)],
     ]
     for (const [field, beforeStr, afterStr] of fieldRows) {
