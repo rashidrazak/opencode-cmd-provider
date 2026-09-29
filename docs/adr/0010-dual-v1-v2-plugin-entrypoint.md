@@ -221,7 +221,12 @@ plugins=N` — with the v1-only bundle our package loaded
   it upstream would silently empty the sidebar again rather than fail a build,
   so the mirror and `tests/tui-deals-panel.test.ts` must be re-derived from
   `@opencode/plugin@<line>/dist/tui/context.d.ts` whenever the supported v2 line
-  moves.
+  moves. The theme slice is the first rename that actually happened:
+  `@opencode/theme@2.0.8` replaced `text.default`/`text.subdued` with
+  `text.base`/`text.muted`, and reading only one spelling left the panel plain
+  white on hosts exposing the other. `V2TuiThemeText` therefore mirrors both
+  spellings for the whole v2.0.x line, and the `v2ThemeColors` resolver (unit
+  tested — `tsx` cannot render: the native FFI is bun-only) picks the live one.
 - `@opencode/plugin@2.0.3` pins `@opentui/core >= 0.5.10` while this package
   pins `^0.5.4`; that peer conflict is why the v2 context is mirrored rather
   than depended on. If the TUI dependencies are ever aligned, the mirror could

@@ -1,9 +1,15 @@
 // tests/tui-deals-panel.test.ts — deals sidebar panel data extraction and the
 // two host contracts (v1 `tui(api)` slot map, v2 `setup(context)` slot claim).
-import plugin, { dealsRows, dealsRowsV2, v1ModelFor, v2ModelFor } from "../src/deals/tui.js"
+import plugin, {
+  dealsRows,
+  dealsRowsV2,
+  v1ModelFor,
+  v2ModelFor,
+  v2ThemeColors,
+} from "../src/deals/tui.js"
 import type { DealsRow } from "../src/deals/tui.js"
 import type { Provider } from "@opencode-ai/sdk/v2"
-import type { V2TuiContext, V2TuiSlotClaim } from "../src/plugin/v2-tui-types.js"
+import type { V2TuiContext, V2TuiSlotClaim, V2TuiTheme } from "../src/plugin/v2-tui-types.js"
 import { assertEqual, assert, run } from "./harness.js"
 
 const NA = "N/A"
@@ -571,6 +577,21 @@ run([
     },
   ],
   [
+    "v2: resolves both theme text spellings across the 2.0.8 rename",
+    () => {
+      // @opencode/theme@2.0.8 renamed the 2.0.3 `text.default`/`text.subdued`
+      // pair to `text.base`/`text.muted`. A v2.0.x host exposes exactly one
+      // spelling, and reading only the absent pair leaves `fg` undefined —
+      // which renders as the terminal default, the plain-white sidebar on
+      // 2.0.8+.
+      const base = { r: 1, g: 2, b: 3, a: 255 }
+      const muted = { r: 4, g: 5, b: 6, a: 255 }
+      const theme = (text: object) => ({ text }) as unknown as V2TuiTheme
+      assertEqual(v2ThemeColors(theme({ base, muted })), { text: base, muted })
+      assertEqual(v2ThemeColors(theme({ default: base, subdued: muted })), { text: base, muted })
+    },
+  ],
+  [
     "v1: model lookup resolves the selected Command Code model and hides other providers",
     () => {
       const cmd = { tier: "premium", free: false }
@@ -614,7 +635,7 @@ run([
     () => {
       const claims: V2TuiSlotClaim[] = []
       const ctx = {
-        theme: { text: { default: {}, subdued: {} } },
+        theme: { text: { base: {}, muted: {} } },
         ui: {
           slot: (claim: V2TuiSlotClaim) => {
             claims.push(claim)

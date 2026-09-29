@@ -20,7 +20,12 @@ import type { TuiPlugin, TuiPluginApi, TuiPluginModule } from "@opencode-ai/plug
 import { DEAL_SOURCE_URL, PLAN_CATALOG } from "./catalog.js"
 import { discountLabel, formatRate, todayIso } from "./format.js"
 import type { PlanId } from "../catalog/plans.js"
-import type { V2TuiContext, V2TuiModel, V2TuiPluginDefinition } from "../plugin/v2-tui-types.js"
+import type {
+  V2TuiContext,
+  V2TuiModel,
+  V2TuiPluginDefinition,
+  V2TuiTheme,
+} from "../plugin/v2-tui-types.js"
 
 type CmdRates = {
   input?: unknown
@@ -297,16 +302,31 @@ function DealsPanelV1(props: { api: TuiPluginApi; session_id: string }) {
   )
 }
 
+/**
+ * The panel's two text colours, across the v2 theme rename (see
+ * `V2TuiThemeText`): `base`/`muted` on `@opencode/theme@2.0.8`+,
+ * `default`/`subdued` on 2.0.3–2.0.7. Reading only one spelling would hand
+ * the renderer `undefined` on the hosts exposing the other, and `undefined`
+ * paints as the terminal default — the plain white sidebar on v2.0.8+.
+ */
+export function v2ThemeColors(theme: V2TuiTheme): { text: RGBA; muted: RGBA } {
+  const text = theme.text
+  return "base" in text
+    ? { text: text.base, muted: text.muted }
+    : { text: text.default, muted: text.subdued }
+}
+
 function DealsPanelV2(props: { ctx: V2TuiContext; sessionID: string }) {
   // Same idea as v1 against the v2 data store: `data` is the host's live
   // client-local state, so reading the session's model and the model catalog
   // inside the memo re-renders the panel when either changes.
   const model = createMemo(() => v2ModelFor(props.ctx.data, props.sessionID))
+  const colors = () => v2ThemeColors(props.ctx.theme)
   return (
     <DealsPanel
       rows={() => dealsRowsV2(model())}
-      text={() => props.ctx.theme.text.default}
-      textMuted={() => props.ctx.theme.text.subdued}
+      text={() => colors().text}
+      textMuted={() => colors().muted}
     />
   )
 }

@@ -12,9 +12,12 @@
 // injects the context, so nothing resolves that module at runtime. Only the
 // members this package touches are declared; the shapes are hand-mirrored from
 // `@opencode/plugin@2.0.3` (`dist/tui/context.d.ts`) and
-// `@opencode/theme@2.0.3` (`dist/tui/types.d.ts`). Bumping the supported v2 line
-// means re-deriving these from the published packages — tests/tui-deals-panel
-// pins the parts we depend on.
+// `@opencode/theme@2.0.3` (`dist/tui/types.d.ts`), except the theme slice,
+// which spans the `@opencode/theme@2.0.8` `text.default`/`text.subdued` →
+// `text.base`/`text.muted` rename (see V2TuiThemeText) because the supported
+// v2.0.x line includes both spellings. Bumping the supported v2 line means
+// re-deriving these from the published packages — tests/tui-deals-panel pins
+// the parts we depend on.
 import type { RGBA } from "@opentui/core"
 
 /**
@@ -55,13 +58,27 @@ export type V2TuiSlotClaim = {
   readonly replace?: never
 }
 
-/** `ResolvedTheme` slice used for the panel's colours (v2 renamed the v1
- * `text`/`textMuted` pair to `text.default`/`text.subdued`). */
+/**
+ * `ResolvedTheme` text colours used for the panel. v2 renamed the v1
+ * `text`/`textMuted` pair to `text.default`/`text.subdued`; then
+ * `@opencode/theme@2.0.8` renamed those to `text.base`/`text.muted`. Every
+ * v2.0.x host this package serves exposes one spelling or the other, so both
+ * are mirrored and the panel reads whichever is present. A panel that reads
+ * only the absent pair gets `undefined` colours, which the renderer paints as
+ * its default foreground — the plain white sidebar on v2.0.8+.
+ */
+export type V2TuiThemeText =
+  | {
+      readonly base: RGBA
+      readonly muted: RGBA
+    }
+  | {
+      readonly default: RGBA
+      readonly subdued: RGBA
+    }
+
 export interface V2TuiTheme {
-  readonly text: {
-    readonly default: RGBA
-    readonly subdued: RGBA
-  }
+  readonly text: V2TuiThemeText
 }
 
 /** `SessionInfo` slice: the session's selected model (`ModelRef`). */
