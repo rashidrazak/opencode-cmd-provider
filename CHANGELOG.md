@@ -1,3 +1,54 @@
+## 2.1.11 - 2026-09-29
+
+### Model catalog
+
+## Model catalog
+
+- **FACTS_LAST_REFRESHED**: `2026-09-28` → `2026-09-29`
+
+| Model                               | Change  | Before                                                | After                                             |
+| ----------------------------------- | ------- | ----------------------------------------------------- | ------------------------------------------------- |
+| `claude-sonnet-5-5`                 | added   | —                                                     | Claude Sonnet 5.5 · 1000000 ctx                   |
+| `deepseek/deepseek-v4.1-flash-fast` | added   | —                                                     | DeepSeek V4.1 Flash Fast · 1000000 ctx            |
+| `xai/grok-4.7`                      | pricing | input 1.2 / output 3.6 / cacheRead 0.3 / cacheWrite 0 | input 2 / output 6 / cacheRead 0.5 / cacheWrite 0 |
+
+### API divergence
+
+- Listing API matches package membership
+
+### Pinned slug map (3)
+
+- `claude-sonnet-5-5`: models-page slug not in the pinned map (docs-ahead; page evidence skipped)
+- `deepseek-v4-1-flash-fast`: models-page slug not in the pinned map (docs-ahead; page evidence skipped)
+- `jev`: models-page slug not in the pinned map (docs-ahead; page evidence skipped)
+
+### Reasoning classification
+
+## Reasoning classification
+
+- **CLASSIFICATION_LAST_REFRESHED**: `2026-09-28` → `2026-09-29`
+
+| Model                               | Change | Before | After                                         |
+| ----------------------------------- | ------ | ------ | --------------------------------------------- |
+| `claude-sonnet-5-5`                 | new    | —      | efforts model (low, medium, high, xhigh, max) |
+| `deepseek/deepseek-v4.1-flash-fast` | new    | —      | efforts model (low, high, max)                |
+
+### Deals intelligence
+
+## Deals intelligence
+
+- **DEAL_LAST_REFRESHED**: `2026-09-28` → `2026-09-29`
+
+| Model                               | Change      | Before                                      | After                                      |
+| ----------------------------------- | ----------- | ------------------------------------------- | ------------------------------------------ |
+| `claude-sonnet-5-5`                 | added       | —                                           | opensource                                 |
+| `deepseek/deepseek-v4.1-flash-fast` | added       | —                                           | opensource                                 |
+| `xai/grok-4.7`                      | was rates   | in 2 / out 6 / cache 0.5                    | —                                          |
+| `xai/grok-4.7`                      | now rates   | in 1.2 / out 3.5999999999999996 / cache 0.3 | —                                          |
+| `xai/grok-4.7`                      | discount    | 40% off (ends 2026-09-27)                   | —                                          |
+| `xai/grok-4.7`                      | allowance   | goat: 35, pro: 45                           | goat: 20, pro: 30                          |
+| `xai/grok-4.7`                      | overContext | —                                           | in 4 / out 12 / cacheRead 1 / cacheWrite 0 |
+
 ## 2.1.10 - 2026-09-28
 
 ### Models page parser
