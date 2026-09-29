@@ -12,6 +12,14 @@
 // requests: `fetchUsageSnapshot` answers `no-credential` up front and the
 // renderer prints the one-line notice.
 //
+// Since #245 the fetch also carries the panel's cached scope: the first chain
+// reads whoami once and caches it with the subscription record; a later
+// refresh passes the scope back in and the chain collapses to the two live
+// legs — credits + summary — while the record is fresh (re-read only when its
+// period end has passed or it is over an hour old). The caller's abort signal
+// joins each request's timeout, so the panel's unmount cancels an in-flight
+// chain.
+//
 // Parsing never throws: upstream shape drift drops a row. `resetAt` is epoch
 // milliseconds (the CLI compares it straight to Date.now()), `0` means no
 // active window, and a value below 1e12 is re-read as seconds — the unit the
@@ -102,6 +110,31 @@ export type UsageResult =
   | { state: "unavailable" }
   | { state: "usage"; snapshot: UsageSnapshot }
 
+/** The slice of a subscription record the refresh path reuses between chains. */
+export interface UsageSubscriptionCache {
+  /** Plan identity in Core's vocabulary — the bundled cap fallback's key. */
+  plan?: PlanId
+  /** `currentPeriodStart` — the summary's `since` pin. */
+  since?: string
+  /** Epoch milliseconds of the period end (the freshness trigger). */
+  periodEnd?: number
+  /** When the record was read, epoch milliseconds (the one-hour rule's basis). */
+  readAt: number
+}
+
+/**
+ * The panel's cached billing context (issue #245). The first chain reads
+ * whoami once and caches the org scope for the panel's lifetime; every later
+ * chain reuses it and re-reads the subscription record only while it is
+ * fresh, so a routine refresh is just the two live legs — credits + summary.
+ */
+export interface UsageScope {
+  /** Whoami's org id; absent when whoami said nothing (still cached). */
+  orgId?: string
+  /** The subscription record's cached slice. */
+  subscription?: UsageSubscriptionCache
+}
+
 export interface FetchUsageOptions {
   /** Resolved credential for the billing reads (defaults to COMMANDCODE_API_KEY). */
   apiKey?: string
@@ -113,6 +146,59 @@ export interface FetchUsageOptions {
   env?: NodeJS.ProcessEnv
   /** Bundled plan rows for the cap fallbacks (defaults to PLAN_CATALOG). */
   catalog?: Readonly<Record<PlanId, PlanInfo>>
+  /**
+   * The cached scope from an earlier chain (#245). When present, whoami is not
+   * re-read and a fresh subscription record collapses the chain to credits +
+   * summary; a chain without one (the mount, or the first chain after a late
+   * credential) runs in full.
+   */
+  scope?: UsageScope
+  /** Called with the scope to cache whenever the chain reads whoami/subscriptions. */
+  onScope?: (scope: UsageScope) => void
+  /** The caller's abort signal, joined with each request's five-second budget. */
+  signal?: AbortSignal
+  /** Clock for the subscription-cache rule (defaults to Date.now()). */
+  now?: number
+}
+
+/**
+ * The subscription cache's ceiling: a record older than this is re-read, and
+ * the period-end rule re-reads sooner when the cycle has rolled (#245).
+ */
+const SUBSCRIPTION_CACHE_MS = 60 * 60_000
+
+/** The org scoping query for a whoami-known org, or the empty string. */
+function scopeQuery(orgId: string | undefined): string {
+  return orgId === undefined ? "" : `?orgId=${encodeURIComponent(orgId)}`
+}
+
+/** A subscription record's freshness: the period end, then the hour rule. */
+function subscriptionsFresh(cache: UsageSubscriptionCache | undefined, now: number): boolean {
+  if (cache === undefined) return false
+  if (cache.periodEnd !== undefined && cache.periodEnd <= now) return false
+  return now - cache.readAt <= SUBSCRIPTION_CACHE_MS
+}
+
+/**
+ * The cacheable slice of a subscriptions payload: the plan identity from the
+ * status-gated `planId` (never a default), the period start the summary pins,
+ * and the period end the freshness rule reads. Undefined when the payload
+ * carries no record at all.
+ */
+function readSubscription(raw: unknown, now: number): UsageSubscriptionCache | undefined {
+  const data = isRecord(raw) && isRecord(raw.data) ? raw.data : undefined
+  if (data === undefined) return undefined
+  const cache: UsageSubscriptionCache = { readAt: now }
+  const status = stringValue(data.status)
+  if (status !== undefined && PLAN_BEARING_SUBSCRIPTION_STATUSES.has(status)) {
+    const plan = normalizePlan(data.planId)
+    if (plan !== undefined) cache.plan = plan
+  }
+  const since = paramValue(data.currentPeriodStart)
+  if (since !== undefined) cache.since = since
+  const periodEnd = toEpochMs(data.currentPeriodEnd)
+  if (periodEnd !== undefined) cache.periodEnd = periodEnd
+  return cache
 }
 
 /** A string query-parameter value; numbers stringify, anything else is absent. */
@@ -211,7 +297,8 @@ function hasUsageData(snapshot: UsageSnapshot): boolean {
  * org-scoped subscriptions → org-scoped credits → summary pinned with
  * `since=currentPeriodStart`. Each leg is independent — a miss drops only the
  * rows it feeds — and a lookup without a resolved credential makes no request
- * at all.
+ * at all. A cached `scope` (#245) skips whoami for good and subscriptions
+ * while the record is fresh, leaving credits + summary.
  */
 export async function fetchUsageSnapshot(options: FetchUsageOptions = {}): Promise<UsageResult> {
   const env = options.env ?? process.env
@@ -220,14 +307,19 @@ export async function fetchUsageSnapshot(options: FetchUsageOptions = {}): Promi
   const base = options.baseURL ?? getApiBase(env)
   const fetchImpl = options.fetch ?? fetch
   const catalog = options.catalog ?? PLAN_CATALOG
+  const now = options.now ?? Date.now()
 
   // One leg: offline, timeout, non-2xx and an unparseable body are all a miss
-  // for this leg alone (ADR-0011). Only the Bearer header travels.
+  // for this leg alone (ADR-0011). Only the Bearer header travels. Each leg
+  // arms its own five-second budget, joined with the caller's signal when the
+  // panel has one, so an unmount aborts an in-flight chain (#245).
   const getJson = async (path: string): Promise<unknown> => {
+    const budget = AbortSignal.timeout(REQUEST_TIMEOUT_MS)
+    const signal = options.signal === undefined ? budget : AbortSignal.any([options.signal, budget])
     try {
       const response = await fetchImpl(`${base}${path}`, {
         headers: { authorization: `Bearer ${key}` },
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        signal,
       })
       return response.ok ? await response.json() : undefined
     } catch {
@@ -235,27 +327,38 @@ export async function fetchUsageSnapshot(options: FetchUsageOptions = {}): Promi
     }
   }
 
-  const whoami = await getJson(WHOAMI_PATH)
-  const orgId = isRecord(whoami) && isRecord(whoami.org) ? stringValue(whoami.org.id) : undefined
-  const scoped = orgId === undefined ? "" : `?orgId=${encodeURIComponent(orgId)}`
+  // The cached scope (#245): whoami is read on the first chain and cached for
+  // the panel's lifetime; the subscription record is re-read only when its
+  // period end has passed or it is over an hour old. A failed re-read keeps
+  // the old slice — its staleness re-triggers a read, and plan/since/periodEnd
+  // keep shaping this snapshot.
+  let orgId = options.scope?.orgId
+  let cached = options.scope?.subscription
+  let publishScope = options.scope === undefined
+  if (options.scope === undefined) {
+    const whoami = await getJson(WHOAMI_PATH)
+    orgId = isRecord(whoami) && isRecord(whoami.org) ? stringValue(whoami.org.id) : undefined
+  }
+  if (!subscriptionsFresh(cached, now)) {
+    const subscriptions = await getJson(`${SUBSCRIPTIONS_PATH}${scopeQuery(orgId)}`)
+    cached = readSubscription(subscriptions, now) ?? cached
+    publishScope = true
+  }
+  if (publishScope) {
+    options.onScope?.({
+      ...(orgId === undefined ? {} : { orgId }),
+      ...(cached === undefined ? {} : { subscription: cached }),
+    })
+  }
+  // Plan identity rides the subscription cache through Core's vocabulary,
+  // gated on the statuses that still identify a plan (ADR-0011): a canceled or
+  // unpaid subscription must not keep feeding the bundled cap fallbacks below,
+  // and an unknown id is unknown — never a default.
+  const plan = cached?.plan
+  const since = cached?.since
+  const periodEnd = cached?.periodEnd
 
-  const subscriptions = await getJson(`${SUBSCRIPTIONS_PATH}${scoped}`)
-  const subscription =
-    isRecord(subscriptions) && isRecord(subscriptions.data) ? subscriptions.data : undefined
-  // Plan identity comes from the subscription's `planId` through Core's
-  // vocabulary, gated on the statuses that still identify a plan (ADR-0011):
-  // a canceled or unpaid subscription must not keep feeding the bundled cap
-  // fallbacks below, and an unknown id is unknown — never a default.
-  const status = subscription === undefined ? undefined : stringValue(subscription.status)
-  const plan =
-    subscription !== undefined &&
-    status !== undefined &&
-    PLAN_BEARING_SUBSCRIPTION_STATUSES.has(status)
-      ? normalizePlan(subscription.planId)
-      : undefined
-  const since = paramValue(subscription?.currentPeriodStart)
-
-  const creditsPayload = await getJson(`${CREDITS_PATH}${scoped}`)
+  const creditsPayload = await getJson(`${CREDITS_PATH}${scopeQuery(orgId)}`)
   const credits =
     isRecord(creditsPayload) && isRecord(creditsPayload.credits)
       ? creditsPayload.credits
@@ -293,7 +396,6 @@ export async function fetchUsageSnapshot(options: FetchUsageOptions = {}): Promi
   if (monthly !== undefined) snapshot.monthly = monthly
   const totals = parseTotals(summaryRecord)
   if (totals !== undefined) snapshot.totals = totals
-  const periodEnd = toEpochMs(subscription?.currentPeriodEnd)
   if (periodEnd !== undefined) snapshot.periodEnd = periodEnd
   const periodBasis =
     summaryRecord === undefined ? undefined : stringValue(summaryRecord.periodBasis)

@@ -1,9 +1,12 @@
-// tests/tui-usage.test.ts — the panel's usage controller (issue #244): the
-// mount chain (credential → snapshot), its once-per-mount semantics, the
-// no-credential notice with zero requests, and last-snapshot retention on a
-// failed refresh. A recording mock fetch — never the network — and no TUI
-// runtime: the controller is host-agnostic and both halves feed it the same
-// shape through `src/deals/tui-usage.ts`.
+// tests/tui-usage.test.ts — the panel's usage controller (issues #244/#245):
+// the mount chain (credential → snapshot), its once-per-mount semantics, the
+// no-credential notice with zero requests, last-snapshot retention on a failed
+// refresh, and the cached-scope shortening of a refresh (whoami and a fresh
+// subscription record are not re-read). The refresh *policy* — throttle,
+// coalescing, countdown, backoff, unmount — lives in
+// tests/tui-usage-refresh.test.ts under the fake clock. A recording mock fetch
+// — never the network — and no TUI runtime: the controller is host-agnostic
+// and both halves feed it the same shape through `src/deals/tui-usage.ts`.
 import { readFileSync } from "node:fs"
 import { createUsagePanel, type UsagePanelState } from "../src/deals/tui-usage.js"
 import { renderUsageRows } from "../src/deals/usage.js"
@@ -164,6 +167,9 @@ run([
       assertEqual(state.provenance, { kind: "host" })
       assertEqual(segment(state), SEGMENT, "the panel's pinned segment")
       assertEqual(changes.length, 1, "one publish per settled mount")
+      // Every mounting test ends with `unmount`: it cancels the countdown
+      // clock, whose live timer would otherwise keep the runner alive.
+      panel.unmount()
     },
   ],
 
@@ -180,6 +186,7 @@ run([
       assertEqual(calls[0]!.headers.authorization, "Bearer v2_key")
       assertEqual(panel.state()?.provenance, { kind: "host" })
       assertEqual(segment(panel.state()), SEGMENT)
+      panel.unmount()
     },
   ],
 
@@ -212,6 +219,7 @@ run([
           ["Usage", "", "heading"],
           ["Usage needs COMMANDCODE_API_KEY — set it to see live limits", "", "value"],
         ])
+        panel.unmount()
       }
     },
   ],
@@ -249,6 +257,8 @@ run([
       })
       await throwing.mount()
       assertEqual(throwing.state()?.result.state, "unavailable")
+      panel.unmount()
+      throwing.unmount()
     },
   ],
 
@@ -277,9 +287,12 @@ run([
       failing = true
       await panel.refresh()
       assertEqual(panel.state(), first, "the failed refresh must not drop the snapshot")
-      assertEqual(attempted.length, 8, "the refresh ran its own four-leg chain")
+      // The mount cached the scope, so the refresh chain is the two live legs
+      // (credits + summary) — four mount requests plus two refresh requests.
+      assertEqual(attempted.length, 6, "the refresh ran its own credits + summary chain")
       assertEqual(changes.length, 1, "a kept snapshot publishes nothing")
       assertEqual(segment(panel.state()), SEGMENT, "the numbers stay rendered")
+      panel.unmount()
     },
   ],
 
@@ -315,6 +328,7 @@ run([
         (row) => Array.isArray(row) && row[0] === "5-hour",
       ) as unknown[]
       assertEqual(fiveHour, ["5-hour", "$1.00 / $3.00 · 33%"], "the refresh's numbers render")
+      panel.unmount()
     },
   ],
 
@@ -333,6 +347,7 @@ run([
       await panel.refresh()
       assertEqual(panel.state()?.result.state, "no-credential")
       assertEqual(urls.length, 4, "the second chain resolved nothing and made no request")
+      panel.unmount()
     },
   ],
 
@@ -353,6 +368,7 @@ run([
       await panel.refresh()
       assertEqual(panel.state()?.result.state, "usage")
       assertEqual(urls.length, 4)
+      panel.unmount()
     },
   ],
 

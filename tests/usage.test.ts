@@ -8,6 +8,7 @@ import {
   renderUsageRows,
   type UsageCredentialSource,
   type UsageResult,
+  type UsageScope,
   type UsageSnapshot,
   type UsageTotals,
 } from "../src/deals/usage.js"
@@ -138,6 +139,17 @@ function label(rows: DealsRow[], key: string): DealsRow | undefined {
 /** The text of the muted value line starting with `prefix`, if it rendered. */
 function valueLine(rows: DealsRow[], prefix: string): string | undefined {
   return rows.find(([name, , kind]) => kind === "value" && name.startsWith(prefix))?.[0]
+}
+
+/**
+ * A subscription cache whose period end has passed: the re-read trigger. The
+ * `since` differs per case, so the refreshed slice is distinguishable.
+ */
+function staleScope(since: string): UsageScope {
+  return {
+    orgId: "org_42",
+    subscription: { plan: "go", since, periodEnd: NOW - 1, readAt: NOW - 60_000 },
+  }
 }
 
 run([
@@ -554,6 +566,198 @@ run([
 
       const derived = await fetchSnapshot({ summary: { totalTokensIn: 10, totalTokensOut: 5 } })
       assertEqual(derived.totals, { tokensIn: 10, tokensOut: 5, tokens: 15 })
+    },
+  ],
+
+  // ---------------------------------------------------------------------------
+  // The cached scope (issue #245): the full chain publishes the whoami org and
+  // the subscription record, and a refresh carrying that scope skips whoami
+  // for good and subscriptions while the record is fresh.
+  // ---------------------------------------------------------------------------
+
+  [
+    "a fresh scope collapses the refresh to the two live legs and reuses the cache",
+    async () => {
+      const { calls, fetch } = stubFetch(fullBodies({ whoami: whoami("org_42") }))
+      let capturedScope: UsageScope | undefined
+      const first = await fetchUsageSnapshot({
+        apiKey: "k",
+        baseURL: BASE,
+        fetch,
+        env: {},
+        now: NOW,
+        onScope: (scope) => {
+          capturedScope = scope
+        },
+      })
+      assert(first.state === "usage")
+      assertEqual(capturedScope, {
+        orgId: "org_42",
+        subscription: {
+          plan: "go",
+          since: PERIOD_START,
+          periodEnd: Date.parse(PERIOD_END),
+          readAt: NOW,
+        },
+      })
+
+      calls.length = 0
+      let refreshedScope: UsageScope | undefined
+      const second = await fetchUsageSnapshot({
+        apiKey: "k",
+        baseURL: BASE,
+        fetch,
+        env: {},
+        now: NOW + 5 * 60_000,
+        scope: capturedScope,
+        onScope: (scope) => {
+          refreshedScope = scope
+        },
+      })
+      assertEqual(
+        calls.map((call) => new URL(call.url).pathname),
+        [CREDITS, SUMMARY],
+        "the two live legs only — never whoami, never subscriptions",
+      )
+      assertEqual(query(calls[0]!.url).get("orgId"), "org_42", "the refresh stays org-scoped")
+      assertEqual(query(calls[1]!.url).get("since"), PERIOD_START, "the summary keeps its pin")
+      assertEqual(refreshedScope, undefined, "a fresh reuse reads nothing new to publish")
+      assert(second.state === "usage")
+      assertEqual(second.snapshot.plan, "go", "plan identity rides the cache")
+      assertEqual(second.snapshot.periodEnd, Date.parse(PERIOD_END), "the period end rides too")
+    },
+  ],
+
+  [
+    "a scope past its period end re-reads subscriptions and keeps whoami cached",
+    async () => {
+      const stale = staleScope("2026-08-05T00:00:00.000Z")
+      const { calls, fetch } = stubFetch(fullBodies({ whoami: whoami("org_42") }))
+      let capturedScope: UsageScope | undefined
+      const result = await fetchUsageSnapshot({
+        apiKey: "k",
+        baseURL: BASE,
+        fetch,
+        env: {},
+        now: NOW,
+        scope: stale,
+        onScope: (scope) => {
+          capturedScope = scope
+        },
+      })
+      assertEqual(
+        calls.map((call) => new URL(call.url).pathname),
+        [SUBSCRIPTIONS, CREDITS, SUMMARY],
+        "the re-read legs, and never whoami",
+      )
+      assertEqual(capturedScope, {
+        orgId: "org_42",
+        subscription: {
+          plan: "go",
+          since: PERIOD_START,
+          periodEnd: Date.parse(PERIOD_END),
+          readAt: NOW,
+        },
+      })
+      assert(result.state === "usage")
+      assertEqual(result.snapshot.plan, "go")
+    },
+  ],
+
+  [
+    "a subscription record over an hour old re-reads; exactly an hour does not",
+    async () => {
+      const scopeAt = (readAt: number): UsageScope => ({
+        orgId: "org_42",
+        subscription: {
+          plan: "go",
+          since: PERIOD_START,
+          periodEnd: Date.parse(PERIOD_END),
+          readAt,
+        },
+      })
+      const { calls, fetch } = stubFetch(fullBodies({ whoami: whoami("org_42") }))
+      await fetchUsageSnapshot({
+        apiKey: "k",
+        baseURL: BASE,
+        fetch,
+        env: {},
+        now: NOW,
+        scope: scopeAt(NOW - HOUR),
+      })
+      assertEqual(
+        calls.map((call) => new URL(call.url).pathname),
+        [CREDITS, SUMMARY],
+        "exactly an hour is still fresh",
+      )
+      calls.length = 0
+      await fetchUsageSnapshot({
+        apiKey: "k",
+        baseURL: BASE,
+        fetch,
+        env: {},
+        now: NOW,
+        scope: scopeAt(NOW - HOUR - 1),
+      })
+      assertEqual(
+        calls.map((call) => new URL(call.url).pathname),
+        [SUBSCRIPTIONS, CREDITS, SUMMARY],
+        "a millisecond over the hour re-reads",
+      )
+    },
+  ],
+
+  [
+    "a failed subscription re-read keeps the cached slice for the next chain",
+    async () => {
+      const stale = staleScope(PERIOD_START)
+      const { calls, fetch } = stubFetch(fullBodies(), {
+        [SUBSCRIPTIONS]: () => new Response("boom", { status: 500 }),
+      })
+      let capturedScope: UsageScope | undefined
+      const result = await fetchUsageSnapshot({
+        apiKey: "k",
+        baseURL: BASE,
+        fetch,
+        env: {},
+        now: NOW,
+        scope: stale,
+        onScope: (scope) => {
+          capturedScope = scope
+        },
+      })
+      assertEqual(
+        calls.map((call) => new URL(call.url).pathname),
+        [SUBSCRIPTIONS, CREDITS, SUMMARY],
+      )
+      assert(result.state === "usage")
+      assertEqual(result.snapshot.plan, "go", "plan survives the failed re-read")
+      assertEqual(
+        capturedScope,
+        stale,
+        "the stale slice publishes unchanged, so the next chain retries",
+      )
+    },
+  ],
+
+  [
+    "the caller's abort signal joins every leg's five-second budget",
+    async () => {
+      const controller = new AbortController()
+      controller.abort()
+      const { calls, fetch } = stubFetch(fullBodies())
+      const result = await fetchUsageSnapshot({
+        apiKey: "k",
+        baseURL: BASE,
+        fetch,
+        env: {},
+        signal: controller.signal,
+      })
+      assertEqual(calls.length, 4, "the chain still runs its legs")
+      for (const call of calls) {
+        assert((call.signal as AbortSignal).aborted, "each leg carries the caller's abort")
+      }
+      assert(result.state === "usage", "the stub ignores signals; the plumbing is what is pinned")
     },
   ],
 

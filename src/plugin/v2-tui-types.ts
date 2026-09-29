@@ -15,13 +15,16 @@
 // `@opencode/theme@2.0.3` (`dist/tui/types.d.ts`), except the theme slice,
 // which spans the `@opencode/theme@2.0.8` `text.default`/`text.subdued` →
 // `text.base`/`text.muted` rename (see V2TuiThemeText) because the supported
-// v2.0.x line includes both spellings, and the provider/integration slices the
+// v2.0.x line includes both spellings, the provider/integration slices the
 // usage credential resolver reads (`@opencode/client@2.0.3`'s `ProviderInfo`,
 // `IntegrationInfo` and `ConnectionInfo`; re-checked against `2.0.18`, where
 // the credential connection gained an unused `method` field — the members
-// declared here are common to the whole line). Bumping the supported v2 line
-// means re-deriving these from the published packages — tests/tui-deals-panel
-// and tests/tui-credential pin the parts we depend on.
+// declared here are common to the whole line), and the data store's turn
+// events the usage refresh subscribes to (`Data.on`, typed by
+// `@opencode/client@2.0.3`'s `SessionIdle` / `SessionExecutionSucceeded`).
+// Bumping the supported v2 line means re-deriving these from the published
+// packages — tests/tui-deals-panel and tests/tui-credential pin the parts we
+// depend on.
 import type { RGBA } from "@opentui/core"
 
 /**
@@ -164,10 +167,24 @@ export interface V2TuiProvider {
 }
 
 /**
+ * The two v2 data-store events that mark a completed turn (issue #245): the
+ * session going idle and the execution succeeding. Mirrored from
+ * `@opencode/client`'s event union (`SessionIdle` / `SessionExecutionSucceeded`
+ * — `Data.on` is typed by that union) and narrowed to the members this package
+ * reads; both carry `data.sessionID`.
+ */
+export type V2TuiTurnEvent =
+  | { readonly type: "session.idle"; readonly data: { readonly sessionID: string } }
+  | {
+      readonly type: "session.execution.succeeded"
+      readonly data: { readonly sessionID: string }
+    }
+
+/**
  * The v2 TUI context. `ui.slot` claims a place in the slot tree and returns the
  * release function; `data` is the host's live client-local store — reads are
  * reactive, so the claim's `render` is re-invoked when the selected model
- * changes.
+ * changes, and `on` subscribes to its turn events.
  */
 export interface V2TuiContext {
   readonly theme: V2TuiTheme
@@ -178,6 +195,11 @@ export interface V2TuiContext {
     readonly session: {
       get(sessionID: string): V2TuiSession | undefined
     }
+    /** Subscribes to one of the turn events; returns the unsubscribe. */
+    readonly on: <Type extends V2TuiTurnEvent["type"]>(
+      type: Type,
+      handler: (event: Extract<V2TuiTurnEvent, { readonly type: Type }>) => void,
+    ) => () => void
     readonly location: {
       readonly model: {
         list(): readonly V2TuiModel[] | undefined

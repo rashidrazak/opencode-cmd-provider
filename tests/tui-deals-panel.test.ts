@@ -1,10 +1,14 @@
 // tests/tui-deals-panel.test.ts — deals sidebar panel data extraction and the
 // two host contracts (v1 `tui(api)` slot map, v2 `setup(context)` slot claim),
-// plus the appended live `Usage` segment's wiring (issue #244).
+// plus the appended live `Usage` segment's wiring (issue #244) and the
+// completed-turn adapters each half subscribes through (issue #245).
 import plugin, {
   dealsRows,
   dealsRowsV2,
+  manageUsagePanel,
   panelRows,
+  subscribeV1Idle,
+  subscribeV2Idle,
   v1ModelFor,
   v1UsageInput,
   v2ModelFor,
@@ -12,7 +16,8 @@ import plugin, {
   v2ThemeColors,
 } from "../src/deals/tui.js"
 import type { DealsRow } from "../src/deals/tui.js"
-import { createUsagePanel, type UsagePanelState } from "../src/deals/tui-usage.js"
+import { createUsagePanel, type UsagePanel, type UsagePanelState } from "../src/deals/tui-usage.js"
+import { createRoot } from "solid-js"
 import type { Provider } from "@opencode-ai/sdk/v2"
 import type { TuiPluginApi } from "@opencode-ai/plugin/tui"
 import type { V2TuiContext, V2TuiSlotClaim, V2TuiTheme } from "../src/plugin/v2-tui-types.js"
@@ -825,6 +830,101 @@ run([
   ],
 
   [
+    "v1 idle adapter: only the watched session's session.idle wakes the panel",
+    () => {
+      const handlers: Array<(event: { properties: { sessionID: string } }) => void> = []
+      let offs = 0
+      const api = {
+        event: {
+          on: (_type: string, handler: (event: { properties: { sessionID: string } }) => void) => {
+            handlers.push(handler)
+            return () => {
+              offs += 1
+            }
+          },
+        },
+      } as unknown as TuiPluginApi
+      const notified: string[] = []
+      const unsubscribe = subscribeV1Idle(
+        api,
+        () => "ses_1",
+        () => notified.push("turn"),
+      )
+      assertEqual(handlers.length, 1, "one session.idle subscription")
+      handlers[0]!({ properties: { sessionID: "ses_2" } })
+      assertEqual(notified, [], "another session's turn is not this panel's")
+      handlers[0]!({ properties: { sessionID: "ses_1" } })
+      assertEqual(notified, ["turn"])
+      unsubscribe()
+      assertEqual(offs, 1, "the bus subscription is torn down")
+    },
+  ],
+
+  [
+    "v2 idle adapter: both turn events for the watched session wake the panel",
+    () => {
+      const handlers = new Map<string, Array<(event: { data: { sessionID: string } }) => void>>()
+      let offs = 0
+      const data = {
+        on: (_type: string, handler: (event: { data: { sessionID: string } }) => void) => {
+          handlers.set(_type, [...(handlers.get(_type) ?? []), handler])
+          return () => {
+            offs += 1
+          }
+        },
+      } as unknown as V2TuiContext["data"]
+      const notified: string[] = []
+      const unsubscribe = subscribeV2Idle(
+        { data } as unknown as V2TuiContext,
+        () => "ses_1",
+        () => notified.push("turn"),
+      )
+      assertEqual(
+        [...handlers.keys()].sort(),
+        ["session.execution.succeeded", "session.idle"],
+        "both turn events are subscribed",
+      )
+      handlers.get("session.idle")![0]!({ data: { sessionID: "ses_other" } })
+      handlers.get("session.execution.succeeded")![0]!({ data: { sessionID: "ses_other" } })
+      assertEqual(notified, [], "another session's turn is not this panel's")
+      handlers.get("session.idle")![0]!({ data: { sessionID: "ses_1" } })
+      handlers.get("session.execution.succeeded")![0]!({ data: { sessionID: "ses_1" } })
+      assertEqual(notified, ["turn", "turn"])
+      unsubscribe()
+      assertEqual(offs, 2, "both data-store subscriptions are torn down")
+    },
+  ],
+
+  [
+    "the shared panel lifecycle tears down the subscription and the panel on unmount",
+    () => {
+      // `manageUsagePanel` is the one lifecycle both host halves bind (#245):
+      // disposal must unsubscribe the idle signal and unmount the panel (its
+      // clock, trailing timer and in-flight chain are the panel's own teardown).
+      let offs = 0
+      let unmounts = 0
+      const stub: UsagePanel = {
+        state: () => undefined,
+        mount: async () => {},
+        refresh: async () => {},
+        turnCompleted: () => {},
+        unmount: () => {
+          unmounts += 1
+        },
+      }
+      const dispose = createRoot((dispose) => {
+        manageUsagePanel(stub, () => () => {
+          offs += 1
+        })
+        return dispose
+      })
+      dispose()
+      assertEqual(offs, 1, "the idle subscription is torn down with the panel")
+      assertEqual(unmounts, 1, "the panel is unmounted with the slot")
+    },
+  ],
+
+  [
     "v1: a visible panel's mount chain feeds the appended segment",
     async () => {
       const providers = [
@@ -859,6 +959,9 @@ run([
       assertEqual(row(rows, "Status"), ["Status", "Paid"])
       assertEqual(row(rows, "5-hour"), ["5-hour", "$0.50 / $3.00 · 17%"])
       assertEqual(row(rows, "via Host connection"), ["via Host connection", "", "value"])
+      // The unmount cancels the panel's countdown clock — a live timer that
+      // would otherwise keep the test runner alive.
+      panel.unmount()
     },
   ],
 
@@ -908,6 +1011,7 @@ run([
       const rows = panelRows(dealsRowsV2(model), panel.state(), NOW)
       assertEqual(row(rows, "Status"), ["Status", "Paid"])
       assertEqual(row(rows, "5-hour"), ["5-hour", "$0.50 / $3.00 · 17%"])
+      panel.unmount()
     },
   ],
 
