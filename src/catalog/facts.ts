@@ -6,10 +6,10 @@
 // parse from the CLI bundle (dist/cli.mjs). Regenerate with
 // `npm run refresh:snapshot`.
 
-export const FACTS_SOURCE_URL = "https://unpkg.com/command-code@1.66.0/dist/bundled/command-code-knowledge/reference/models.md"
-export const MODALITIES_SOURCE_URL = "https://unpkg.com/command-code@1.66.0/dist/cli.mjs"
-export const FACTS_PACKAGE_VERSION = "1.66.0"
-export const FACTS_LAST_REFRESHED = "2026-09-28"
+export const FACTS_SOURCE_URL = "https://unpkg.com/command-code@1.69.0/dist/bundled/command-code-knowledge/reference/models.md"
+export const MODALITIES_SOURCE_URL = "https://unpkg.com/command-code@1.69.0/dist/cli.mjs"
+export const FACTS_PACKAGE_VERSION = "1.69.0"
+export const FACTS_LAST_REFRESHED = "2026-09-29"
 
 export const MODEL_EFFORTS: Readonly<Record<string, readonly string[]>> = {
   "deepseek/deepseek-v4-pro": ["high","max"],
@@ -17,6 +17,7 @@ export const MODEL_EFFORTS: Readonly<Record<string, readonly string[]>> = {
   "deepseek/deepseek-v4-flash-vision-exp": ["high","max"],
   "deepseek/deepseek-v4-flash-fast": ["low","high","max"],
   "deepseek/deepseek-v4.1-flash": ["low","high","max"],
+  "deepseek/deepseek-v4.1-flash-fast": ["low","high","max"],
   "moonshotai/Kimi-K3": ["low","high","max"],
   "z-ai/glm-5.3-flash": ["low","high","max"],
   "z-ai/glm-5.3-flashx": ["low","high","max"],
@@ -32,6 +33,7 @@ export const MODEL_EFFORTS: Readonly<Record<string, readonly string[]>> = {
   "tencent/hy4-preview": ["low","medium","high"],
   "stealth/space-bunny-alpha": ["low","medium","high"],
   "stealth/pixel-canary": ["low","medium","xhigh"],
+  "claude-sonnet-5-5": ["low","medium","high","xhigh","max"],
   "claude-sonnet-5": ["low","medium","high","xhigh","max"],
   "claude-sonnet-4-6": ["low","medium","high","xhigh","max"],
   "claude-fable-5-1": ["low","medium","high","xhigh","max"],
@@ -75,6 +77,7 @@ export const MODEL_COSTS: Readonly<
   "deepseek/deepseek-v4-flash-vision-exp": { input: 0.15, output: 0.6, cacheRead: 0.003, cacheWrite: 0 },
   "deepseek/deepseek-v4-flash-fast": { input: 0.28, output: 0.56, cacheRead: 0.07, cacheWrite: 0 },
   "deepseek/deepseek-v4.1-flash": { input: 0.15, output: 0.6, cacheRead: 0.003, cacheWrite: 0 },
+  "deepseek/deepseek-v4.1-flash-fast": { input: 0.16, output: 0.58, cacheRead: 0.016, cacheWrite: 0 },
   "moonshotai/Kimi-K3": { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 0 },
   "moonshotai/Kimi-K2.7-Code": { input: 0.95, output: 4, cacheRead: 0.19, cacheWrite: 0 },
   "moonshotai/Kimi-K2.7-Code-Highspeed": { input: 1.9, output: 8, cacheRead: 0.38, cacheWrite: 0 },
@@ -118,6 +121,7 @@ export const MODEL_COSTS: Readonly<
   "inclusionai/ling-3.0-flash-sante:free": { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
   "stealth/space-bunny-alpha": { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
   "stealth/pixel-canary": { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+  "claude-sonnet-5-5": { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 },
   "claude-sonnet-5": { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 },
   "claude-sonnet-4-6": { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
   "claude-fable-5-1": { input: 10, output: 50, cacheRead: 0.25, cacheWrite: 12.5 },
@@ -151,7 +155,7 @@ export const MODEL_COSTS: Readonly<
   "meta/muse-spark-1.3-contributor": { input: 0.1, output: 0.2, cacheRead: 0.002, cacheWrite: 0 },
   "xai/grok-4.5": { input: 2, output: 6, cacheRead: 0.5, cacheWrite: 0 },
   "xai/grok-4.6": { input: 2, output: 6, cacheRead: 0.5, cacheWrite: 0 },
-  "xai/grok-4.7": { input: 1.2, output: 3.6, cacheRead: 0.3, cacheWrite: 0 },
+  "xai/grok-4.7": { input: 2, output: 6, cacheRead: 0.5, cacheWrite: 0 },
 }
 
 export const MODEL_INPUT_MODALITIES: Readonly<
@@ -175,8 +179,10 @@ export const MODEL_INPUT_MODALITIES: Readonly<
   "claude-opus-5-5": ["text","image"],
   "claude-sonnet-4-6": ["text","image"],
   "claude-sonnet-5": ["text","image"],
+  "claude-sonnet-5-5": ["text","image"],
   "deepseek/deepseek-v4-flash-vision-exp": ["text","image"],
   "deepseek/deepseek-v4.1-flash": ["text","image"],
+  "deepseek/deepseek-v4.1-flash-fast": ["text","image"],
   "google/gemini-3.1-flash-lite": ["text","image"],
   "google/gemini-3.5-flash": ["text","image"],
   "google/gemini-3.5-flash-lite": ["text","image"],
