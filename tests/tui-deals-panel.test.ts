@@ -1,18 +1,54 @@
 // tests/tui-deals-panel.test.ts — deals sidebar panel data extraction and the
-// two host contracts (v1 `tui(api)` slot map, v2 `setup(context)` slot claim).
+// two host contracts (v1 `tui(api)` slot map, v2 `setup(context)` slot claim),
+// plus the appended live `Usage` segment's wiring (issue #244).
 import plugin, {
   dealsRows,
   dealsRowsV2,
+  panelRows,
   v1ModelFor,
+  v1UsageInput,
   v2ModelFor,
+  v2UsageInput,
   v2ThemeColors,
 } from "../src/deals/tui.js"
 import type { DealsRow } from "../src/deals/tui.js"
+import { createUsagePanel, type UsagePanelState } from "../src/deals/tui-usage.js"
 import type { Provider } from "@opencode-ai/sdk/v2"
+import type { TuiPluginApi } from "@opencode-ai/plugin/tui"
 import type { V2TuiContext, V2TuiSlotClaim, V2TuiTheme } from "../src/plugin/v2-tui-types.js"
 import { assertEqual, assert, run } from "./harness.js"
 
 const NA = "N/A"
+
+/** The render clock the usage fixtures pin their countdowns against. */
+const NOW = Date.parse("2026-10-01T12:00:00.000Z")
+
+/** A live reset 4h32m out, in milliseconds (above the seconds-heuristic floor). */
+const RESET_AT = NOW + (4 * 60 + 32) * 60_000
+
+/** Five days out, so the monthly meter's renewal suffix is exactly `5d`. */
+const PERIOD_END = NOW + 5 * 86_400_000
+
+/**
+ * One published usage state as the panel's controller hands it over: the three
+ * meters (with a countdown and a renewal, so `panelRows`'s `now` is
+ * load-bearing) and the host rung's provenance.
+ */
+function usageState(): UsagePanelState {
+  return {
+    result: {
+      state: "usage",
+      snapshot: {
+        limited: true,
+        fiveHour: { used: 0.5, cap: 3, exceeded: false },
+        weekly: { used: 1.5, cap: 6, exceeded: false, resetAt: RESET_AT },
+        monthly: { used: 39.5, cap: 40 },
+        periodEnd: PERIOD_END,
+      },
+    },
+    provenance: { kind: "host" },
+  }
+}
 
 /** PLAN_CATALOG display names the Allowance segment renders, in order. */
 const PLAN_LABELS = ["Go", "GOAT", "Pro", "Max 10×", "Max 20×", "Team Pro"]
@@ -704,6 +740,177 @@ run([
       assertFixedRows(dealsRows(missing), {})
     },
   ],
+  // ---------------------------------------------------------------------------
+  // The live `Usage` segment (issue #244): appended below the fixed rows from
+  // the panel's mount chain. The chain's fetch counts and retention rules are
+  // pinned in tests/tui-usage.test.ts; here the panel's composition and both
+  // halves' live credential inputs are.
+  // ---------------------------------------------------------------------------
+
+  [
+    "the panel appends the Usage segment below the fixed rows",
+    () => {
+      const deals = dealsRows({ options: { cmd: { free: false } } })
+      const rows = panelRows(deals, usageState(), NOW)
+      // The fixed rows are untouched and in front...
+      assertEqual(rows.slice(0, deals.length), deals)
+      // ...and the segment follows the last fixed row.
+      assert(
+        rows.findIndex(([label]) => label === "Usage") >
+          rows.findIndex(([label]) => label === "Tok/s"),
+        "the Usage heading must come after every fixed row",
+      )
+      assertEqual(rows[deals.length], ["", ""])
+      assertEqual(rows[deals.length + 1], ["Usage", "", "heading"])
+      assertEqual(row(rows, "5-hour"), ["5-hour", "$0.50 / $3.00 · 17%"])
+      assertEqual(row(rows, "Weekly"), ["Weekly", "$1.50 / $6.00 · 25% · resets in 4h 32m"])
+      assertEqual(row(rows, "Monthly"), ["Monthly", "$39.50 / $40.00 · 99% · renews in 5d"])
+      assertEqual(row(rows, "via Host connection"), ["via Host connection", "", "value"])
+    },
+  ],
+
+  [
+    "before the first load settles the panel shows the fixed rows only",
+    () => {
+      // An undefined state is "the mount chain is still in flight", not the
+      // resolver's miss: no notice may flash while the fetch is pending.
+      const deals = dealsRows({ options: { cmd: {} } })
+      assertEqual(panelRows(deals, undefined, NOW), deals)
+    },
+  ],
+
+  [
+    "each Usage degradation renders its line below the fixed rows",
+    () => {
+      const deals = dealsRows({ options: { cmd: {} } })
+      const cases: Array<[UsagePanelState, string]> = [
+        [
+          { result: { state: "no-credential" } },
+          "Usage needs COMMANDCODE_API_KEY — set it to see live limits",
+        ],
+        [
+          { result: { state: "unavailable" } },
+          "Usage unavailable — could not read the Command Code billing API",
+        ],
+      ]
+      for (const [state, line] of cases) {
+        const rows = panelRows(deals, state, NOW)
+        assertEqual(rows.slice(0, deals.length), deals)
+        assertEqual(rows[deals.length + 1], ["Usage", "", "heading"])
+        assertEqual(rows[deals.length + 2], [line, "", "value"])
+      }
+    },
+  ],
+
+  [
+    "the panel stays hidden for non-Command Code models, with or without usage",
+    () => {
+      for (const state of [undefined, usageState()]) {
+        assertEqual(panelRows(dealsRows(undefined), state, NOW), [])
+        assertEqual(panelRows([], state, NOW), [])
+      }
+    },
+  ],
+
+  [
+    "both halves' usage inputs read the live host state",
+    () => {
+      const providers = [{ id: "commandcode", key: "k" }] as unknown as readonly Provider[]
+      const client = { provider: { list: async () => ({}) } }
+      const api = { state: { provider: providers }, client } as unknown as TuiPluginApi
+      assertEqual(v1UsageInput(api), { host: "v1", providers, client })
+      const data = { session: { get: () => undefined } } as unknown as V2TuiContext["data"]
+      assertEqual(v2UsageInput({ data } as unknown as V2TuiContext), { host: "v2", data })
+    },
+  ],
+
+  [
+    "v1: a visible panel's mount chain feeds the appended segment",
+    async () => {
+      const providers = [
+        {
+          id: "commandcode",
+          key: "v1_key",
+          models: { "claude-sonnet-5": { options: { cmd: { free: false } } } },
+        },
+      ] as unknown as readonly Provider[]
+      const api = {
+        state: {
+          provider: providers,
+          session: {
+            get: () => ({
+              id: "ses_1",
+              model: { id: "claude-sonnet-5", providerID: "commandcode" },
+            }),
+          },
+        },
+        client: { provider: { list: async () => ({}) } },
+      } as unknown as TuiPluginApi
+      const panel = createUsagePanel(() => v1UsageInput(api), {
+        credential: { env: {}, authPaths: [] },
+        fetchSnapshot: async (options) => {
+          assertEqual(options.apiKey, "v1_key", "the host record's key reaches the fetch")
+          return usageState().result
+        },
+      })
+      await panel.mount()
+      const model = v1ModelFor(providers, { id: "claude-sonnet-5", providerID: "commandcode" })
+      const rows = panelRows(dealsRows(model), panel.state(), NOW)
+      assertEqual(row(rows, "Status"), ["Status", "Paid"])
+      assertEqual(row(rows, "5-hour"), ["5-hour", "$0.50 / $3.00 · 17%"])
+      assertEqual(row(rows, "via Host connection"), ["via Host connection", "", "value"])
+    },
+  ],
+
+  [
+    "v2: a visible panel's mount chain feeds the appended segment",
+    async () => {
+      const data = {
+        session: {
+          get: () => ({
+            id: "ses_1",
+            model: { id: "claude-sonnet-5", providerID: "commandcode" },
+          }),
+        },
+        location: {
+          model: {
+            list: () => [
+              {
+                id: "claude-sonnet-5",
+                modelID: "claude-sonnet-5",
+                providerID: "commandcode",
+                settings: { cmd: { free: false } },
+              },
+            ],
+          },
+          provider: { list: () => [{ id: "commandcode", integrationID: "commandcode" }] },
+          integration: {
+            list: () => [
+              {
+                id: "commandcode",
+                name: "Command Code",
+                connections: [{ type: "env", name: "COMMANDCODE_API_KEY" }],
+              },
+            ],
+          },
+        },
+      } as unknown as V2TuiContext["data"]
+      const ctx = { data } as unknown as V2TuiContext
+      const panel = createUsagePanel(() => v2UsageInput(ctx), {
+        credential: { env: { COMMANDCODE_API_KEY: "v2_key" }, authPaths: [] },
+        fetchSnapshot: async (options) => {
+          assertEqual(options.apiKey, "v2_key", "the env connection's key reaches the fetch")
+          return usageState().result
+        },
+      })
+      await panel.mount()
+      const model = v2ModelFor(data, "ses_1")
+      const rows = panelRows(dealsRowsV2(model), panel.state(), NOW)
+      assertEqual(row(rows, "Status"), ["Status", "Paid"])
+      assertEqual(row(rows, "5-hour"), ["5-hour", "$0.50 / $3.00 · 17%"])
+    },
+  ],
+
   [
     "v1 half registers the snake_case sidebar_content slot",
     async () => {

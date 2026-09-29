@@ -2,9 +2,11 @@
 // src/deals/tui.tsx — TUI plugin: "Command Code" deals section in the session
 // sidebar. Renders deal details from the picked model's enriched `cmd`
 // (produced by the server plugin's config hook on v1 and its provider transform
-// on v2). Every Command Code model gets the full fixed row set — a row the
-// model has no data for reads `N/A` instead of vanishing. Models from other
-// providers get nothing: the panel's visibility gate is the provider id.
+// on v2), plus the live `Usage` segment fetched once per panel mount through
+// the host's credential (issue #244, src/deals/tui-usage.ts). Every Command
+// Code model gets the full fixed row set — a row the model has no data for
+// reads `N/A` instead of vanishing. Models from other providers get nothing:
+// the panel's visibility gate is the provider id.
 //
 // Two hosts, two TUI contracts (ADR-0010), one default export:
 //   v1  `{ id, tui(api) }`        — `api.slots.register({ slots: { sidebar_content } })`
@@ -13,12 +15,15 @@
 // module is rejected outright and the sidebar never appears — the reason both
 // halves ship from this file. v1's reader only inspects `id`/`server`/`tui`, so
 // the extra `setup` is invisible to it (tests/contract.test.ts pins both).
-import { For, Show, createMemo } from "solid-js"
+import { For, Show, createMemo, createSignal, onMount } from "solid-js"
 import type { RGBA } from "@opentui/core"
 import type { Provider } from "@opencode-ai/sdk/v2"
 import type { TuiPlugin, TuiPluginApi, TuiPluginModule } from "@opencode-ai/plugin/tui"
 import { DEAL_SOURCE_URL, PLAN_CATALOG } from "./catalog.js"
 import { discountLabel, formatRate, todayIso } from "./format.js"
+import { renderUsageRows } from "./usage.js"
+import { createUsagePanel, type UsagePanelState } from "./tui-usage.js"
+import type { TuiCredentialInput } from "./tui-credential.js"
 import type { PlanId } from "../catalog/plans.js"
 import type {
   V2TuiContext,
@@ -321,6 +326,27 @@ export function dealsRowsV2(
   return cmdRows(model.settings?.["cmd"] as Cmd | undefined, baseRates(base), today)
 }
 
+/**
+ * The panel's full row list: the model's fixed deals rows, then the `Usage`
+ * segment (#244). The visibility gate survives composition — an empty deals
+ * row list is a non-Command Code selection (or no selection), so the panel
+ * stays hidden even while a usage state exists. `now` is the segment's
+ * countdown clock; it defaults to the render moment (the ticking clock is
+ * #245's).
+ */
+export function panelRows(
+  deals: DealsRow[],
+  usage: UsagePanelState | undefined,
+  now?: number,
+): DealsRow[] {
+  if (deals.length === 0) return []
+  // Before the first load settles there is no segment at all: an undefined
+  // state is "still loading", not the resolver's miss, so no notice flashes
+  // while the mount chain is in flight.
+  if (usage === undefined) return deals
+  return [...deals, ...renderUsageRows(usage.result, { provenance: usage.provenance, now })]
+}
+
 const id = "commandcode.deals"
 
 /** The panel itself, shared by both hosts: rows in, theme colours in. */
@@ -357,6 +383,36 @@ function DealsPanel(props: { rows: () => DealsRow[]; text: () => RGBA; textMuted
   )
 }
 
+/**
+ * The v1 half's live credential input (ADR-0020): the provider records the
+ * state already holds plus the TUI's own client. Built per load, never cached
+ * at mount, so a `/connect` or a provider re-registration is observed.
+ */
+export function v1UsageInput(api: TuiPluginApi): TuiCredentialInput {
+  return { host: "v1", providers: api.state.provider, client: api.client }
+}
+
+/**
+ * The v1 panel body: rendered only while the selected model is a Command Code
+ * one, so the mount chain never reaches the billing API for another provider's
+ * selection. The controller lives as long as that selection does — one panel,
+ * one mount chain, no re-fetch on mid-session model switches.
+ */
+function CmdPanelV1(props: { api: TuiPluginApi; model: () => V1Model }) {
+  const [usage, setUsage] = createSignal<UsagePanelState | undefined>(undefined)
+  const usagePanel = createUsagePanel(() => v1UsageInput(props.api), { onChange: setUsage })
+  onMount(() => {
+    void usagePanel.mount()
+  })
+  return (
+    <DealsPanel
+      rows={() => panelRows(dealsRows(props.model()), usage())}
+      text={() => props.api.theme.current.text}
+      textMuted={() => props.api.theme.current.textMuted}
+    />
+  )
+}
+
 function DealsPanelV1(props: { api: TuiPluginApi; session_id: string }) {
   // Mid-session model switches update the session record (`session.updated`
   // reconciles it into the sync store), so reading `session.model` reactively
@@ -364,13 +420,7 @@ function DealsPanelV1(props: { api: TuiPluginApi; session_id: string }) {
   const model = createMemo(() =>
     v1ModelFor(props.api.state.provider, props.api.state.session.get(props.session_id)?.model),
   )
-  return (
-    <DealsPanel
-      rows={() => dealsRows(model())}
-      text={() => props.api.theme.current.text}
-      textMuted={() => props.api.theme.current.textMuted}
-    />
-  )
+  return <Show when={model()}>{(selected) => <CmdPanelV1 api={props.api} model={selected} />}</Show>
 }
 
 /**
@@ -387,19 +437,41 @@ export function v2ThemeColors(theme: V2TuiTheme): { text: RGBA; muted: RGBA } {
     : { text: text.default, muted: text.subdued }
 }
 
+/**
+ * The v2 half's live credential input: the host's client-local data store,
+ * which the resolver reads provider → integration → connection from
+ * (ADR-0020). Read per load, like v1's.
+ */
+export function v2UsageInput(ctx: V2TuiContext): TuiCredentialInput {
+  return { host: "v2", data: ctx.data }
+}
+
+/**
+ * The v2 panel body, gated exactly like v1's: mounted only for a Command Code
+ * selection, one mount chain per panel.
+ */
+function CmdPanelV2(props: { ctx: V2TuiContext; model: () => V2PanelModel }) {
+  const [usage, setUsage] = createSignal<UsagePanelState | undefined>(undefined)
+  const usagePanel = createUsagePanel(() => v2UsageInput(props.ctx), { onChange: setUsage })
+  onMount(() => {
+    void usagePanel.mount()
+  })
+  const colors = () => v2ThemeColors(props.ctx.theme)
+  return (
+    <DealsPanel
+      rows={() => panelRows(dealsRowsV2(props.model()), usage())}
+      text={() => colors().text}
+      textMuted={() => colors().muted}
+    />
+  )
+}
+
 function DealsPanelV2(props: { ctx: V2TuiContext; sessionID: string }) {
   // Same idea as v1 against the v2 data store: `data` is the host's live
   // client-local state, so reading the session's model and the model catalog
   // inside the memo re-renders the panel when either changes.
   const model = createMemo(() => v2ModelFor(props.ctx.data, props.sessionID))
-  const colors = () => v2ThemeColors(props.ctx.theme)
-  return (
-    <DealsPanel
-      rows={() => dealsRowsV2(model())}
-      text={() => colors().text}
-      textMuted={() => colors().muted}
-    />
-  )
+  return <Show when={model()}>{(selected) => <CmdPanelV2 ctx={props.ctx} model={selected} />}</Show>
 }
 
 /** v1 half: snake_case slot map registered through `api.slots`. */
