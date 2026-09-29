@@ -151,15 +151,20 @@ surfaces in two places:
 - **Sidebar panel** (`src/deals/tui.tsx`): the server half writes the payload to
   the model's provider options — v1 `options.cmd`, v2 `settings.cmd` — and the
   panel renders in segmented rows for the session's selected model: tier/status,
-  an `Allowance` heading over one row per plan, then the deal/benchmark rows
+  an `Allowance` heading over one row per displayed plan (Pro (legacy) and
+  Provider keep their catalog rows and payload data — the plan-summary tool and
+  the transport still read them — but never render as panel rows), a **`Rates`**
+  section, then an **`Other Information`** heading over the deal/benchmark rows
   (`Deal`, `Was`, `Now`, `Intelligence`, `Tok/s`), blank lines between segments.
-  The tail closes with a **`Rates`** section: the published time-of-day bands
-  (`Peak`, `Off-peak`, `Windows`) and/or context-window bands labeled by their
-  published thresholds (`≤ 272K`, `> 272K`, …), each rate row carrying
-  in/out/cache-read/cache-write per-million rates; a model with neither keeps a
-  plain `Rates: N/A` row. The row set is fixed: every Command Code model shows
-  every row, with `N/A` for rows the payload says nothing about, and a selected
-  model from any other provider hides the panel.
+  `Rates` prints each published band — time-of-day (`Peak`, `Off-peak`) and/or
+  context-window bands labeled by their published thresholds (`≤ 272K`,
+  `> 272K`, …) — as a `Name: in | out | cache r | w` label over its
+  pipe-separated per-million values, then the `Peak Windows` schedule as its own
+  block; a model with no published band shows the host model cost it bills
+  against in the same two-line shape, and one with neither reads `N/A`. The row
+  set is fixed: every Command Code model shows every row, with `N/A` for rows
+  the payload says nothing about, and a selected model from any other provider
+  hides the panel.
 - **`cmd_plan_summary` tool**: plan-aware allowances and deal rates for
   estimating monthly request counts. It resolves the plan from
   `GET /alpha/billing/subscriptions`, org-scoped through `/alpha/whoami`, using

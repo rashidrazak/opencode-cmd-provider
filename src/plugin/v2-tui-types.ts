@@ -88,15 +88,29 @@ export interface V2TuiSession {
 }
 
 /**
+ * One `ModelInfo.cost` entry: `{ tier?, input, output, cache: { read, write } }`.
+ * v2's cost shape is an array of context tiers — the untiered entry is the
+ * model's base price, which the Deals panel reads for its `Rates` fallback
+ * when the payload publishes no band.
+ */
+export interface V2TuiModelCost {
+  readonly tier?: { readonly type: "context"; readonly size: number } | undefined
+  readonly input: number
+  readonly output: number
+  readonly cache: { readonly read: number; readonly write: number }
+}
+
+/**
  * `ModelInfo` slice. v2 renamed the model's free-form provider-option bag from
  * v1's `options` to `settings` (ADR-0010), which is where the Deals
- * enrichment writes `cmd`.
+ * enrichment writes `cmd`; `cost` is the host's own price table.
  */
 export interface V2TuiModel {
   readonly id: string
   readonly modelID: string
   readonly providerID: string
   readonly settings?: Readonly<Record<string, unknown>> | undefined
+  readonly cost?: readonly V2TuiModelCost[] | undefined
 }
 
 /**

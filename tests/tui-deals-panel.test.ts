@@ -14,32 +14,30 @@ import { assertEqual, assert, run } from "./harness.js"
 
 const NA = "N/A"
 
-/** PLAN_CATALOG display names — the plan rows under the Allowance heading. */
-const PLAN_LABELS = [
-  "Go",
-  "GOAT",
-  "Pro",
-  "Pro (legacy)",
-  "Max 10×",
-  "Max 20×",
-  "Team Pro",
-  "Provider",
-]
+/** PLAN_CATALOG display names the Allowance segment renders, in order. */
+const PLAN_LABELS = ["Go", "GOAT", "Pro", "Max 10×", "Max 20×", "Team Pro"]
 
-/** The rows after the allowance segment: deal and benchmark data. */
+/** The rows under the `Other Information` heading: deal and benchmark data. */
 const TAIL_LABELS = ["Deal", "Was", "Now", "Intelligence", "Tok/s"]
 
-/** The placeholder a model with no rate bands renders: a blank line, then `Rates: N/A`. */
+/** The column line every rate block prints. */
+const COLUMNS = "in | out | cache r | w"
+
+/**
+ * The placeholder under `Rates` for a model with no published band and no host
+ * cost (the synthetic models in this suite): the column line, then `N/A`.
+ */
 const NO_RATES: DealsRow[] = [
-  ["", ""],
-  ["Rates", NA],
+  [COLUMNS, "", "value"],
+  [NA, "", "value"],
 ]
 
 /**
  * The fixed segmented shape: Tier/Status, a blank line, the `Allowance` heading
- * over one row per plan, a blank line, then the deal/benchmark rows and the
- * rate block (`rates`, defaulting to the plain `Rates: N/A` row) — every value
- * from `values` (or `N/A`).
+ * over one row per rendered plan, a blank line, the `Rates` heading over the
+ * band block (`rates`, defaulting to the no-cost price fallback), a blank line,
+ * then the `Other Information` heading over the deal/benchmark rows — every
+ * value from `values` (or `N/A`).
  */
 function fixedRows(values: Record<string, string>, rates: DealsRow[] = NO_RATES): DealsRow[] {
   const valueRow = (label: string): DealsRow => [label, values[label] ?? NA]
@@ -50,8 +48,11 @@ function fixedRows(values: Record<string, string>, rates: DealsRow[] = NO_RATES)
     ["Allowance", "", "heading"],
     ...PLAN_LABELS.map(valueRow),
     ["", ""],
-    ...TAIL_LABELS.map(valueRow),
+    ["Rates", "", "heading"],
     ...rates,
+    ["", ""],
+    ["Other Information", "", "heading"],
+    ...TAIL_LABELS.map(valueRow),
   ]
 }
 
@@ -107,7 +108,7 @@ run([
   ],
 
   [
-    "segments the panel: Tier/Status, blank, Allowance heading + plans, blank, deal rows, blank, Rates",
+    "segments the panel: Tier/Status, blank, Allowance heading + plans, blank, Rates, blank, Other Information",
     () => {
       const rows = dealsRows({
         options: { cmd: { allowance: { goat: 20 }, free: false } },
@@ -118,25 +119,26 @@ run([
         ["", ""],
         ["Allowance", "", "heading"],
       ])
-      assertEqual(rows.slice(4, 12), [
+      assertEqual(rows.slice(4, 10), [
         ["Go", NA],
         ["GOAT", "$20/mo"],
         ["Pro", NA],
-        ["Pro (legacy)", NA],
         ["Max 10×", NA],
         ["Max 20×", NA],
         ["Team Pro", NA],
-        ["Provider", NA],
       ])
-      assertEqual(rows.slice(12), [
+      assertEqual(rows.slice(10), [
         ["", ""],
+        ["Rates", "", "heading"],
+        [COLUMNS, "", "value"],
+        [NA, "", "value"],
+        ["", ""],
+        ["Other Information", "", "heading"],
         ["Deal", NA],
         ["Was", NA],
         ["Now", NA],
         ["Intelligence", NA],
         ["Tok/s", NA],
-        ["", ""],
-        ["Rates", NA],
       ])
     },
   ],
@@ -291,9 +293,11 @@ run([
       })
       assertEqual(row(rows, "Status"), ["Status", "FREE"])
       assertEqual(row(rows, "Rates"), ["Rates", "", "heading"])
-      assertEqual(row(rows, "Peak"), ["Peak", NA])
-      assertEqual(row(rows, "Off-peak"), ["Off-peak", NA])
-      assertEqual(row(rows, "Windows"), ["Windows", "01-04 & 06-10 UTC"])
+      // The band labels carry the column line; the values line is bare.
+      assertEqual(row(rows, "Peak"), ["Peak", COLUMNS])
+      assertEqual(row(rows, "Off-peak"), ["Off-peak", COLUMNS])
+      assertEqual(row(rows, "Peak Windows"), ["Peak Windows", ""])
+      assertEqual(row(rows, "01-04 & 06-10 UTC"), ["01-04 & 06-10 UTC", "", "value"])
       // A free model has no allowances: every plan row reads N/A rather than
       // vanishing.
       for (const plan of PLAN_LABELS) {
@@ -321,11 +325,14 @@ run([
         { Status: "Paid" },
         {
           rates: [
+            ["Peak", COLUMNS],
+            ["$0.32 | $1.16 | $0.032 | $0", "", "value"],
             ["", ""],
-            ["Rates", "", "heading"],
-            ["Peak", "$0.32/$1.16/$0.032/$0 in/out/cache"],
-            ["Off-peak", "$0.16/$0.58/$0.016/$0 in/out/cache"],
-            ["Windows", "01–04 & 06–10 UTC, Mon–Fri"],
+            ["Off-peak", COLUMNS],
+            ["$0.16 | $0.58 | $0.016 | $0", "", "value"],
+            ["", ""],
+            ["Peak Windows", ""],
+            ["01–04 & 06–10 UTC, Mon–Fri", "", "value"],
           ],
         },
       )
@@ -358,10 +365,11 @@ run([
         { Status: "Paid" },
         {
           rates: [
+            ["≤ 272K", COLUMNS],
+            ["$2 | $10 | $0.2 | $2.5", "", "value"],
             ["", ""],
-            ["Rates", "", "heading"],
-            ["≤ 272K", "$2/$10/$0.2/$2.5 in/out/cache"],
-            ["> 272K", "$4/$15/$0.4/$5 in/out/cache"],
+            ["> 272K", COLUMNS],
+            ["$4 | $15 | $0.4 | $5", "", "value"],
           ],
         },
       )
@@ -387,12 +395,17 @@ run([
         { Status: "Paid" },
         {
           rates: [
+            ["Peak", COLUMNS],
+            [NA, "", "value"],
             ["", ""],
-            ["Rates", "", "heading"],
-            ["Peak", NA],
-            ["Off-peak", NA],
-            ["Windows", "01–04"],
-            ["≤ 32K", NA],
+            ["Off-peak", COLUMNS],
+            [NA, "", "value"],
+            ["", ""],
+            ["Peak Windows", ""],
+            ["01–04", "", "value"],
+            ["", ""],
+            ["≤ 32K", COLUMNS],
+            [NA, "", "value"],
           ],
         },
       )
@@ -449,7 +462,7 @@ run([
   ],
 
   [
-    "renders every plan row under the Allowance heading, N/A for unlisted plans",
+    "renders the truncated plan set under Allowance; unknown keys and hidden plans are not rows",
     () => {
       const rows = dealsRows({
         options: {
@@ -464,9 +477,82 @@ run([
         GOAT: "$40/mo",
         "Team Pro": "$40/mo",
       })
-      // The row set is the catalog's plan vocabulary — unknown keys are not rows.
+      // Pro (legacy) and Provider keep their catalog rows and their payload
+      // data — the plan-summary tool and the transport still read them — but
+      // they are never rendered: an allowance keyed to them changes nothing.
+      assertFixedRows(
+        dealsRows({
+          options: { cmd: { allowance: { prolegacy: 15, provider: 15 }, free: false } },
+        }),
+        { Status: "Paid" },
+      )
+      // The row set is the catalog's displayed plan vocabulary — unknown keys
+      // are not rows either.
       const unknown = dealsRows({ options: { cmd: { allowance: { custom: 5 }, free: false } } })
       assertFixedRows(unknown, { Status: "Paid" })
+    },
+  ],
+
+  [
+    "falls back to the model's actual price when no rate band is published",
+    () => {
+      // Both hosts hand the panel the model cost they bill against: v1 keeps
+      // one record per model, v2 an array whose untiered entry is the base
+      // price. With no band in the payload the cost fills the Rates block.
+      const cost = { input: 0.15, output: 0.6, cache: { read: 0.003, write: 0 } }
+      const rates: DealsRow[] = [
+        [COLUMNS, "", "value"],
+        ["$0.15 | $0.6 | $0.003 | $0", "", "value"],
+      ]
+      assertFixedRows(
+        dealsRows({ options: { cmd: { free: false } }, cost }),
+        { Status: "Paid" },
+        { rates },
+      )
+      assertFixedRows(
+        dealsRowsV2({ settings: { cmd: { free: false } }, cost: [cost] }),
+        { Status: "Paid" },
+        { rates },
+      )
+      // A published band wins over the base price: the fallback never
+      // double-prints.
+      assertFixedRows(
+        dealsRows({
+          options: {
+            cmd: {
+              free: false,
+              peakOffPeak: {
+                peak: { input: 0.3, output: 1.2, cacheRead: 0.006, cacheWrite: 0 },
+                offPeak: { input: 0.15, output: 0.6, cacheRead: 0.003, cacheWrite: 0 },
+                windows: "01–04 & 06–10 UTC, Mon–Fri",
+              },
+            },
+          },
+          cost,
+        }),
+        { Status: "Paid" },
+        {
+          rates: [
+            ["Peak", COLUMNS],
+            ["$0.3 | $1.2 | $0.006 | $0", "", "value"],
+            ["", ""],
+            ["Off-peak", COLUMNS],
+            ["$0.15 | $0.6 | $0.003 | $0", "", "value"],
+            ["", ""],
+            ["Peak Windows", ""],
+            ["01–04 & 06–10 UTC, Mon–Fri", "", "value"],
+          ],
+        },
+      )
+      // A record with only tiered entries has no base price: N/A, never a
+      // tier's rate read as the base.
+      assertFixedRows(
+        dealsRowsV2({
+          settings: { cmd: { free: false } },
+          cost: [{ tier: { type: "context", size: 200000 }, ...cost }],
+        }),
+        { Status: "Paid" },
+      )
     },
   ],
 
@@ -539,12 +625,14 @@ run([
     "v2: model lookup resolves the selected Command Code model and hides other providers",
     () => {
       const cmd = { tier: "premium", free: false }
+      const cost = [{ input: 2, output: 10, cache: { read: 0.2, write: 2.5 } }]
       const models = [
         {
           id: "claude-sonnet-5",
           modelID: "claude-sonnet-5",
           providerID: "commandcode",
           settings: { cmd },
+          cost,
         },
         { id: "gpt-6", modelID: "gpt-6", providerID: "opencode" },
       ]
@@ -556,6 +644,8 @@ run([
 
       const found = v2ModelFor(data({ id: "claude-sonnet-5", providerID: "commandcode" }), "ses_1")
       assertEqual(found?.settings?.["cmd"], cmd)
+      // The host cost rides along for the Rates price fallback.
+      assertEqual(found?.cost, cost)
       // Selecting another provider's model hides the panel.
       assertEqual(v2ModelFor(data({ id: "gpt-6", providerID: "opencode" }), "ses_1"), undefined)
       // A Command Code model missing from the catalog still renders the full
@@ -595,12 +685,15 @@ run([
     "v1: model lookup resolves the selected Command Code model and hides other providers",
     () => {
       const cmd = { tier: "premium", free: false }
+      const cost = { input: 2, output: 10, cache: { read: 0.2, write: 2.5 } }
       const providers = [
-        { id: "commandcode", models: { "claude-sonnet-5": { options: { cmd } } } },
+        { id: "commandcode", models: { "claude-sonnet-5": { options: { cmd }, cost } } },
         { id: "opencode", models: { "gpt-6": {} } },
       ] as unknown as readonly Provider[]
       const found = v1ModelFor(providers, { id: "claude-sonnet-5", providerID: "commandcode" })
       assertEqual(found?.options?.["cmd"], cmd)
+      // The host cost rides along for the Rates price fallback.
+      assertEqual(found?.cost, cost)
       // Selecting another provider's model hides the panel.
       assertEqual(v1ModelFor(providers, { id: "gpt-6", providerID: "opencode" }), undefined)
       assertEqual(v1ModelFor(providers, undefined), undefined)
