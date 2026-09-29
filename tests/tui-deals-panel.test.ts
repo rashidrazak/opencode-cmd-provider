@@ -296,7 +296,7 @@ run([
       // The band labels carry the column line; the values line is bare.
       assertEqual(row(rows, "Peak"), ["Peak", COLUMNS])
       assertEqual(row(rows, "Off-peak"), ["Off-peak", COLUMNS])
-      assertEqual(row(rows, "Peak Windows"), ["Peak Windows", ""])
+      assertEqual(row(rows, "Peak Windows"), ["Peak Windows", "", "value"])
       assertEqual(row(rows, "01-04 & 06-10 UTC"), ["01-04 & 06-10 UTC", "", "value"])
       // A free model has no allowances: every plan row reads N/A rather than
       // vanishing.
@@ -331,7 +331,7 @@ run([
             ["Off-peak", COLUMNS],
             ["$0.16 | $0.58 | $0.016 | $0", "", "value"],
             ["", ""],
-            ["Peak Windows", ""],
+            ["Peak Windows", "", "value"],
             ["01–04 & 06–10 UTC, Mon–Fri", "", "value"],
           ],
         },
@@ -401,7 +401,7 @@ run([
             ["Off-peak", COLUMNS],
             [NA, "", "value"],
             ["", ""],
-            ["Peak Windows", ""],
+            ["Peak Windows", "", "value"],
             ["01–04", "", "value"],
             ["", ""],
             ["≤ 32K", COLUMNS],
@@ -539,7 +539,7 @@ run([
             ["Off-peak", COLUMNS],
             ["$0.15 | $0.6 | $0.003 | $0", "", "value"],
             ["", ""],
-            ["Peak Windows", ""],
+            ["Peak Windows", "", "value"],
             ["01–04 & 06–10 UTC, Mon–Fri", "", "value"],
           ],
         },

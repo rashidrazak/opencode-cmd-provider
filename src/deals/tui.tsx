@@ -72,9 +72,9 @@ type V2PanelModel = {
 /**
  * One rendered sidebar line. `[label, value]` renders as `label: value`; an
  * empty value renders the label bare and emphasized (`[text, ""]` — the
- * unavailable banner or a `Peak Windows` label; `[text, "", "heading"]` — a
- * segment heading, underlined as well); `[text, "", "value"]` renders a bare
- * muted line with no emphasis (a rate-values line); `["", ""]` is the blank
+ * unavailable banner; `[text, "", "heading"]` — a segment heading, underlined
+ * as well); `[text, "", "value"]` renders a bare muted line with no emphasis
+ * (a rate-values line or the `Peak Windows` label); `["", ""]` is the blank
  * line between segments.
  */
 export type DealsRow = [label: string, value: string, kind?: "heading" | "value"]
@@ -165,7 +165,7 @@ function ratesRows(c: Cmd, base: CmdRates | undefined): DealsRow[] {
     band("Off-peak", tod.offPeak)
     if (typeof tod.windows === "string") {
       rows.push(["", ""])
-      rows.push(["Peak Windows", ""])
+      rows.push(["Peak Windows", "", "value"])
       rows.push([tod.windows, "", "value"])
     }
   }
