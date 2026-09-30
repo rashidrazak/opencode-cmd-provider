@@ -6,10 +6,10 @@
 // parse from the CLI bundle (dist/cli.mjs). Regenerate with
 // `npm run refresh:snapshot`.
 
-export const FACTS_SOURCE_URL = "https://unpkg.com/command-code@1.69.0/dist/bundled/command-code-knowledge/reference/models.md"
-export const MODALITIES_SOURCE_URL = "https://unpkg.com/command-code@1.69.0/dist/cli.mjs"
-export const FACTS_PACKAGE_VERSION = "1.69.0"
-export const FACTS_LAST_REFRESHED = "2026-09-29"
+export const FACTS_SOURCE_URL = "https://unpkg.com/command-code@1.72.4/dist/bundled/command-code-knowledge/reference/models.md"
+export const MODALITIES_SOURCE_URL = "https://unpkg.com/command-code@1.72.4/dist/cli.mjs"
+export const FACTS_PACKAGE_VERSION = "1.72.4"
+export const FACTS_LAST_REFRESHED = "2026-09-30"
 
 export const MODEL_EFFORTS: Readonly<Record<string, readonly string[]>> = {
   "deepseek/deepseek-v4-pro": ["high","max"],
@@ -31,6 +31,7 @@ export const MODEL_EFFORTS: Readonly<Record<string, readonly string[]>> = {
   "Qwen/Qwen3.8-Flash": ["low","medium","xhigh"],
   "stepfun/Step-5-Preview": ["low","medium","high"],
   "tencent/hy4-preview": ["low","medium","high"],
+  "inclusionai/ling-3.1-flash:free": ["low","medium","high"],
   "stealth/space-bunny-alpha": ["low","medium","high"],
   "stealth/pixel-canary": ["low","medium","xhigh"],
   "claude-sonnet-5-5": ["low","medium","high","xhigh","max"],
@@ -43,6 +44,7 @@ export const MODEL_EFFORTS: Readonly<Record<string, readonly string[]>> = {
   "claude-opus-4-8": ["low","medium","high","xhigh","max"],
   "claude-opus-4-7": ["low","medium","high","xhigh","max"],
   "gpt-6-astra": ["low","medium","high","xhigh","max"],
+  "gpt-6.1-sol": ["low","medium","high","xhigh","max"],
   "gpt-6-sol": ["low","medium","high","xhigh","max"],
   "gpt-6-luna": ["low","medium","high","xhigh","max"],
   "gpt-5.6-sol": ["low","medium","high","xhigh","max"],
@@ -119,6 +121,7 @@ export const MODEL_COSTS: Readonly<
   "thinkingmachines/inkling-small": { input: 0.5, output: 1.2, cacheRead: 0.1, cacheWrite: 0 },
   "poolside/laguna-s-2.1-free": { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
   "inclusionai/ling-3.0-flash-sante:free": { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+  "inclusionai/ling-3.1-flash:free": { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
   "stealth/space-bunny-alpha": { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
   "stealth/pixel-canary": { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
   "claude-sonnet-5-5": { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 },
@@ -132,6 +135,7 @@ export const MODEL_COSTS: Readonly<
   "claude-opus-4-7": { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 },
   "claude-haiku-4-5-20251001": { input: 1, output: 5, cacheRead: 0.1, cacheWrite: 1.25 },
   "gpt-6-astra": { input: 10, output: 50, cacheRead: 1, cacheWrite: 12.5 },
+  "gpt-6.1-sol": { input: 2, output: 10, cacheRead: 0.1, cacheWrite: 2.5 },
   "gpt-6-sol": { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 },
   "gpt-6-luna": { input: 0.1, output: 0.5, cacheRead: 0.01, cacheWrite: 0.125 },
   "gpt-5.6-sol": { input: 5, output: 30, cacheRead: 0.5, cacheWrite: 6.25 },
@@ -199,6 +203,7 @@ export const MODEL_INPUT_MODALITIES: Readonly<
   "gpt-6-astra": ["text","image"],
   "gpt-6-luna": ["text","image"],
   "gpt-6-sol": ["text","image"],
+  "gpt-6.1-sol": ["text","image"],
   "meta/muse-spark-1.1": ["text","image"],
   "meta/muse-spark-1.2": ["text","image"],
   "meta/muse-spark-1.2-contributor": ["text","image"],
