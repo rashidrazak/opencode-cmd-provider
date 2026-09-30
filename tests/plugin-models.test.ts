@@ -108,8 +108,8 @@ run([
         )
         assertEqual(
           registered.modalities,
-          { input: [...inputModalitiesForModel(model.id)] },
-          `${model.id} modalities must mirror the generated modality facts`,
+          { input: [...inputModalitiesForModel(model.id)], output: ["text"] },
+          `${model.id} modalities must mirror the generated modality facts and carry both v1 lists`,
         )
         // The auto-registered cost mirrors the model's own parsed ship-bar
         // row cost (issue #130): a null row cost advertises no cost entry.
