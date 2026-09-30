@@ -415,7 +415,9 @@ run([
       // The RSC's `planAllowanceUsd` is the source of truth for
       // per-model plan allowances — every paid model. The test pins
       // that data flows through: a model with allowance in the
-      // compact array must surface in the output.
+      // compact array must surface in the output. The expected values
+      // are read back from the fixture, never re-typed — an upstream
+      // allowance change moves the fixture, not this test.
       const out = emitDealsModuleFromRsc({
         pricingLimitsRsc: RSC_PRICING,
         goatRsc: RSC_GOAT,
@@ -423,11 +425,14 @@ run([
         lastRefreshed: "2026-08-28",
         packageVersion: "rsc",
       })
-      // moonshotai/Kimi-K3: RSC compact has goat=20, pro=30.
+      const { compact } = extractPricingLimitsRsc(RSC_PRICING)
+      const kimi = compact.find((record) => record.id === "kimi-k3")
+      assert(kimi, "fixture must carry the Kimi K3 compact record")
       const kimiLine = out.split("\n").find((l) => l.includes('"moonshotai/Kimi-K3"'))
       assert(kimiLine, "must have a Kimi K3 entry")
       assert(
-        kimiLine.includes('"goat":20') && kimiLine.includes('"pro":30'),
+        kimiLine.includes(`"goat":${kimi.planAllowanceUsd.goat}`) &&
+          kimiLine.includes(`"pro":${kimi.planAllowanceUsd.pro}`),
         `Kimi K3 must carry RSC allowances (got: ${kimiLine})`,
       )
     },
