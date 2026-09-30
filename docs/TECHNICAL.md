@@ -282,6 +282,57 @@ minutes while the last-good snapshot stays on screen; a success resets the
 ladder. On v2 each chain is one plugin-RPC call plus its `progress` events,
 and the counts above are the billing requests the server half makes.
 
+### Sidebar segments and the layout dialog
+
+The panel's rows are five segments — Tier/Status, Allowance, Rates, Other
+Information and the Usage block above. Which of them render, and in which
+order, is a per-machine user choice (issue #253,
+[ADR-0022](adr/0022-sidebar-segment-layout.md)): the `Deals: sidebar segments`
+command palette entry opens a dialog where up/down moves the cursor,
+space/enter toggles the selected segment, shift+up/down reorders it, `r`
+restores the default layout and escape closes. Changes apply live.
+
+The layout is a JSON record `{ order, hidden }`; `order` carries all five ids
+including hidden ones (unhiding restores a position) and `hidden` names what
+not to render. `src/deals/segments.ts` owns the vocabulary, the key map and
+`normalizeLayout`, which drops unknown/duplicate ids and appends ids a store
+is missing — so a release that adds or removes a segment can never make it
+vanish or crash the panel, and no migration exists. Persistence is each TUI
+host's own durable store: v1 `api.kv` under `commandcode.deals.segments`
+(the shared `state/kv.json`, read reactively), v2 `ctx.storage.store(...)`
+(disk-persisted, live-synced across TUI instances, host-namespaced by plugin
+id).
+
+Composition rules: `panelRows` joins the visible segments with exactly one
+blank line, trims blank edges a segment ships itself (the usage renderer's
+leading separator), skips segments that render no rows (Usage before its
+first load), and emits nothing when every segment is hidden — the panel and
+its `Command Code` header disappear entirely. The `Deals unavailable` banner
+is pinned above whichever segment comes first, but only while a catalog
+segment (anything but Usage) is visible; a Usage-only panel carries no
+catalog warning.
+
+The commands register through `api.keymap.registerLayer` on v1 (the
+deprecated `api.command` shim only forwards to it and warns) and
+`ctx.keymap.layer` on v2. The v1 dialog additionally registers a
+`priority: 1` keymap layer for its lifetime (`bindV1DialogKeys`): the prompt's
+managed textarea layer owns the focused prompt's arrows at default priority,
+so raw keyboard handlers never see them while a session prompt is mounted —
+the host's own `DialogSelect` wins them the same way through its focused
+filter input. On v2 the layer comes from a headless component mounted through
+the `app` slot instead, because the v2 keymap layer is a Solid context owned
+by the calling component: created from `setup` it throws
+`Keymap.Provider is missing` and takes the sidebar down with it. The v2 layer
+is `mode: "global"` because layers otherwise default to `base`, and the
+command palette lists only reachable commands while its own dialog is open —
+a base-mode entry silently disappears. Both measured on opencode 2.0.20.
+`SegmentsDialog` is one shared component mounted through
+`api.ui.dialog.replace` / `ctx.ui.dialog.show`; its key handling is the pure
+`segmentKeyIntent`. The v1 keymap slice is mirrored inside
+`src/deals/tui.tsx` (`@opentui/keymap` is host-provided and not installed);
+the v2 `keymap`/`storage`/`ui.dialog` slices extend
+`src/plugin/v2-tui-types.ts` and are re-checked across 2.0.3–2.0.20.
+
 ## Reasoning support
 
 Reasoning metadata derives from the generated classification module
@@ -659,3 +710,4 @@ Both e2e scripts are excluded from `npm test`.
 | [0019](adr/0019-out-of-vocabulary-efforts-snap.md)             | An unadvertised reasoning effort snaps to the nearest advertised level                             |
 | [0020](adr/0020-tui-host-credential-for-usage.md)              | The TUI host resolves its usage credential (v1 in-process, v2 via the plugin-RPC bridge)           |
 | [0021](adr/0021-usage-parallel-wave-progressive-merge.md)      | The usage refresh is one parallel wave, publishes progressively, and merges the last-good snapshot |
+| [0022](adr/0022-sidebar-segment-layout.md)                     | The sidebar segment layout is user state, persisted by each TUI host                               |

@@ -20,13 +20,17 @@
 // spellings, the client's RPC subclient slice the
 // usage bridge calls (`@opencode/client@2.0.3`'s `OpenCodeClient.rpc`;
 // re-checked against 2.0.19 — the TUI context's `client` is present from
-// 2.0.3 through 2.0.20), and the data store's turn events the usage refresh
+// 2.0.3 through 2.0.20), the data store's turn events the usage refresh
 // subscribes to (`Data.on`, typed by `@opencode/client@2.0.3`'s
-// `SessionIdle` / `SessionExecutionSucceeded`).
+// `SessionIdle` / `SessionExecutionSucceeded`), and the segment-settings
+// slices (issue #253): `keymap.layer` (checked against `@opencode/plugin`
+// 2.0.3 and 2.0.20, `Keymap`/`KeymapCommand`), `storage.store` (durable,
+// plugin-namespaced state, same range), and `ui.dialog.show`/`clear`.
 // Bumping the supported v2 line means re-deriving these from the published
 // packages — tests/tui-deals-panel and tests/tui-credential pin the parts we
 // depend on.
 import type { RGBA } from "@opentui/core"
+import type { Store } from "solid-js/store"
 
 /**
  * Slot paths the v2 host publishes (`SlotMap`). Absolute and dot-separated, and
@@ -167,6 +171,65 @@ export interface V2TuiClient {
 }
 
 /**
+ * One command of a plugin keymap layer (`KeymapCommand`): the identity and
+ * palette metadata plus the runner. `palette: true` puts it in the host
+ * command palette; `run` receives the palette input and keyboard event when
+ * dispatched, neither of which this package reads.
+ */
+export interface V2TuiKeymapCommand {
+  readonly id?: string
+  readonly title?: string
+  readonly description?: string
+  readonly group?: string
+  readonly enabled?: boolean | (() => boolean)
+  readonly palette?: true
+  readonly run: (input?: string, event?: unknown) => void | false | Promise<void>
+}
+
+/**
+ * One keymap layer (`KeymapLayer`), narrowed to the command list this package
+ * registers. `layer` takes a thunk so the host re-evaluates the layer
+ * reactively and owns its teardown with the plugin scope. It is a Solid
+ * context owned by the calling component — calling it outside a component
+ * (from `setup`) throws `Keymap.Provider is missing` — which is why the Deals
+ * layer mounts through a headless `app`-slot component, with `mode: "global"`
+ * because the palette lists only reachable commands while its dialog is open
+ * and layers default to `base`.
+ */
+export interface V2TuiKeymapLayer {
+  readonly mode?: string
+  readonly enabled?: boolean | (() => boolean)
+  readonly commands?: readonly V2TuiKeymapCommand[]
+  readonly bindings?: readonly string[]
+}
+
+export interface V2TuiKeymap {
+  readonly layer: (input: () => V2TuiKeymapLayer) => void
+}
+
+/**
+ * The host's durable state (`Storage.store`): persisted JSON that survives
+ * restarts and hot reloads and stays live-synced across running TUI
+ * instances. The host namespaces the key with the plugin id; the returned
+ * store is reactive, and the mutator writes a validated draft.
+ */
+export interface V2TuiStorage {
+  readonly store: <Value extends object>(
+    key: string,
+    options: { readonly initial: Value },
+  ) => readonly [Store<Value>, (mutation: (draft: Value) => void) => Promise<void>]
+}
+
+/**
+ * The host dialog slice (`Dialog`): `show` renders one component in the modal
+ * stack, `clear` closes it. Both exist on 2.0.3 through 2.0.20.
+ */
+export interface V2TuiDialog {
+  readonly show: (render: () => unknown, onClose?: () => void) => void
+  readonly clear: () => void
+}
+
+/**
  * The two v2 data-store events that mark a completed turn (issue #245): the
  * session going idle and the execution succeeding. Mirrored from
  * `@opencode/client`'s event union (`SessionIdle` / `SessionExecutionSucceeded`
@@ -182,7 +245,10 @@ export type V2TuiTurnEvent =
 
 /**
  * The v2 TUI context. `ui.slot` claims a place in the slot tree and returns the
- * release function; `client` is the host's OpenCode client (the RPC bridge's
+ * release function, `ui.dialog` is the modal stack the segment-settings dialog
+ * (issue #253) opens through; `keymap` registers the command-palette entry
+ * that opens it; `storage` is the durable per-plugin state the chosen segment
+ * layout persists in; `client` is the host's OpenCode client (the RPC bridge's
  * transport); `data` is the host's live client-local store — reads are
  * reactive, so the claim's `render` is re-invoked when the selected model
  * changes, and `on` subscribes to its turn events.
@@ -191,7 +257,10 @@ export interface V2TuiContext {
   readonly theme: V2TuiTheme
   readonly ui: {
     readonly slot: (claim: V2TuiSlotClaim) => () => void
+    readonly dialog: V2TuiDialog
   }
+  readonly keymap: V2TuiKeymap
+  readonly storage: V2TuiStorage
   readonly client: V2TuiClient
   readonly data: {
     readonly session: {

@@ -3,6 +3,8 @@
 // plus the appended live `Usage` segment's wiring (issue #244) and the
 // completed-turn adapters each half subscribes through (issue #245).
 import plugin, {
+  dealSegments,
+  dealSegmentsV2,
   dealsRows,
   dealsRowsV2,
   manageUsagePanel,
@@ -15,6 +17,7 @@ import plugin, {
   v2ThemeColors,
 } from "../src/deals/tui.js"
 import type { DealsRow } from "../src/deals/tui.js"
+import { defaultLayout } from "../src/deals/segments.js"
 import { createUsagePanel, type UsagePanel, type UsagePanelState } from "../src/deals/tui-usage.js"
 import { createUsageRpcLoader } from "../src/deals/usage-rpc.js"
 import { createRoot } from "solid-js"
@@ -797,8 +800,9 @@ run([
   [
     "the panel appends the Usage segment below the fixed rows",
     () => {
-      const deals = dealsRows({ options: { cmd: { free: false } } })
-      const rows = panelRows(deals, usageState(), NOW)
+      const model = { options: { cmd: { free: false } } }
+      const deals = dealsRows(model)
+      const rows = panelRows(dealSegments(model)!, defaultLayout(), usageState(), NOW)
       // The fixed rows are untouched and in front...
       assertEqual(rows.slice(0, deals.length), deals)
       // ...and the segment follows the last fixed row.
@@ -832,15 +836,17 @@ run([
     () => {
       // An undefined state is "the mount chain is still in flight", not the
       // resolver's miss: no notice may flash while the fetch is pending.
-      const deals = dealsRows({ options: { cmd: {} } })
-      assertEqual(panelRows(deals, undefined, NOW), deals)
+      const model = { options: { cmd: {} } }
+      const deals = dealsRows(model)
+      assertEqual(panelRows(dealSegments(model)!, defaultLayout(), undefined, NOW), deals)
     },
   ],
 
   [
     "each Usage degradation renders its line below the fixed rows",
     () => {
-      const deals = dealsRows({ options: { cmd: {} } })
+      const model = { options: { cmd: {} } }
+      const deals = dealsRows(model)
       const cases: Array<[UsagePanelState, string]> = [
         [
           { result: { state: "no-credential" } },
@@ -852,7 +858,7 @@ run([
         ],
       ]
       for (const [state, line] of cases) {
-        const rows = panelRows(deals, state, NOW)
+        const rows = panelRows(dealSegments(model)!, defaultLayout(), state, NOW)
         assertEqual(rows.slice(0, deals.length), deals)
         assertEqual(rows[deals.length + 1], ["Usage", "", "heading"])
         assertEqual(rows[deals.length + 2], [line, "", "value"])
@@ -864,8 +870,8 @@ run([
     "the panel stays hidden for non-Command Code models, with or without usage",
     () => {
       for (const state of [undefined, usageState()]) {
-        assertEqual(panelRows(dealsRows(undefined), state, NOW), [])
-        assertEqual(panelRows([], state, NOW), [])
+        assertEqual(panelRows(dealSegments(undefined), defaultLayout(), state, NOW), [])
+        assertEqual(panelRows(undefined, defaultLayout(), state, NOW), [])
       }
     },
   ],
@@ -1005,7 +1011,7 @@ run([
       const panel = createUsagePanel(async () => usageState())
       await panel.mount()
       const model = v1ModelFor(providers, { id: "claude-sonnet-5", providerID: "commandcode" })
-      const rows = panelRows(dealsRows(model), panel.state(), NOW)
+      const rows = panelRows(dealSegments(model), defaultLayout(), panel.state(), NOW)
       assertEqual(row(rows, "Status"), ["Status", "Paid"])
       assertEqual(meterDetail(rows, "5-hour"), ["$0.50 / $3.00", "", "value"])
       // The unmount cancels the panel's countdown clock — a live timer that
@@ -1060,7 +1066,7 @@ run([
       await panel.mount()
       assertEqual(portCalls, 1, "one bridge call per mount chain")
       const model = v2ModelFor(data, "ses_1")
-      const rows = panelRows(dealsRowsV2(model), panel.state(), NOW)
+      const rows = panelRows(dealSegmentsV2(model), defaultLayout(), panel.state(), NOW)
       assertEqual(row(rows, "Status"), ["Status", "Paid"])
       assertEqual(meterDetail(rows, "5-hour"), ["$0.50 / $3.00", "", "value"])
       panel.unmount()
@@ -1087,22 +1093,30 @@ run([
     },
   ],
   [
-    "v2 half claims the dot-separated sidebar.content path with a renderer",
+    "v2 half claims the sidebar and a headless app-slot command layer",
     () => {
       const claims: V2TuiSlotClaim[] = []
       const ctx = {
         theme: { text: { base: {}, muted: {} } },
+        storage: {
+          store: (_key: string, options: { initial: unknown }) => [options.initial, async () => {}],
+        },
+        keymap: { layer: () => {} },
         ui: {
           slot: (claim: V2TuiSlotClaim) => {
             claims.push(claim)
             return () => {}
           },
+          dialog: { show: () => {}, clear: () => {} },
         },
       } as unknown as V2TuiContext
       plugin.setup(ctx)
-      assertEqual(claims.length, 1)
-      assertEqual(claims[0]?.append, "sidebar.content")
-      assert(typeof claims[0]?.render === "function")
+      // Two claims: the headless command layer on `app` (the keymap layer is
+      // owned by a component, never by setup) and the sidebar panel.
+      assertEqual(claims.map((claim) => claim.append).sort(), ["app", "sidebar.content"])
+      const sidebar = claims.find((claim) => claim.append === "sidebar.content")
+      assert(sidebar !== undefined)
+      assert(typeof sidebar.render === "function")
     },
   ],
   [

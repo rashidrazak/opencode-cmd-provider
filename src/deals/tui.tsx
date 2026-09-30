@@ -9,6 +9,16 @@
 // reads `N/A` instead of vanishing. Models from other providers get nothing:
 // the panel's visibility gate is the provider id.
 //
+// The panel's rows are five segments — Tier/Status, Allowance, Rates, Other
+// Information and the live Usage block (issue #253). Users choose which
+// segments show and in what order from the `Deals: sidebar segments` command
+// palette entry: exactly one blank line separates any two visible segments, a
+// segment with no rows (Usage before its first load) leaves no gap, and with
+// every segment hidden the panel hides entirely. The layout persists per
+// machine (v1 `api.kv`, v2 `ctx.storage.store`) and is normalized on every
+// read, so a value from another release can never crash or hide a segment by
+// accident (src/deals/segments.ts).
+//
 // Two hosts, two TUI contracts (ADR-0010), one default export:
 //   v1  `{ id, tui(api) }`        — `api.slots.register({ slots: { sidebar_content } })`
 //   v2  `{ id, setup(context) }`  — `context.ui.slot({ append: "sidebar.content" })`
@@ -20,11 +30,26 @@
 // event bus, v2's `session.idle`/`session.execution.succeeded` data store)
 // and filters it to the panel's session before waking the refresh policy.
 import { For, Show, createMemo, createSignal, onCleanup, onMount } from "solid-js"
+import { useKeyboard } from "@opentui/solid"
 import type { RGBA } from "@opentui/core"
 import type { Provider } from "@opencode-ai/sdk/v2"
 import type { TuiPlugin, TuiPluginApi, TuiPluginModule } from "@opencode-ai/plugin/tui"
 import { DEAL_SOURCE_URL, PLAN_CATALOG } from "./catalog.js"
 import { discountLabel, formatRate, todayIso } from "./format.js"
+import {
+  DEALS_LAYOUT_KEY,
+  DEALS_SEGMENT_LABELS,
+  defaultLayout,
+  moveSegment,
+  normalizeLayout,
+  resetLayout,
+  segmentKeyIntent,
+  toggleSegment,
+  visibleSegments,
+  type DealsLayout,
+  type DealsSegmentId,
+  type SegmentsKeyIntent,
+} from "./segments.js"
 import { renderUsageRows } from "./usage.js"
 import {
   createUsagePanel,
@@ -39,6 +64,7 @@ import type { PlanId } from "../catalog/plans.js"
 import type {
   V2TuiContext,
   V2TuiFeedbackColor,
+  V2TuiKeymapCommand,
   V2TuiModel,
   V2TuiPluginDefinition,
   V2TuiTheme,
@@ -219,50 +245,81 @@ function ratesRows(c: Cmd, base: CmdRates | undefined): DealsRow[] {
 }
 
 /**
- * Renders the `cmd` payload (identical on both hosts) into sidebar rows,
- * segmented: tier/status, an `Allowance` heading over one row per rendered
- * plan, a `Rates` heading over the published bands (or the model's actual
- * price), then an `Other Information` heading over the deal/benchmark rows —
- * blank lines between segments. The row set is fixed: every row renders for
- * every Command Code model, and a row the payload says nothing about reads
- * `N/A`. An unavailable catalog leads with the banner and reads `N/A` on every
- * row — no half-trusted values behind it.
+ * One rendered segment block; the composer joins them. The Usage block is not
+ * built from the payload — the panel fills it from the live usage state at
+ * compose time — so `dealSegments` leaves it empty.
  */
-function cmdRows(cmd: Cmd | undefined, base: CmdRates | undefined, today: string): DealsRow[] {
-  const unavailable = cmd?.unavailable === true
-  const c: Cmd = unavailable ? {} : (cmd ?? {})
-  const rows: DealsRow[] = []
-  if (unavailable) {
-    rows.push([`Deals unavailable — ${DEAL_SOURCE_URL}`, ""])
-  }
-  rows.push(["Tier", typeof c.tier === "string" ? tierDisplay(c.tier) : NA])
-  rows.push(["Status", c.free === true ? "FREE" : c.free === false ? "Paid" : NA])
-  rows.push(["", ""])
-  rows.push(["Allowance", "", "heading"])
+export interface DealsSegments {
+  /** The `Deals unavailable` banner rows, pinned above the visible segments. */
+  banner: DealsRow[]
+  segments: Record<DealsSegmentId, DealsRow[]>
+}
+
+/** The Tier/Status block: the model's tier and free/paid state. */
+function statusRows(c: Cmd): DealsRow[] {
+  return [
+    ["Tier", typeof c.tier === "string" ? tierDisplay(c.tier) : NA],
+    ["Status", c.free === true ? "FREE" : c.free === false ? "Paid" : NA],
+  ]
+}
+
+/** The `Allowance` block: the heading over one row per rendered plan. */
+function allowanceRows(c: Cmd): DealsRow[] {
+  const rows: DealsRow[] = [["Allowance", "", "heading"]]
   for (const plan of PLAN_IDS) {
     const value = c.allowance?.[plan]
     rows.push([planDisplay(plan), typeof value === "number" ? `$${value}/mo` : NA])
   }
-  rows.push(["", ""])
-  rows.push(["Rates", "", "heading"])
-  rows.push(...ratesRows(c, base))
-  rows.push(["", ""])
-  rows.push(["Other Information", "", "heading"])
-  rows.push([
-    "Deal",
-    c.discount && typeof c.discount.pct === "number"
-      ? discountLabel(
-          c.discount.pct,
-          typeof c.discount.endsAt === "string" ? c.discount.endsAt : undefined,
-          today,
-        )
-      : NA,
-  ])
-  rows.push(["Was", rateDisplay(c.was)])
-  rows.push(["Now", rateDisplay(c.now)])
-  rows.push(["Intelligence", benchmarkDisplay(c.benchmark, "intelligence")])
-  rows.push(["Tok/s", benchmarkDisplay(c.benchmark, "tokPerSec")])
   return rows
+}
+
+/** The `Rates` block: the heading over the published bands (or the base price). */
+function ratesSegmentRows(c: Cmd, base: CmdRates | undefined): DealsRow[] {
+  return [["Rates", "", "heading"], ...ratesRows(c, base)]
+}
+
+/** The `Other Information` block: the deal and benchmark rows. */
+function infoRows(c: Cmd, today: string): DealsRow[] {
+  return [
+    ["Other Information", "", "heading"],
+    [
+      "Deal",
+      c.discount && typeof c.discount.pct === "number"
+        ? discountLabel(
+            c.discount.pct,
+            typeof c.discount.endsAt === "string" ? c.discount.endsAt : undefined,
+            today,
+          )
+        : NA,
+    ],
+    ["Was", rateDisplay(c.was)],
+    ["Now", rateDisplay(c.now)],
+    ["Intelligence", benchmarkDisplay(c.benchmark, "intelligence")],
+    ["Tok/s", benchmarkDisplay(c.benchmark, "tokPerSec")],
+  ]
+}
+
+/**
+ * The panel's five segment blocks for one `cmd` payload (identical on both
+ * hosts). The row set inside every segment is fixed: a row the payload says
+ * nothing about reads `N/A` instead of vanishing. An unavailable catalog leads
+ * with the banner and reads `N/A` in every segment — no half-trusted values
+ * behind it. `usage` starts empty and is filled by the composer from the live
+ * state; the banner is pinned by the composer while a catalog segment shows.
+ */
+function dealSegmentsFrom(cmd: Cmd | undefined, base: CmdRates | undefined, today: string): DealsSegments {
+  const unavailable = cmd?.unavailable === true
+  const c: Cmd = unavailable ? {} : (cmd ?? {})
+  return {
+    banner: unavailable ? [[`Deals unavailable — ${DEAL_SOURCE_URL}`, ""]] : [],
+    segments: {
+      status: statusRows(c),
+      allowance: allowanceRows(c),
+      rates: ratesSegmentRows(c, base),
+      info: infoRows(c, today),
+      usage: [],
+    },
+  }
 }
 
 /**
@@ -298,16 +355,29 @@ export function v1ModelFor(
 }
 
 /**
- * v1 model entry: the config hook's enrichment writes the model's provider
+ * v1 segment entry: the config hook's enrichment writes the model's provider
  * options into `options.cmd` (both for auto-registered and declared models),
  * and the host's own model cost feeds the `Rates` fallback for models whose
  * payload publishes no band. An undefined model (no selected model to speak
- * of) yields no rows — the panel's visibility gate; a resolvable model with no
- * `cmd` payload yields the full all-N/A row set.
+ * of) yields no segments — the panel's visibility gate; a resolvable model
+ * with no `cmd` payload yields the full all-N/A segment set.
+ */
+export function dealSegments(
+  model: V1Model | undefined,
+  today: string = todayIso(),
+): DealsSegments | undefined {
+  if (!model) return undefined
+  return dealSegmentsFrom(model.options?.cmd as Cmd | undefined, baseRates(model.cost), today)
+}
+
+/**
+ * The v1 default row set: `dealSegments` composed under the out-of-the-box
+ * layout (every segment, historic order) with no usage state — the shape the
+ * panel rendered before layouts existed. The panel itself composes the live
+ * usage state and the user's layout through `panelRows`.
  */
 export function dealsRows(model: V1Model | undefined, today: string = todayIso()): DealsRow[] {
-  if (!model) return []
-  return cmdRows(model.options?.cmd as Cmd | undefined, baseRates(model.cost), today)
+  return panelRows(dealSegments(model, today), defaultLayout(), undefined)
 }
 
 /**
@@ -335,41 +405,87 @@ export function v2ModelFor(
 }
 
 /**
- * v2 model entry: v2 renamed the model's provider-option bag to `settings`
+ * v2 segment entry: v2 renamed the model's provider-option bag to `settings`
  * (ADR-0010), which is where `enrichCommandCodeModelsV2` writes `cmd`. The
  * model-cost array's untiered entry is the base price behind the `Rates`
  * fallback (tiered entries are the over-context bands the payload already
- * publishes). Gates identically to `dealsRows`: undefined model → no rows, no
- * payload → all-N/A.
+ * publishes). Gates identically to `dealSegments`: undefined model → no
+ * segments, no payload → all-N/A.
  */
+export function dealSegmentsV2(
+  model: V2PanelModel | undefined,
+  today: string = todayIso(),
+): DealsSegments | undefined {
+  if (!model) return undefined
+  const base = model.cost?.find((entry) => entry.tier === undefined)
+  return dealSegmentsFrom(model.settings?.["cmd"] as Cmd | undefined, baseRates(base), today)
+}
+
+/** The v2 default row set — `dealsRows`' rule through the v2 model slice. */
 export function dealsRowsV2(
   model: V2PanelModel | undefined,
   today: string = todayIso(),
 ): DealsRow[] {
-  if (!model) return []
-  const base = model.cost?.find((entry) => entry.tier === undefined)
-  return cmdRows(model.settings?.["cmd"] as Cmd | undefined, baseRates(base), today)
+  return panelRows(dealSegmentsV2(model, today), defaultLayout(), undefined)
+}
+
+/** True for the blank separator row the composer inserts between segments. */
+function isBlankRow(row: DealsRow): boolean {
+  return row[0] === "" && row[1] === ""
 }
 
 /**
- * The panel's full row list: the model's fixed deals rows, then the `Usage`
- * segment (#244). The visibility gate survives composition — an empty deals
- * row list is a non-Command Code selection (or no selection), so the panel
- * stays hidden even while a usage state exists. `now` is the segment's
- * countdown clock — the panel body hands it the 30-second tick's instant
- * (#245) so countdown text re-renders without a fetch.
+ * A segment's rows without leading/trailing blank separators, so a segment
+ * that ships its own edge blanks (the usage renderer carries a leading one)
+ * composes without doubling them.
+ */
+function trimBlankEdges(rows: readonly DealsRow[]): DealsRow[] {
+  let start = 0
+  let end = rows.length
+  while (start < end) {
+    const first = rows[start]
+    if (first === undefined || !isBlankRow(first)) break
+    start += 1
+  }
+  while (end > start) {
+    const last = rows[end - 1]
+    if (last === undefined || !isBlankRow(last)) break
+    end -= 1
+  }
+  return rows.slice(start, end)
+}
+
+/**
+ * The panel's full row list (issues #244, #253): the segments the user's
+ * layout renders, in the layout's order, joined by exactly one blank line —
+ * a segment with no rows (still-loading Usage, or one that renders empty)
+ * leaves no gap, and every segment hidden reads `[]`, so the panel hides
+ * entirely. The visibility gate survives composition: an undefined `segments`
+ * (a non-Command Code selection, or no selection) means no panel even while a
+ * usage state exists. The `Deals unavailable` banner stays pinned above the
+ * segments, but only while at least one catalog segment (anything but Usage)
+ * is visible — a Usage-only panel carries no catalog warning. `now` is the
+ * countdown clock the panel body hands in from its 30-second tick (#245).
  */
 export function panelRows(
-  deals: DealsRow[],
+  segments: DealsSegments | undefined,
+  layout: DealsLayout,
   usage: UsagePanelState | undefined,
   now?: number,
 ): DealsRow[] {
-  if (deals.length === 0) return []
-  // Before the first load settles there is no segment at all: an undefined
-  // state is "still loading", not the resolver's miss, so no notice flashes
-  // while the mount chain is in flight.
-  if (usage === undefined) return deals
-  return [...deals, ...renderUsageRows(usage.result, { now })]
+  if (segments === undefined) return []
+  const visible = visibleSegments(layout)
+  const usageRows = usage === undefined ? [] : renderUsageRows(usage.result, { now })
+  const blocks = visible
+    .map((segment) => trimBlankEdges(segment === "usage" ? usageRows : segments.segments[segment]))
+    .filter((rows) => rows.length > 0)
+  const banner = visible.some((segment) => segment !== "usage") ? segments.banner : []
+  const rows: DealsRow[] = [...banner]
+  for (const [index, block] of blocks.entries()) {
+    if (index > 0) rows.push(["", ""])
+    rows.push(...block)
+  }
+  return rows
 }
 
 const id = "commandcode.deals"
@@ -417,6 +533,303 @@ function DealsPanel(props: {
     </Show>
   )
 }
+
+/**
+ * The v1 layout, read reactively from the host's shared KV store (ADR-0020's
+ * TUI host state): `api.kv.get` reads its Solid store under the hood, so a
+ * dialog save repaints every mounted panel without a local signal. The
+ * normalizer tolerates whatever the store holds, foreign keys included.
+ */
+export function v1Layout(api: TuiPluginApi): DealsLayout {
+  return normalizeLayout(api.kv.get(DEALS_LAYOUT_KEY))
+}
+
+/** Persists a v1 layout; the KV store writes through to `state/kv.json`. */
+export function saveV1Layout(api: TuiPluginApi, layout: DealsLayout): void {
+  api.kv.set(DEALS_LAYOUT_KEY, layout)
+}
+
+/** The v2 layout store the panel and the dialog share. */
+export interface V2LayoutStore {
+  layout: () => DealsLayout
+  save: (layout: DealsLayout) => void
+}
+
+/**
+ * Creates the v2 layout store once per plugin activation: the host persists
+ * and live-syncs it, namespacing the key with the plugin id itself. The
+ * normalized read tolerates a shape from another release; a save rewrites
+ * both arrays so the stored value stays the plain JSON shape.
+ */
+export function createV2LayoutStore(ctx: V2TuiContext): V2LayoutStore {
+  const [stored, mutate] = ctx.storage.store(DEALS_LAYOUT_KEY, { initial: defaultLayout() })
+  return {
+    layout: () => normalizeLayout(stored),
+    save: (layout) => {
+      void mutate((draft) => {
+        draft.order = [...layout.order]
+        draft.hidden = [...layout.hidden]
+      })
+    },
+  }
+}
+
+/**
+ * The segment-settings dialog: one row per segment in the current order — the
+ * cursor, a visibility box, and the label — plus the key hints. The key map
+ * is `segmentKeyIntent` (arrows move the cursor, shift+arrows move the
+ * segment, space/enter toggle, `r` resets, escape closes); every change saves
+ * immediately, so the panel behind the dialog repaints live. Hidden segments
+ * keep their position, so unhiding restores the user's order.
+ *
+ * Keys arrive one of two ways because the hosts differ: v2's raw
+ * `useKeyboard` sees them (the palette leaves no textarea focused), while v1
+ * hands key handling to the caller through `bindKeys` — the prompt's managed
+ * textarea layer owns the arrows at default priority, so the v1 mount
+ * registers a `priority: 1` keymap layer for the dialog's lifetime instead
+ * (`bindV1DialogKeys`). `bindKeys` returns the layer's disposer, run with the
+ * component.
+ */
+function SegmentsDialog(props: {
+  layout: () => DealsLayout
+  save: (layout: DealsLayout) => void
+  close: () => void
+  text: () => RGBA
+  muted: () => RGBA
+  accent: () => RGBA
+  bindKeys?: (handle: (intent: SegmentsKeyIntent) => void) => () => void
+}) {
+  const [cursor, setCursor] = createSignal(0)
+
+  const order = () => props.layout().order
+  const current = () => order()[cursor()]
+
+  const moveCursor = (delta: -1 | 1) => {
+    const count = order().length
+    if (count === 0) return
+    setCursor((index) => (index + delta + count) % count)
+  }
+
+  const handle = (intent: SegmentsKeyIntent): void => {
+    if (intent === "close") {
+      props.close()
+      return
+    }
+    if (intent === "up" || intent === "down") {
+      moveCursor(intent === "up" ? -1 : 1)
+      return
+    }
+    const segment = current()
+    if (segment === undefined) return
+    if (intent === "toggle") {
+      props.save(toggleSegment(props.layout(), segment))
+      return
+    }
+    if (intent === "move-up" || intent === "move-down") {
+      const next = moveSegment(props.layout(), segment, intent === "move-up" ? -1 : 1)
+      props.save(next)
+      // Keep the cursor on the segment the user just moved.
+      const index = next.order.indexOf(segment)
+      if (index !== -1) setCursor(index)
+      return
+    }
+    if (intent === "reset") {
+      props.save(resetLayout())
+      setCursor(0)
+    }
+  }
+
+  if (props.bindKeys) onCleanup(props.bindKeys(handle))
+
+  useKeyboard((event) => {
+    // The v1 mount routes keys through its own keymap layer; consuming them
+    // here too would double-apply every press.
+    if (props.bindKeys) return
+    const intent = segmentKeyIntent(event)
+    if (intent === undefined) return
+    event.preventDefault()
+    event.stopPropagation()
+    handle(intent)
+  })
+
+  return (
+    <box gap={1}>
+      <box flexDirection="row" justifyContent="space-between" paddingLeft={2} paddingRight={2}>
+        <text fg={props.text()}>
+          <b>Sidebar segments</b>
+        </text>
+        <text fg={props.muted()} onMouseUp={() => props.close()}>
+          esc
+        </text>
+      </box>
+      <box paddingLeft={2} paddingRight={2}>
+        <text fg={props.muted()}>Choose what the Command Code sidebar shows.</text>
+      </box>
+      <box flexDirection="column">
+        <For each={order()}>
+          {(segment, index) => {
+            const active = () => index() === cursor()
+            const shown = () => !props.layout().hidden.includes(segment)
+            return (
+              <box flexDirection="row" gap={1} paddingLeft={2} paddingRight={2}>
+                <text fg={active() ? props.accent() : props.muted()}>{active() ? "›" : " "}</text>
+                <text fg={shown() ? props.text() : props.muted()}>{shown() ? "[x]" : "[ ]"}</text>
+                <text fg={shown() ? props.text() : props.muted()}>
+                  {active() ? <b>{DEALS_SEGMENT_LABELS[segment]}</b> : DEALS_SEGMENT_LABELS[segment]}
+                </text>
+              </box>
+            )
+          }}
+        </For>
+      </box>
+      <box paddingLeft={2} paddingRight={2}>
+        <text fg={props.muted()}>space show/hide · shift+↑↓ move · r reset</text>
+      </box>
+    </box>
+  )
+}
+
+/**
+ * The dialog's v1 keyboard handling: the prompt's managed textarea layer
+ * (`input.move.up`/`input.move.down`, `input.newline`, …) owns the focused
+ * prompt at default priority, so arrows never reach a raw `useKeyboard`
+ * handler while a session prompt is mounted. Registering the dialog's keys as
+ * a `priority: 1` layer for the dialog's lifetime wins the dispatch — the
+ * same way the host's own `DialogSelect` wins it through its focused filter
+ * input. Returns the layer's disposer, run with the component.
+ */
+export function bindV1DialogKeys(
+  keymap: V1Keymap,
+  handle: (intent: SegmentsKeyIntent) => void,
+): () => void {
+  const name = (intent: SegmentsKeyIntent) => `commandcode.deals.segments.${intent}`
+  return keymap.registerLayer({
+    priority: 1,
+    commands: [
+      { name: name("up"), run: () => handle("up") },
+      { name: name("down"), run: () => handle("down") },
+      { name: name("move-up"), run: () => handle("move-up") },
+      { name: name("move-down"), run: () => handle("move-down") },
+      { name: name("toggle"), run: () => handle("toggle") },
+      { name: name("reset"), run: () => handle("reset") },
+      { name: name("close"), run: () => handle("close") },
+    ],
+    bindings: [
+      { key: "up", cmd: name("up") },
+      { key: "down", cmd: name("down") },
+      { key: "shift+up", cmd: name("move-up") },
+      { key: "shift+down", cmd: name("move-down") },
+      { key: "space", cmd: name("toggle") },
+      { key: "return", cmd: name("toggle") },
+      { key: "r", cmd: name("reset") },
+      { key: "escape", cmd: name("close") },
+    ],
+  })
+}
+
+/**
+ * Opens the segment settings on v1 through the host dialog stack. The dialog
+ * reads and writes the KV layout directly, so it and the panel stay in sync.
+ * Keys ride the host keymap through `bindKeys` (`bindV1DialogKeys`); a host
+ * without a keymap still renders the panel — its dialog falls back to the raw
+ * keyboard handler, which the prompt's textarea layer may shadow.
+ */
+export function openV1SegmentsDialog(api: TuiPluginApi): void {
+  const keymap = api.keymap as V1Keymap | undefined
+  api.ui.dialog.replace(() => (
+    <SegmentsDialog
+      layout={() => v1Layout(api)}
+      save={(layout) => saveV1Layout(api, layout)}
+      close={() => api.ui.dialog.clear()}
+      text={() => api.theme.current.text}
+      muted={() => api.theme.current.textMuted}
+      accent={() => api.theme.current.primary}
+      bindKeys={keymap === undefined ? undefined : (handle) => bindV1DialogKeys(keymap, handle)}
+    />
+  ))
+}
+
+/**
+ * Opens the segment settings on v2 through the host dialog stack, reading and
+ * writing the shared layout store the panel already renders from. v2's theme
+ * exposes no accent token in the slice this package mirrors, so the cursor
+ * accent reads as the panel's text colour.
+ */
+export function openV2SegmentsDialog(ctx: V2TuiContext, store: V2LayoutStore): void {
+  const colors = () => v2ThemeColors(ctx.theme)
+  ctx.ui.dialog.show(() => (
+    <SegmentsDialog
+      layout={store.layout}
+      save={store.save}
+      close={() => ctx.ui.dialog.clear()}
+      text={() => colors().text}
+      muted={() => colors().muted}
+      accent={() => colors().text}
+    />
+  ))
+}
+
+/**
+ * The v1 keymap slice (1.18.x `@opentui/keymap`'s `Layer`/`Command`): the
+ * package that types `TuiPluginApi.keymap` is provided by the host, not
+ * installed here, so the shape is mirrored. The palette fields are the ones
+ * the host's own legacy `api.command` shim registers (`namespace`, `name`,
+ * `title`, `desc`, `category`), and `run` ignores its command context exactly
+ * as the shim does.
+ */
+type V1PaletteCommand = {
+  namespace: "palette"
+  name: string
+  title: string
+  desc?: string
+  category?: string
+  run: () => void
+}
+
+/** One layer command: a name and its runner, plus any host metadata fields. */
+type V1KeymapCommand = { name: string; run: () => void; [field: string]: unknown }
+
+/** One binding: a key and the command name it dispatches. */
+type V1KeymapBinding = { key: string; cmd: string }
+
+/**
+ * The v1 layer slice: the palette command registers alone; the dialog's
+ * lifetime layer registers named commands plus their bindings at
+ * `priority: 1` (see `bindV1DialogKeys`).
+ */
+interface V1KeymapLayer {
+  priority?: number
+  commands: V1KeymapCommand[]
+  bindings?: V1KeymapBinding[]
+}
+
+interface V1Keymap {
+  registerLayer: (layer: V1KeymapLayer) => () => void
+}
+
+/**
+ * Registers the `Deals: sidebar segments` palette command on v1 through
+ * `api.keymap.registerLayer` — the host's current command channel, which the
+ * deprecated `api.command` shim only forwards to (with a warning). Feature
+ * detected: a host without a keymap still renders the panel, just without the
+ * dialog entry.
+ */
+export function registerV1SegmentsCommand(api: TuiPluginApi): void {
+  const keymap = api.keymap as V1Keymap | undefined
+  keymap?.registerLayer({
+    commands: [
+      {
+        namespace: "palette",
+        name: "commandcode.deals.segments",
+        title: "Deals: sidebar segments",
+        desc: "Show, hide and reorder the Command Code sidebar segments",
+        category: "Command Code",
+        run: () => openV1SegmentsDialog(api),
+      },
+    ],
+  })
+}
+
 
 /**
  * The v1 half's live credential input (ADR-0020): the provider records the
@@ -485,7 +898,7 @@ function CmdPanelV1(props: { api: TuiPluginApi; sessionID: string; model: () => 
   )
   return (
     <DealsPanel
-      rows={() => panelRows(dealsRows(props.model()), usage(), now())}
+      rows={() => panelRows(dealSegments(props.model()), v1Layout(props.api), usage(), now())}
       text={() => props.api.theme.current.text}
       textMuted={() => props.api.theme.current.textMuted}
       tone={(tone) => props.api.theme.current[tone]}
@@ -569,7 +982,12 @@ export function subscribeV2Idle(
  * bridge (ADR-0020): the plugin's server half resolves the Host's connected
  * credential and fetches the snapshot; this process never holds the key.
  */
-function CmdPanelV2(props: { ctx: V2TuiContext; sessionID: string; model: () => V2PanelModel }) {
+function CmdPanelV2(props: {
+  ctx: V2TuiContext
+  sessionID: string
+  model: () => V2PanelModel
+  layout: V2LayoutStore
+}) {
   const [usage, setUsage] = createSignal<UsagePanelState | undefined>(undefined)
   const [now, setNow] = createSignal(Date.now())
   const usagePanel = createUsagePanel(createUsageRpcLoader(props.ctx.client), {
@@ -587,7 +1005,7 @@ function CmdPanelV2(props: { ctx: V2TuiContext; sessionID: string; model: () => 
   const colors = () => v2ThemeColors(props.ctx.theme)
   return (
     <DealsPanel
-      rows={() => panelRows(dealsRowsV2(props.model()), usage(), now())}
+      rows={() => panelRows(dealSegmentsV2(props.model()), props.layout.layout(), usage(), now())}
       text={() => colors().text}
       textMuted={() => colors().muted}
       tone={(tone) => colors()[tone]}
@@ -595,20 +1013,28 @@ function CmdPanelV2(props: { ctx: V2TuiContext; sessionID: string; model: () => 
   )
 }
 
-function DealsPanelV2(props: { ctx: V2TuiContext; sessionID: string }) {
+function DealsPanelV2(props: { ctx: V2TuiContext; sessionID: string; layout: V2LayoutStore }) {
   // Same idea as v1 against the v2 data store: `data` is the host's live
   // client-local state, so reading the session's model and the model catalog
   // inside the memo re-renders the panel when either changes.
   const model = createMemo(() => v2ModelFor(props.ctx.data, props.sessionID))
   return (
     <Show when={model()}>
-      {(selected) => <CmdPanelV2 ctx={props.ctx} sessionID={props.sessionID} model={selected} />}
+      {(selected) => (
+        <CmdPanelV2
+          ctx={props.ctx}
+          sessionID={props.sessionID}
+          model={selected}
+          layout={props.layout}
+        />
+      )}
     </Show>
   )
 }
 
 /** v1 half: snake_case slot map registered through `api.slots`. */
 const tui: TuiPlugin = async (api) => {
+  registerV1SegmentsCommand(api)
   api.slots.register({
     order: 200,
     slots: {
@@ -619,11 +1045,54 @@ const tui: TuiPlugin = async (api) => {
   })
 }
 
-/** v2 half: `setup(context)` claiming the dot-separated `"sidebar.content"` path. */
+/**
+ * The v2 palette command (issue #253): `palette: true` surfaces it in the
+ * host command palette; running it opens the segment settings.
+ */
+export function v2SegmentsCommand(
+  ctx: V2TuiContext,
+  layout: V2LayoutStore,
+): V2TuiKeymapCommand {
+  return {
+    id: "commandcode.deals.segments",
+    title: "Deals: sidebar segments",
+    description: "Show, hide and reorder the Command Code sidebar segments",
+    group: "Command Code",
+    palette: true,
+    run: () => openV2SegmentsDialog(ctx, layout),
+  }
+}
+
+/**
+ * The v2 command layer, rendered as a headless component through the `app`
+ * slot. Two host constraints meet here (both measured on opencode 2.0.20):
+ * `keymap.layer` is a Solid context owned by the calling component, so
+ * calling it from `setup` throws `Keymap.Provider is missing` and takes the
+ * whole plugin — sidebar included — down with it; and the layer must be
+ * `mode: "global"`, because layers default to `base` and the command palette
+ * queries *reachable* commands while its own modal dialog is open, where a
+ * base-mode layer is unreachable and the entry silently vanishes. The `app`
+ * slot mounts on every route under that provider, so the palette entry exists
+ * before any session opens; the component renders nothing.
+ */
+function SegmentsCommandLayer(props: { ctx: V2TuiContext; layout: V2LayoutStore }) {
+  props.ctx.keymap.layer(() => ({
+    mode: "global",
+    commands: [v2SegmentsCommand(props.ctx, props.layout)],
+  }))
+  return null
+}
+
+/** v2 half: `setup(context)` claiming the headless command layer and the sidebar. */
 const setup = (ctx: V2TuiContext): void => {
+  const layout = createV2LayoutStore(ctx)
+  ctx.ui.slot({
+    append: "app",
+    render: () => <SegmentsCommandLayer ctx={ctx} layout={layout} />,
+  })
   ctx.ui.slot({
     append: "sidebar.content",
-    render: (input) => <DealsPanelV2 ctx={ctx} sessionID={input.sessionID} />,
+    render: (input) => <DealsPanelV2 ctx={ctx} sessionID={input.sessionID} layout={layout} />,
   })
 }
 
