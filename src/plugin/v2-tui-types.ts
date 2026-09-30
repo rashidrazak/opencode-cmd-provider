@@ -14,8 +14,10 @@
 // `@opencode/plugin@2.0.3` (`dist/tui/context.d.ts`) and
 // `@opencode/theme@2.0.3` (`dist/tui/types.d.ts`), except the theme slice,
 // which spans the `@opencode/theme@2.0.8` `text.default`/`text.subdued` →
-// `text.base`/`text.muted` rename (see V2TuiThemeText) because the supported
-// v2.0.x line includes both spellings, the client's RPC subclient slice the
+// `text.base`/`text.muted` rename — and the same rename on the
+// `text.feedback.{success,warning,error}` pair the usage bars colour by (see
+// `V2TuiThemeText`) — because the supported v2.0.x line includes both
+// spellings, the client's RPC subclient slice the
 // usage bridge calls (`@opencode/client@2.0.3`'s `OpenCodeClient.rpc`;
 // re-checked against 2.0.19 — the TUI context's `client` is present from
 // 2.0.3 through 2.0.20), and the data store's turn events the usage refresh
@@ -77,11 +79,26 @@ export type V2TuiThemeText =
   | {
       readonly base: RGBA
       readonly muted: RGBA
+      readonly feedback: V2TuiFeedback
     }
   | {
       readonly default: RGBA
       readonly subdued: RGBA
+      readonly feedback: V2TuiFeedback
     }
+
+/**
+ * One `text.feedback` colour (success/warning/error). The pair was renamed
+ * with the text colours — `base`/`muted` on the newer line, `default`/
+ * `subdued` on 2.0.3–2.0.7 — and the usage bars read whichever is present.
+ */
+export type V2TuiFeedbackColor = { readonly base: RGBA } | { readonly default: RGBA }
+
+/** The feedback kinds the usage bars colour by (`info` is not used). */
+export type V2TuiFeedbackKind = "success" | "warning" | "error"
+
+/** The `text.feedback` slice: one colour per kind. */
+export type V2TuiFeedback = Readonly<Record<V2TuiFeedbackKind, V2TuiFeedbackColor>>
 
 export interface V2TuiTheme {
   readonly text: V2TuiThemeText

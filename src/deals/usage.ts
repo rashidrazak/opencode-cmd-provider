@@ -32,10 +32,14 @@
 // as `cmd_plan_summary`'s lookup is (ADR-0011) — never a default, and never
 // riding on a subscription the account no longer holds.
 //
-// The renderer pins the segment: a `Usage` heading, the 5-hour/weekly meters,
-// the monthly meter with renewal days, the muted cycle-totals line (requests,
-// tokens, spend), the muted provenance line, and every degradation variant —
-// no credential, no rolling windows (pay-as-you-go), idle window, unavailable.
+// The renderer pins the segment: a `Usage` heading, one sub-section per meter
+// (label, progress bar, `used / cap` detail with the countdown or renewal),
+// then the summary sub-section — tokens in/out, requests, spend, and the
+// purchased extra-credit balance — plus every degradation variant: no
+// credential, no rolling windows (pay-as-you-go), idle window, unavailable.
+// A bar fills 33 cells of the 37-character sidebar column (the percentage
+// field reserves four) to the nearest half cell, keeps its end cap, and
+// carries a colour token by progress (green ≤ 40%, yellow ≤ 80%, red above).
 // Percent is a clamped integer, money two decimals, tokens compact, and reset
 // countdowns mirror the CLI's own duration format. It takes `now` so a render
 // stays a function of its inputs (the ticking clock is the panel's, #245).
@@ -46,7 +50,7 @@ import { normalizePlan, PLAN_BEARING_SUBSCRIPTION_STATUSES, type PlanId } from "
 import { getApiBase } from "../env.js"
 import { isRecord, numberValue, stringValue } from "../provider/converters.js"
 import { PLAN_CATALOG, type PlanInfo } from "./catalog.js"
-import type { DealsRow } from "./tui.js"
+import type { DealsRow, DealsRowTone } from "./tui.js"
 
 /** Abort budget for each billing request, mirroring the plan lookup. */
 const REQUEST_TIMEOUT_MS = 5000
@@ -97,6 +101,8 @@ export interface UsageSnapshot {
   fiveHour?: UsageWindow
   weekly?: UsageWindow
   monthly?: UsageMonthly
+  /** The purchased extra-credit balance remaining, in credit dollars. */
+  purchasedCredits?: number
   totals?: UsageTotals
   /** Epoch milliseconds of the subscription period end (renewal basis). */
   periodEnd?: number
@@ -288,6 +294,7 @@ function hasUsageData(snapshot: UsageSnapshot): boolean {
     snapshot.fiveHour !== undefined ||
     snapshot.weekly !== undefined ||
     snapshot.monthly !== undefined ||
+    snapshot.purchasedCredits !== undefined ||
     snapshot.totals !== undefined
   )
 }
@@ -387,6 +394,9 @@ export async function fetchUsageSnapshot(options: FetchUsageOptions = {}): Promi
     summaryRecord === undefined ? undefined : numberValue(summaryRecord.totalMonthlyCredits),
     bundle?.credits,
   )
+  // The extra-credit balance is the CLI's `Extra Credits` figure (its
+  // `purchasedCredits`); negative values are unreadable and clamp to zero.
+  const purchasedCredits = credits === undefined ? undefined : numberValue(credits.purchasedCredits)
 
   const snapshot: UsageSnapshot = {}
   if (plan !== undefined) snapshot.plan = plan
@@ -394,6 +404,7 @@ export async function fetchUsageSnapshot(options: FetchUsageOptions = {}): Promi
   if (fiveHour !== undefined) snapshot.fiveHour = fiveHour
   if (weekly !== undefined) snapshot.weekly = weekly
   if (monthly !== undefined) snapshot.monthly = monthly
+  if (purchasedCredits !== undefined) snapshot.purchasedCredits = Math.max(0, purchasedCredits)
   const totals = parseTotals(summaryRecord)
   if (totals !== undefined) snapshot.totals = totals
   if (periodEnd !== undefined) snapshot.periodEnd = periodEnd
@@ -414,29 +425,27 @@ const DAY_MS = 86_400_000
 const SEP = " · "
 
 export interface RenderUsageOptions {
-  /**
-   * The credential rung the snapshot was fetched with, rendered as the muted
-   * `via …` line. Display data only: the key never travels with it, so no
-   * rendering path can leak one (ADR-0015 rule 4, ADR-0017 rule 1).
-   */
-  provenance?: UsageCredentialSource
   /** Clock for countdowns and renewal days (defaults to Date.now()). */
   now?: number
 }
 
 /**
- * The credential rung behind a lookup, for the provenance line: the resolver
- * (#243) reports one of these — the same three display rungs the plan summary
+ * The credential rung behind a lookup, as the host loaders report it: the
+ * resolver (#243) names one of the same three display rungs the plan summary
  * names (Host connection / `COMMANDCODE_API_KEY` / a legacy file's label).
+ * The usage panel no longer renders it; the rung stays display data only, and
+ * the key never travels with it (ADR-0015 rule 4, ADR-0017 rule 1).
  */
 export type UsageCredentialSource =
   { kind: "host" } | { kind: "environment" } | { kind: "file"; label: string }
 
 /**
- * The `Usage` segment rows: a leading blank separator, then the heading. A
- * missing result is the no-credential state (the resolver found nothing,
- * #243) and every other state maps to its own degradation line. Pure:
- * countdowns and renewal days come from `options.now`.
+ * The `Usage` segment rows: a leading blank separator, then the heading over
+ * up to four sub-sections — 5-hour, Weekly, Monthly (label, bar, detail) and
+ * the summary — blank-line separated. A missing result is the no-credential
+ * state (the resolver found nothing, #243) and every other state maps to its
+ * own degradation line. Pure: countdowns and renewal days come from
+ * `options.now`.
  */
 export function renderUsageRows(
   result: UsageResult | undefined,
@@ -463,55 +472,107 @@ export function renderUsageRows(
     return rows
   }
   const now = options.now ?? Date.now()
+  const sections: DealsRow[][] = []
   if (snapshot.limited === false) {
     // `limited: false` is the pay-as-you-go shape (extra credits bypass the
     // windows), so the rolling meters are explained away, not rendered.
-    rows.push([PAY_AS_YOU_GO_LINE, "", "value"])
+    sections.push([[PAY_AS_YOU_GO_LINE, "", "value"]])
   } else {
-    if (snapshot.fiveHour !== undefined) rows.push(meterRow("5-hour", snapshot.fiveHour, now, ""))
-    if (snapshot.weekly !== undefined) rows.push(meterRow("Weekly", snapshot.weekly, now, ""))
+    if (snapshot.fiveHour !== undefined) {
+      sections.push(
+        meterSection("5-hour", snapshot.fiveHour, resetSuffix(snapshot.fiveHour.resetAt, now)),
+      )
+    }
+    if (snapshot.weekly !== undefined) {
+      sections.push(
+        meterSection("Weekly", snapshot.weekly, resetSuffix(snapshot.weekly.resetAt, now)),
+      )
+    }
   }
   if (snapshot.monthly !== undefined) {
-    rows.push(meterRow("Monthly", snapshot.monthly, now, renewalSuffix(snapshot.periodEnd, now)))
+    sections.push(meterSection("Monthly", snapshot.monthly, renewalSuffix(snapshot.periodEnd, now)))
   }
-  const cycle = snapshot.totals === undefined ? undefined : cycleLine(snapshot.totals)
-  if (cycle !== undefined) rows.push([cycle, "", "value"])
-  if (options.provenance !== undefined) {
-    rows.push([provenanceLine(options.provenance), "", "value"])
+  const summary = summarySection(snapshot)
+  if (summary.length > 0) sections.push(summary)
+  for (const [index, section] of sections.entries()) {
+    if (index > 0) rows.push(["", ""])
+    rows.push(...section)
   }
   return rows
 }
 
+/** The sidebar column the segment lays out against: bar + percentage field. */
+const USAGE_COLUMN = 37
+/** The reserved percentage field: three digits plus the sign (`  6%`, `100%`). */
+const PERCENT_FIELD = 4
+/** The bar's width: the column minus the reserved percentage field. */
+const BAR_WIDTH = USAGE_COLUMN - PERCENT_FIELD
+
+const BAR_FULL = "█"
+const BAR_HALF = "▌"
+const BAR_EMPTY = "·"
+const BAR_END = "▏"
+
 /**
- * One meter row: `$used / $cap · N%` plus a reset countdown when the window is
- * active, `$used used` when no cap is known, and the caller's suffix (the
- * monthly meter's renewal days) at the end.
+ * One meter's bar: whole cells for the filled share, a half cell at the
+ * boundary, dots for the rest, and the end cap in the last cell. The fill
+ * rounds to the nearest half cell, so `100%` still keeps the cap visible.
  */
-function meterRow(
+function usageBar(percent: number): string {
+  const cells = BAR_WIDTH - 1
+  const halves = Math.round((percent / 100) * cells * 2)
+  const full = Math.floor(halves / 2)
+  const half = halves % 2
+  return `${BAR_FULL.repeat(full)}${half === 1 ? BAR_HALF : ""}${BAR_EMPTY.repeat(cells - full - half)}${BAR_END}`
+}
+
+/** The reserved, right-aligned percentage text (`  6%`, ` 36%`, `100%`). */
+function percentText(percent: number): string {
+  return `${String(percent).padStart(3)}%`
+}
+
+/** The bar's colour token by progress: green ≤ 40, yellow ≤ 80, red above. */
+function usageTone(percent: number): DealsRowTone {
+  if (percent > 80) return "error"
+  if (percent > 40) return "warning"
+  return "success"
+}
+
+/**
+ * One meter sub-section: the muted label, the bar with its percentage field
+ * (only when a cap exists — no cap, no fabricated percentage), then the muted
+ * `$used / $cap` detail with the caller's countdown/renewal suffix.
+ */
+function meterSection(
   label: string,
-  meter: { used: number; cap?: number; resetAt?: number },
-  now: number,
+  meter: { used: number; cap?: number },
   suffix: string,
-): DealsRow {
-  let value =
+): DealsRow[] {
+  const rows: DealsRow[] = [[label, "", "value"]]
+  if (meter.cap !== undefined) {
+    const percent = percentOf(meter.used, meter.cap)
+    rows.push([usageBar(percent), percentText(percent), "bar", usageTone(percent)])
+  }
+  const value =
     meter.cap === undefined
       ? `${money(meter.used)} used`
-      : `${money(meter.used)} / ${money(meter.cap)}${SEP}${percentOf(meter.used, meter.cap)}%`
-  if (meter.resetAt !== undefined && meter.resetAt > now) {
-    value += `${SEP}resets in ${formatDuration(meter.resetAt - now)}`
-  }
-  return [label, value + suffix]
+      : `${money(meter.used)} / ${money(meter.cap)}`
+  rows.push([suffix === "" ? value : `${value}${SEP}${suffix}`, "", "value"])
+  return rows
+}
+
+/** The active window's countdown, or nothing for an idle window. */
+function resetSuffix(resetAt: number | undefined, now: number): string {
+  return resetAt !== undefined && resetAt > now ? formatDuration(resetAt - now) : ""
 }
 
 /**
  * Days to the subscription renewal, mirroring the CLI: whole days from `ceil`,
- * floored at 0 so a just-rolled period reads "renews today" rather than a
- * negative count.
+ * floored at 0 so a just-rolled period never counts negative.
  */
 function renewalSuffix(periodEnd: number | undefined, now: number): string {
   if (periodEnd === undefined) return ""
-  const days = Math.max(0, Math.ceil((periodEnd - now) / DAY_MS))
-  return days === 0 ? `${SEP}renews today` : `${SEP}renews in ${days}d`
+  return `${Math.max(0, Math.ceil((periodEnd - now) / DAY_MS))}d`
 }
 
 /** The CLI's clamped meter percent: a zero cap reads 0, an over-cap window 100. */
@@ -535,33 +596,31 @@ function formatDuration(ms: number): string {
   return `${rest}m`
 }
 
-/** The muted cycle-totals line: requests, tokens (in/out detail), spend. */
-function cycleLine(totals: UsageTotals): string | undefined {
-  const parts: string[] = []
-  if (totals.requests !== undefined) {
-    parts.push(`${totals.requests.toLocaleString("en-US")} requests`)
+/**
+ * The summary sub-section: the cycle's token counts (in/out, or the total
+ * when the split is absent), requests, spend, and the purchased extra-credit
+ * balance. Whatever the summary leg said nothing about renders no row.
+ */
+function summarySection(snapshot: UsageSnapshot): DealsRow[] {
+  const rows: DealsRow[] = []
+  const totals = snapshot.totals
+  if (totals?.tokensIn !== undefined) rows.push(["Token In", compact(totals.tokensIn)])
+  if (totals?.tokensOut !== undefined) rows.push(["Token Out", compact(totals.tokensOut)])
+  if (
+    totals?.tokens !== undefined &&
+    totals.tokensIn === undefined &&
+    totals.tokensOut === undefined
+  ) {
+    rows.push(["Tokens", compact(totals.tokens)])
   }
-  const tokens = tokenText(totals)
-  if (tokens !== undefined) parts.push(tokens)
-  if (totals.cost !== undefined) parts.push(`${money(totals.cost)} spent`)
-  return parts.length === 0 ? undefined : `This cycle: ${parts.join(SEP)}`
-}
-
-function tokenText(totals: UsageTotals): string | undefined {
-  const { tokens, tokensIn, tokensOut } = totals
-  if (tokens === undefined) {
-    if (tokensIn !== undefined && tokensOut !== undefined) {
-      return `${compact(tokensIn)} in / ${compact(tokensOut)} out tokens`
-    }
-    if (tokensIn !== undefined) return `${compact(tokensIn)} in tokens`
-    if (tokensOut !== undefined) return `${compact(tokensOut)} out tokens`
-    return undefined
+  if (totals?.requests !== undefined) {
+    rows.push(["Request", totals.requests.toLocaleString("en-US")])
   }
-  const detail =
-    tokensIn !== undefined && tokensOut !== undefined
-      ? ` (${compact(tokensIn)} in / ${compact(tokensOut)} out)`
-      : ""
-  return `${compact(tokens)} tokens${detail}`
+  if (totals?.cost !== undefined) rows.push(["Total Spent", money(totals.cost)])
+  if (snapshot.purchasedCredits !== undefined) {
+    rows.push(["Extra Credit", money(snapshot.purchasedCredits)])
+  }
+  return rows
 }
 
 /** Compact token counts: 1135619637 → 1.14B. */
@@ -569,35 +628,4 @@ const COMPACT = new Intl.NumberFormat("en-US", { notation: "compact", maximumFra
 
 function compact(value: number): string {
   return COMPACT.format(value)
-}
-
-/**
- * The muted provenance line for one credential rung. The file rung's label is
- * data from outside (a store's path), so it is flattened and stripped of
- * backticks/pipes before it sits inside the line's own code span — the same
- * inert-label rule the plan summary applies (ADR-0017 rule 4).
- */
-function provenanceLine(source: UsageCredentialSource): string {
-  switch (source.kind) {
-    case "host":
-      return "via Host connection"
-    case "environment":
-      return "via COMMANDCODE_API_KEY"
-    case "file": {
-      const label = flattenLabel(source.label)
-      return label === undefined ? "via legacy file" : `via legacy file \`${label}\``
-    }
-  }
-}
-
-/**
- * Flatten a display label so it cannot break or forge the line it sits in; an
- * all-whitespace label renders nothing.
- */
-function flattenLabel(value: string): string | undefined {
-  const label = value
-    .replace(/[`|\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-  return label === "" ? undefined : label
 }

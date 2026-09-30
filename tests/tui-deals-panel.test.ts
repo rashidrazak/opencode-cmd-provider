@@ -114,6 +114,17 @@ function assertFixedRows(
 const row = (rows: DealsRow[], label: string): DealsRow | undefined =>
   rows.find(([key]) => key === label)
 
+/** A 33-cell meter bar: `full` whole cells, one half cell, dots, then the cap. */
+function bar(full: number, half = 0): string {
+  return `${"█".repeat(full)}${half === 1 ? "▌" : ""}${"·".repeat(32 - full - half)}▏`
+}
+
+/** The meter detail row under `label`'s label row (label, bar, detail). */
+function meterDetail(rows: DealsRow[], label: string): DealsRow | undefined {
+  const index = rows.findIndex(([name]) => name === label)
+  return index === -1 ? undefined : rows[index + 2]
+}
+
 run([
   [
     "renders the full fixed row set for a model with full deals data",
@@ -708,18 +719,49 @@ run([
     },
   ],
   [
-    "v2: resolves both theme text spellings across the 2.0.8 rename",
+    "v2: resolves both theme spellings across the 2.0.8 rename — text and feedback",
     () => {
       // @opencode/theme@2.0.8 renamed the 2.0.3 `text.default`/`text.subdued`
-      // pair to `text.base`/`text.muted`. A v2.0.x host exposes exactly one
-      // spelling, and reading only the absent pair leaves `fg` undefined —
-      // which renders as the terminal default, the plain-white sidebar on
-      // 2.0.8+.
+      // pair to `text.base`/`text.muted` — and the same pair on the
+      // `text.feedback` colours the usage bars read. A v2.0.x host exposes
+      // exactly one spelling, and reading only the absent pair leaves `fg`
+      // undefined — which renders as the terminal default, the plain-white
+      // sidebar on 2.0.8+.
       const base = { r: 1, g: 2, b: 3, a: 255 }
       const muted = { r: 4, g: 5, b: 6, a: 255 }
+      const green = { r: 7, g: 8, b: 9, a: 255 }
+      const yellow = { r: 10, g: 11, b: 12, a: 255 }
+      const red = { r: 13, g: 14, b: 15, a: 255 }
       const theme = (text: object) => ({ text }) as unknown as V2TuiTheme
-      assertEqual(v2ThemeColors(theme({ base, muted })), { text: base, muted })
-      assertEqual(v2ThemeColors(theme({ default: base, subdued: muted })), { text: base, muted })
+      const expected = { text: base, muted, success: green, warning: yellow, error: red }
+      assertEqual(
+        v2ThemeColors(
+          theme({
+            base,
+            muted,
+            feedback: {
+              success: { base: green, muted: green },
+              warning: { base: yellow, muted: yellow },
+              error: { base: red, muted: red },
+            },
+          }),
+        ),
+        expected,
+      )
+      assertEqual(
+        v2ThemeColors(
+          theme({
+            default: base,
+            subdued: muted,
+            feedback: {
+              success: { default: green, subdued: green },
+              warning: { default: yellow, subdued: yellow },
+              error: { default: red, subdued: red },
+            },
+          }),
+        ),
+        expected,
+      )
     },
   ],
   [
@@ -767,10 +809,21 @@ run([
       )
       assertEqual(rows[deals.length], ["", ""])
       assertEqual(rows[deals.length + 1], ["Usage", "", "heading"])
-      assertEqual(row(rows, "5-hour"), ["5-hour", "$0.50 / $3.00 · 17%"])
-      assertEqual(row(rows, "Weekly"), ["Weekly", "$1.50 / $6.00 · 25% · resets in 4h 32m"])
-      assertEqual(row(rows, "Monthly"), ["Monthly", "$39.50 / $40.00 · 99% · renews in 5d"])
-      assertEqual(row(rows, "via Host connection"), ["via Host connection", "", "value"])
+      assertEqual(rows.slice(deals.length), [
+        ["", ""],
+        ["Usage", "", "heading"],
+        ["5-hour", "", "value"],
+        [bar(5, 1), " 17%", "bar", "success"],
+        ["$0.50 / $3.00", "", "value"],
+        ["", ""],
+        ["Weekly", "", "value"],
+        [bar(8), " 25%", "bar", "success"],
+        ["$1.50 / $6.00 · 4h 32m", "", "value"],
+        ["", ""],
+        ["Monthly", "", "value"],
+        [bar(31, 1), " 99%", "bar", "error"],
+        ["$39.50 / $40.00 · 5d", "", "value"],
+      ])
     },
   ],
 
@@ -954,8 +1007,7 @@ run([
       const model = v1ModelFor(providers, { id: "claude-sonnet-5", providerID: "commandcode" })
       const rows = panelRows(dealsRows(model), panel.state(), NOW)
       assertEqual(row(rows, "Status"), ["Status", "Paid"])
-      assertEqual(row(rows, "5-hour"), ["5-hour", "$0.50 / $3.00 · 17%"])
-      assertEqual(row(rows, "via Host connection"), ["via Host connection", "", "value"])
+      assertEqual(meterDetail(rows, "5-hour"), ["$0.50 / $3.00", "", "value"])
       // The unmount cancels the panel's countdown clock — a live timer that
       // would otherwise keep the test runner alive.
       panel.unmount()
@@ -1010,8 +1062,7 @@ run([
       const model = v2ModelFor(data, "ses_1")
       const rows = panelRows(dealsRowsV2(model), panel.state(), NOW)
       assertEqual(row(rows, "Status"), ["Status", "Paid"])
-      assertEqual(row(rows, "5-hour"), ["5-hour", "$0.50 / $3.00 · 17%"])
-      assertEqual(row(rows, "via Host connection"), ["via Host connection", "", "value"])
+      assertEqual(meterDetail(rows, "5-hour"), ["$0.50 / $3.00", "", "value"])
       panel.unmount()
     },
   ],

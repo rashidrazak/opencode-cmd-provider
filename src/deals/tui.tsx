@@ -37,6 +37,7 @@ import type { TuiCredentialV1Input } from "./tui-credential.js"
 import type { PlanId } from "../catalog/plans.js"
 import type {
   V2TuiContext,
+  V2TuiFeedbackColor,
   V2TuiModel,
   V2TuiPluginDefinition,
   V2TuiTheme,
@@ -85,14 +86,27 @@ type V2PanelModel = {
 }
 
 /**
+ * The colour token a usage meter bar renders in, mapped by the panel to the
+ * host theme's tone colours (`success`/`warning`/`error` on v1; the v2
+ * theme's `text.feedback` pair, see `v2ThemeColors`).
+ */
+export type DealsRowTone = "success" | "warning" | "error"
+
+/**
  * One rendered sidebar line. `[label, value]` renders as `label: value`; an
  * empty value renders the label bare and emphasized (`[text, ""]` — the
  * unavailable banner; `[text, "", "heading"]` — a segment heading, underlined
  * as well); `[text, "", "value"]` renders a bare muted line with no emphasis
- * (a rate-values line or the `Peak Windows` label); `["", ""]` is the blank
- * line between segments.
+ * (a rate-values line or a usage subsection label); `[bar, percent, "bar",
+ * tone]` renders a usage meter bar in `tone` followed by the muted percentage
+ * field; `["", ""]` is the blank line between segments.
  */
-export type DealsRow = [label: string, value: string, kind?: "heading" | "value"]
+export type DealsRow = [
+  label: string,
+  value: string,
+  kind?: "heading" | "value" | "bar",
+  tone?: DealsRowTone,
+]
 
 /** Value of a row the model has nothing to say about. */
 const NA = "N/A"
@@ -354,13 +368,18 @@ export function panelRows(
   // state is "still loading", not the resolver's miss, so no notice flashes
   // while the mount chain is in flight.
   if (usage === undefined) return deals
-  return [...deals, ...renderUsageRows(usage.result, { provenance: usage.provenance, now })]
+  return [...deals, ...renderUsageRows(usage.result, { now })]
 }
 
 const id = "commandcode.deals"
 
 /** The panel itself, shared by both hosts: rows in, theme colours in. */
-function DealsPanel(props: { rows: () => DealsRow[]; text: () => RGBA; textMuted: () => RGBA }) {
+function DealsPanel(props: {
+  rows: () => DealsRow[]
+  text: () => RGBA
+  textMuted: () => RGBA
+  tone: (tone: DealsRowTone) => RGBA
+}) {
   return (
     <Show when={props.rows().length > 0}>
       <box>
@@ -371,6 +390,11 @@ function DealsPanel(props: { rows: () => DealsRow[]; text: () => RGBA; textMuted
           {(row) =>
             row[0] === "" ? (
               <text> </text>
+            ) : row[2] === "bar" ? (
+              <text fg={props.textMuted()}>
+                <span style={{ fg: props.tone(row[3] ?? "success") }}>{row[0]}</span>
+                {row[1]}
+              </text>
             ) : row[2] === "value" ? (
               <text fg={props.textMuted()}>{row[0]}</text>
             ) : row[1] === "" ? (
@@ -462,6 +486,7 @@ function CmdPanelV1(props: { api: TuiPluginApi; sessionID: string; model: () => 
       rows={() => panelRows(dealsRows(props.model()), usage(), now())}
       text={() => props.api.theme.current.text}
       textMuted={() => props.api.theme.current.textMuted}
+      tone={(tone) => props.api.theme.current[tone]}
     />
   )
 }
@@ -481,17 +506,34 @@ function DealsPanelV1(props: { api: TuiPluginApi; session_id: string }) {
 }
 
 /**
- * The panel's two text colours, across the v2 theme rename (see
- * `V2TuiThemeText`): `base`/`muted` on `@opencode/theme@2.0.8`+,
- * `default`/`subdued` on 2.0.3–2.0.7. Reading only one spelling would hand
- * the renderer `undefined` on the hosts exposing the other, and `undefined`
- * paints as the terminal default — the plain white sidebar on v2.0.8+.
+ * The panel's colours, across the v2 theme rename (see `V2TuiThemeText`):
+ * `base`/`muted` on the newer line, `default`/`subdued` on 2.0.3–2.0.7 —
+ * including the `text.feedback` tone pair the usage bars colour by. Reading
+ * only one spelling would hand the renderer `undefined` on the hosts exposing
+ * the other, and `undefined` paints as the terminal default — the plain white
+ * sidebar on 2.0.8+.
  */
-export function v2ThemeColors(theme: V2TuiTheme): { text: RGBA; muted: RGBA } {
+export function v2ThemeColors(theme: V2TuiTheme): {
+  text: RGBA
+  muted: RGBA
+  success: RGBA
+  warning: RGBA
+  error: RGBA
+} {
   const text = theme.text
+  const tones = {
+    success: feedbackColor(text.feedback.success),
+    warning: feedbackColor(text.feedback.warning),
+    error: feedbackColor(text.feedback.error),
+  }
   return "base" in text
-    ? { text: text.base, muted: text.muted }
-    : { text: text.default, muted: text.subdued }
+    ? { text: text.base, muted: text.muted, ...tones }
+    : { text: text.default, muted: text.subdued, ...tones }
+}
+
+/** One feedback colour across the pair rename (`base` → `default`). */
+function feedbackColor(color: V2TuiFeedbackColor): RGBA {
+  return "base" in color ? color.base : color.default
 }
 
 /**
@@ -545,6 +587,7 @@ function CmdPanelV2(props: { ctx: V2TuiContext; sessionID: string; model: () => 
       rows={() => panelRows(dealsRowsV2(props.model()), usage(), now())}
       text={() => colors().text}
       textMuted={() => colors().muted}
+      tone={(tone) => colors()[tone]}
     />
   )
 }

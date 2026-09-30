@@ -98,16 +98,37 @@ function billingBodies(
 const SEGMENT = [
   ["", ""],
   ["Usage", "", "heading"],
-  ["5-hour", "$0.50 / $3.00 · 17%"],
-  ["Weekly", "$1.50 / $6.00 · 25% · resets in 4h 32m"],
-  ["Monthly", "$39.50 / $40.00 · 99% · renews in 5d"],
-  ["This cycle: 7,020 requests · 1.14B tokens · $9.41 spent", "", "value"],
-  ["via Host connection", "", "value"],
+  ["5-hour", "", "value"],
+  [bar(5, 1), " 17%", "bar", "success"],
+  ["$0.50 / $3.00", "", "value"],
+  ["", ""],
+  ["Weekly", "", "value"],
+  [bar(8), " 25%", "bar", "success"],
+  ["$1.50 / $6.00 · 4h 32m", "", "value"],
+  ["", ""],
+  ["Monthly", "", "value"],
+  [bar(31, 1), " 99%", "bar", "error"],
+  ["$39.50 / $40.00 · 5d", "", "value"],
+  ["", ""],
+  ["Tokens", "1.14B"],
+  ["Request", "7,020"],
+  ["Total Spent", "$9.41"],
 ]
+
+/** A 33-cell meter bar: `full` whole cells, one half cell, dots, then the cap. */
+function bar(full: number, half = 0): string {
+  return `${"█".repeat(full)}${half === 1 ? "▌" : ""}${"·".repeat(32 - full - half)}▏`
+}
+
+/** The meter detail row for `label` in a rendered segment. */
+function detail(rows: unknown[], label: string): unknown[] {
+  const index = rows.findIndex((row) => Array.isArray(row) && row[0] === label)
+  return rows[index + 2] as unknown[]
+}
 
 /** The segment rows for a controller state, as the panel renders them. */
 function segment(state: UsagePanelState | undefined): unknown[] {
-  return renderUsageRows(state?.result, { provenance: state?.provenance, now: NOW })
+  return renderUsageRows(state?.result, { now: NOW })
 }
 
 /**
@@ -163,7 +184,7 @@ run([
     async () => {
       // The v2 half's loader is the RPC bridge (tests/usage-rpc.test.ts); here
       // a stub stands in for it and pins the controller-side contract: the
-      // outcome publishes as-is, provenance included, with no network at all.
+      // outcome publishes as-is, with no network at all.
       const snapshot: UsageSnapshot = {
         plan: "go",
         limited: true,
@@ -186,11 +207,21 @@ run([
       assertEqual(segment(panel.state()), [
         ["", ""],
         ["Usage", "", "heading"],
-        ["5-hour", "$0.50 / $3.00 · 17%"],
-        ["Weekly", "$1.50 / $6.00 · 25% · resets in 4h 32m"],
-        ["Monthly", "$39.50 / $40.00 · 99% · renews in 5d"],
-        ["This cycle: 7,020 requests · 1.14B tokens · $9.41 spent", "", "value"],
-        ["via COMMANDCODE_API_KEY", "", "value"],
+        ["5-hour", "", "value"],
+        [bar(5, 1), " 17%", "bar", "success"],
+        ["$0.50 / $3.00", "", "value"],
+        ["", ""],
+        ["Weekly", "", "value"],
+        [bar(8), " 25%", "bar", "success"],
+        ["$1.50 / $6.00 · 4h 32m", "", "value"],
+        ["", ""],
+        ["Monthly", "", "value"],
+        [bar(31, 1), " 99%", "bar", "error"],
+        ["$39.50 / $40.00 · 5d", "", "value"],
+        ["", ""],
+        ["Tokens", "1.14B"],
+        ["Request", "7,020"],
+        ["Total Spent", "$9.41"],
       ])
       panel.unmount()
     },
@@ -366,10 +397,11 @@ run([
       await panel.refresh()
       const state = panel.state()
       assert(state?.result.state === "usage")
-      const fiveHour = segment(state).find(
-        (row) => Array.isArray(row) && row[0] === "5-hour",
-      ) as unknown[]
-      assertEqual(fiveHour, ["5-hour", "$1.00 / $3.00 · 33%"], "the refresh's numbers render")
+      assertEqual(
+        detail(segment(state), "5-hour"),
+        ["$1.00 / $3.00", "", "value"],
+        "the refresh's numbers render",
+      )
       panel.unmount()
     },
   ],

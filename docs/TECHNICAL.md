@@ -205,8 +205,8 @@ rows it feeds:
 - `GET /alpha/whoami?limits=1` — the org scope for team accounts
 - `GET /alpha/billing/subscriptions[?orgId=]` — plan identity and the billing
   period
-- `GET /alpha/billing/credits[?orgId=]` — the 5-hour and weekly windows and
-  the monthly credit pool
+- `GET /alpha/billing/credits[?orgId=]` — the 5-hour and weekly windows, the
+  monthly credit pool, and the purchased extra-credit balance
 - `GET /alpha/usage/summary[?orgId=][&since=<currentPeriodStart>]` — the
   cycle's requests, tokens and spend
 
@@ -229,8 +229,16 @@ The credential those reads use is resolved per TUI half (issue #243,
   rather than another account's numbers.
 
 Nothing resolving means zero requests and the one-line notice
-`Usage needs COMMANDCODE_API_KEY — set it to see live limits`; a resolved rung
-renders its muted `via …` provenance line.
+`Usage needs COMMANDCODE_API_KEY — set it to see live limits`; the credential
+rung the loaders report is no longer rendered.
+
+The segment renders one sub-section per meter — a muted label, a 33-cell
+progress bar (the 37-character sidebar column minus the four-character
+right-aligned percentage field) and the `$used / $cap` detail with its
+countdown or renewal — then a summary: tokens in/out, requests, spend, and the
+purchased extra-credit balance the `/usage` overlay labels `Extra Credits`. A
+bar fills to the nearest half cell and colours by progress: green at 40% or
+below, yellow through 80%, red above.
 
 The refresh is event-driven, never polled (issue #245): **4 requests on
 mount** (whoami → subscriptions → credits → summary; the whoami org scope is
