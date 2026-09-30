@@ -48,6 +48,8 @@ import type {
   V2ProviderInfo,
   V2ConnectionInfo,
   V2CredentialValue,
+  V2RpcCallContext,
+  V2RpcDefinition,
   V2SDKEvent,
   V2SetupContext,
   V2ToolDefinition,
@@ -198,6 +200,11 @@ interface FakeHost {
   replayIntegrations(): Map<string, IntegrationRecord>
   /** Replays every tool transform onto a fresh draft. */
   tools(): Map<string, V2ToolDefinition<never>>
+  /** The RPC ports `ctx.rpc.register` was called with, in order. */
+  rpcPorts(): Array<{
+    definition: V2RpcDefinition
+    handlers: Readonly<Record<string, (input: unknown, context: V2RpcCallContext) => unknown>>
+  }>
   /** Runs the registered SDK hooks for one model and returns the event. */
   sdkEvent(model?: Partial<V2ModelInfo>): V2SDKEvent
   /** Seeds a draft before the first replay, as the config transforms would. */
@@ -219,6 +226,10 @@ function fakeHost(): FakeHost {
   const sdkHooks: Array<{ callback: (event: V2SDKEvent) => void; providerID?: string }> = []
   const catalogSeeds: Array<(draft: Map<string, ProviderRecord>) => void> = []
   const defaultSeeds: Array<{ providerID: string; modelID: string }> = []
+  const rpcPorts: Array<{
+    definition: V2RpcDefinition
+    handlers: Readonly<Record<string, (input: unknown, context: V2RpcCallContext) => unknown>>
+  }> = []
   let active:
     | { integrationID: string; connection: V2ConnectionInfo; credential?: V2CredentialValue }
     | undefined
@@ -269,6 +280,12 @@ function fakeHost(): FakeHost {
         return {}
       },
     },
+    rpc: {
+      register: async (definition, handlers) => {
+        rpcPorts.push({ definition, handlers })
+        return {}
+      },
+    },
     aisdk: {
       hook: async (name, callback, options) => {
         assertEqual(name, "sdk")
@@ -302,6 +319,7 @@ function fakeHost(): FakeHost {
       for (const transform of toolTransforms) transform(toolEditor(draft))
       return draft
     },
+    rpcPorts: () => rpcPorts,
     sdkEvent: (model) => {
       const event: V2SDKEvent = {
         model: { ...defaultModel(PROVIDER_ID, "gpt-5.6-terra"), ...model },
@@ -732,6 +750,16 @@ run([
       assertEqual(provider?.package, `${AISDK_PREFIX}${resolveProviderNpm()}`)
       assert(host.tools().has("cmd_plan_summary"), "the Deals tool must be registered")
       assertEqual(host.replayIntegrations().get(PROVIDER_ID)?.name, PROVIDER_NAME)
+      // The usage bridge's port is registered too: the TUI half's only path to
+      // the Host's connected credential (ADR-0020).
+      const ports = host.rpcPorts()
+      assertEqual(ports.length, 1, "exactly one RPC port")
+      assertEqual(ports[0]?.definition.id, PROVIDER_ID)
+      assertEqual(Object.keys(ports[0]?.definition.methods ?? {}), ["usage"])
+      assert(
+        typeof ports[0]?.handlers["usage"] === "function",
+        "the usage method must have a handler",
+      )
     },
   ],
   [

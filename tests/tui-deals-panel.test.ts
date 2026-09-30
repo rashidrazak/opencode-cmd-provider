@@ -12,11 +12,11 @@ import plugin, {
   v1ModelFor,
   v1UsageInput,
   v2ModelFor,
-  v2UsageInput,
   v2ThemeColors,
 } from "../src/deals/tui.js"
 import type { DealsRow } from "../src/deals/tui.js"
 import { createUsagePanel, type UsagePanel, type UsagePanelState } from "../src/deals/tui-usage.js"
+import { createUsageRpcLoader } from "../src/deals/usage-rpc.js"
 import { createRoot } from "solid-js"
 import type { Provider } from "@opencode-ai/sdk/v2"
 import type { TuiPluginApi } from "@opencode-ai/plugin/tui"
@@ -818,14 +818,14 @@ run([
   ],
 
   [
-    "both halves' usage inputs read the live host state",
+    "the v1 usage input reads the live host state",
     () => {
       const providers = [{ id: "commandcode", key: "k" }] as unknown as readonly Provider[]
       const client = { provider: { list: async () => ({}) } }
       const api = { state: { provider: providers }, client } as unknown as TuiPluginApi
       assertEqual(v1UsageInput(api), { host: "v1", providers, client })
-      const data = { session: { get: () => undefined } } as unknown as V2TuiContext["data"]
-      assertEqual(v2UsageInput({ data } as unknown as V2TuiContext), { host: "v2", data })
+      // The v2 half has no local resolver anymore: its chain is the RPC bridge,
+      // pinned by tests/usage-rpc.test.ts.
     },
   ],
 
@@ -946,13 +946,10 @@ run([
         },
         client: { provider: { list: async () => ({}) } },
       } as unknown as TuiPluginApi
-      const panel = createUsagePanel(() => v1UsageInput(api), {
-        credential: { env: {}, authPaths: [] },
-        fetchSnapshot: async (options) => {
-          assertEqual(options.apiKey, "v1_key", "the host record's key reaches the fetch")
-          return usageState().result
-        },
-      })
+      // The v1 chain runs the real loader shape; its credential plumbing
+      // (`Bearer v1_key`) is pinned in tests/tui-usage.test.ts, so this panel
+      // composition test stubs the outcome.
+      const panel = createUsagePanel(async () => usageState())
       await panel.mount()
       const model = v1ModelFor(providers, { id: "claude-sonnet-5", providerID: "commandcode" })
       const rows = panelRows(dealsRows(model), panel.state(), NOW)
@@ -966,7 +963,7 @@ run([
   ],
 
   [
-    "v2: a visible panel's mount chain feeds the appended segment",
+    "v2: a visible panel's mount chain feeds the appended segment through the RPC bridge",
     async () => {
       const data = {
         session: {
@@ -986,31 +983,35 @@ run([
               },
             ],
           },
-          provider: { list: () => [{ id: "commandcode", integrationID: "commandcode" }] },
-          integration: {
-            list: () => [
-              {
-                id: "commandcode",
-                name: "Command Code",
-                connections: [{ type: "env", name: "COMMANDCODE_API_KEY" }],
-              },
-            ],
-          },
         },
       } as unknown as V2TuiContext["data"]
-      const ctx = { data } as unknown as V2TuiContext
-      const panel = createUsagePanel(() => v2UsageInput(ctx), {
-        credential: { env: { COMMANDCODE_API_KEY: "v2_key" }, authPaths: [] },
-        fetchSnapshot: async (options) => {
-          assertEqual(options.apiKey, "v2_key", "the env connection's key reaches the fetch")
-          return usageState().result
+      let portCalls = 0
+      const ctx = {
+        data,
+        client: {
+          rpc: (definition: unknown) => {
+            assertEqual(
+              (definition as { id: string }).id,
+              "commandcode",
+              "the panel asks the plugin's own port",
+            )
+            return {
+              usage: async () => {
+                portCalls += 1
+                return { result: usageState().result, provenance: { kind: "host" } }
+              },
+            }
+          },
         },
-      })
+      } as unknown as V2TuiContext
+      const panel = createUsagePanel(createUsageRpcLoader(ctx.client))
       await panel.mount()
+      assertEqual(portCalls, 1, "one bridge call per mount chain")
       const model = v2ModelFor(data, "ses_1")
       const rows = panelRows(dealsRowsV2(model), panel.state(), NOW)
       assertEqual(row(rows, "Status"), ["Status", "Paid"])
       assertEqual(row(rows, "5-hour"), ["5-hour", "$0.50 / $3.00 · 17%"])
+      assertEqual(row(rows, "via Host connection"), ["via Host connection", "", "value"])
       panel.unmount()
     },
   ],

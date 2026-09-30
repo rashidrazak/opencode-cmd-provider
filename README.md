@@ -131,10 +131,8 @@ section for that model, split into segments:
 - an **Other Information** section with benchmark scores (intelligence,
   tokens/second), current deals and `was`/`now` rates
 - a **Usage** section with live 5-hour, weekly and monthly usage plus the
-  current cycle's requests, tokens and spend, read from your Command Code
-  account and refreshed as you work (never polled); on OpenCode v2, a key kept
-  only inside OpenCode cannot be read by the sidebar — set
-  `COMMANDCODE_API_KEY` to see live limits
+  current cycle's requests, tokens and spend, read from the account you're
+  connected with and refreshed as you work (never polled)
 
 Every row is always shown: when a model has nothing for a row, its value reads
 `N/A` instead of the row disappearing.

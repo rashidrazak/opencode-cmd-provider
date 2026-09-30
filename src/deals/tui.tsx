@@ -26,8 +26,14 @@ import type { TuiPlugin, TuiPluginApi, TuiPluginModule } from "@opencode-ai/plug
 import { DEAL_SOURCE_URL, PLAN_CATALOG } from "./catalog.js"
 import { discountLabel, formatRate, todayIso } from "./format.js"
 import { renderUsageRows } from "./usage.js"
-import { createUsagePanel, type UsagePanel, type UsagePanelState } from "./tui-usage.js"
-import type { TuiCredentialInput } from "./tui-credential.js"
+import {
+  createUsagePanel,
+  v1UsageLoader,
+  type UsagePanel,
+  type UsagePanelState,
+} from "./tui-usage.js"
+import { createUsageRpcLoader } from "./usage-rpc.js"
+import type { TuiCredentialV1Input } from "./tui-credential.js"
 import type { PlanId } from "../catalog/plans.js"
 import type {
   V2TuiContext,
@@ -392,7 +398,7 @@ function DealsPanel(props: { rows: () => DealsRow[]; text: () => RGBA; textMuted
  * state already holds plus the TUI's own client. Built per load, never cached
  * at mount, so a `/connect` or a provider re-registration is observed.
  */
-export function v1UsageInput(api: TuiPluginApi): TuiCredentialInput {
+export function v1UsageInput(api: TuiPluginApi): TuiCredentialV1Input {
   return { host: "v1", providers: api.state.provider, client: api.client }
 }
 
@@ -437,10 +443,13 @@ export function manageUsagePanel(panel: UsagePanel, subscribeIdle: () => () => v
 function CmdPanelV1(props: { api: TuiPluginApi; sessionID: string; model: () => V1Model }) {
   const [usage, setUsage] = createSignal<UsagePanelState | undefined>(undefined)
   const [now, setNow] = createSignal(Date.now())
-  const usagePanel = createUsagePanel(() => v1UsageInput(props.api), {
-    onChange: setUsage,
-    onTick: setNow,
-  })
+  const usagePanel = createUsagePanel(
+    v1UsageLoader(() => v1UsageInput(props.api)),
+    {
+      onChange: setUsage,
+      onTick: setNow,
+    },
+  )
   manageUsagePanel(usagePanel, () =>
     subscribeV1Idle(
       props.api,
@@ -486,15 +495,6 @@ export function v2ThemeColors(theme: V2TuiTheme): { text: RGBA; muted: RGBA } {
 }
 
 /**
- * The v2 half's live credential input: the host's client-local data store,
- * which the resolver reads provider → integration → connection from
- * (ADR-0020). Read per load, like v1's.
- */
-export function v2UsageInput(ctx: V2TuiContext): TuiCredentialInput {
-  return { host: "v2", data: ctx.data }
-}
-
-/**
  * The v2 half's completed-turn adapter (#245): the data store's
  * `session.idle` and `session.execution.succeeded` for the watched session
  * call `notify`. `session` is a thunk so a slot re-rendered for another
@@ -521,12 +521,14 @@ export function subscribeV2Idle(
 /**
  * The v2 panel body, gated exactly like v1's: mounted only for a Command Code
  * selection, one mount chain per panel — and one clock, one subscription and
- * one abortable chain, all cancelled with it (#245).
+ * one abortable chain, all cancelled with it (#245). The chain is the RPC
+ * bridge (ADR-0020): the plugin's server half resolves the Host's connected
+ * credential and fetches the snapshot; this process never holds the key.
  */
 function CmdPanelV2(props: { ctx: V2TuiContext; sessionID: string; model: () => V2PanelModel }) {
   const [usage, setUsage] = createSignal<UsagePanelState | undefined>(undefined)
   const [now, setNow] = createSignal(Date.now())
-  const usagePanel = createUsagePanel(() => v2UsageInput(props.ctx), {
+  const usagePanel = createUsagePanel(createUsageRpcLoader(props.ctx.client), {
     onChange: setUsage,
     onTick: setNow,
   })

@@ -1,18 +1,18 @@
 // tests/tui-usage.test.ts — the panel's usage controller (issues #244/#245):
-// the mount chain (credential → snapshot), its once-per-mount semantics, the
-// no-credential notice with zero requests, last-snapshot retention on a failed
-// refresh, and the cached-scope shortening of a refresh (whoami and a fresh
-// subscription record are not re-read). The refresh *policy* — throttle,
-// coalescing, countdown, backoff, unmount — lives in
+// the loader seam (v1: resolve → fetch; v2: the RPC bridge, tested in
+// tests/usage-rpc.test.ts) fed by `v1UsageLoader`, its once-per-mount
+// semantics, the no-credential notice with zero requests, last-snapshot
+// retention on a failed refresh, and the cached-scope shortening of a refresh
+// (whoami and a fresh subscription record are not re-read). The refresh
+// *policy* — throttle, coalescing, countdown, backoff, unmount — lives in
 // tests/tui-usage-refresh.test.ts under the fake clock. A recording mock fetch
 // — never the network — and no TUI runtime: the controller is host-agnostic
-// and both halves feed it the same shape through `src/deals/tui-usage.ts`.
+// and each half feeds it one loader through `src/deals/tui-usage.ts`.
 import { readFileSync } from "node:fs"
-import { createUsagePanel, type UsagePanelState } from "../src/deals/tui-usage.js"
-import { renderUsageRows } from "../src/deals/usage.js"
-import type { TuiCredentialInput } from "../src/deals/tui-credential.js"
+import { createUsagePanel, v1UsageLoader, type UsagePanelState } from "../src/deals/tui-usage.js"
+import { renderUsageRows, type UsageResult, type UsageSnapshot } from "../src/deals/usage.js"
+import type { TuiCredentialV1Input } from "../src/deals/tui-credential.js"
 import type { V1ProviderListClient } from "../src/deals/host-credential.js"
-import type { V2TuiContext } from "../src/plugin/v2-tui-types.js"
 import { assert, assertEqual, run } from "./harness.js"
 
 const BASE = "http://mock"
@@ -112,30 +112,13 @@ function segment(state: UsagePanelState | undefined): unknown[] {
 
 /**
  * The v1 host's live state thunk: the `commandcode` record plus the TUI's own
- * client — exactly what the panel's `v1UsageInput` hands the resolver.
+ * client — exactly what the panel's `v1UsageInput` hands the loader.
  */
 function v1Input(
   providers: readonly unknown[],
   client?: V1ProviderListClient,
-): () => TuiCredentialInput {
+): () => TuiCredentialV1Input {
   return () => ({ host: "v1", providers, client })
-}
-
-/** The v2 host's live state thunk: provider → client-local integration → env connection. */
-function v2Input(name: string): () => TuiCredentialInput {
-  const data = {
-    session: { get: () => undefined },
-    location: {
-      model: { list: () => [] },
-      provider: { list: () => [{ id: "commandcode", integrationID: "commandcode" }] },
-      integration: {
-        list: () => [
-          { id: "commandcode", name: "Command Code", connections: [{ type: "env", name }] },
-        ],
-      },
-    },
-  } as unknown as V2TuiContext["data"]
-  return () => ({ host: "v2", data })
 }
 
 /** No ambient credential: only what a test injects can resolve. */
@@ -147,11 +130,13 @@ run([
     async () => {
       const { urls, calls, fetch } = stubFetch(billingBodies())
       const changes: UsagePanelState[] = []
-      const panel = createUsagePanel(v1Input([{ id: "commandcode", key: "v1_key" }]), {
-        credential: NO_CREDENTIAL,
-        fetchOptions: { baseURL: BASE, fetch, env: {} },
-        onChange: (state) => changes.push(state),
-      })
+      const panel = createUsagePanel(
+        v1UsageLoader(v1Input([{ id: "commandcode", key: "v1_key" }]), {
+          credential: NO_CREDENTIAL,
+          fetchOptions: { baseURL: BASE, fetch, env: {} },
+        }),
+        { onChange: (state) => changes.push(state) },
+      )
       await panel.mount()
       // A second mount is a no-op: the chain is once per panel, not per call.
       await panel.mount()
@@ -174,18 +159,39 @@ run([
   ],
 
   [
-    "the v2 half's env connection mounts the same chain and segment",
+    "the controller renders whichever outcome the loader answers (host-agnostic)",
     async () => {
-      const { urls, calls, fetch } = stubFetch(billingBodies())
-      const panel = createUsagePanel(v2Input("COMMANDCODE_API_KEY"), {
-        credential: { env: { COMMANDCODE_API_KEY: "v2_key" }, authPaths: [] },
-        fetchOptions: { baseURL: BASE, fetch, env: {} },
+      // The v2 half's loader is the RPC bridge (tests/usage-rpc.test.ts); here
+      // a stub stands in for it and pins the controller-side contract: the
+      // outcome publishes as-is, provenance included, with no network at all.
+      const snapshot: UsageSnapshot = {
+        plan: "go",
+        limited: true,
+        fiveHour: { used: 0.5, cap: 3, exceeded: false },
+        weekly: { used: 1.5, cap: 6, exceeded: false, resetAt: RESET_AT },
+        monthly: { used: 39.5, cap: 40 },
+        totals: { requests: 7020, tokens: 1135619637, cost: 9.41 },
+        periodEnd: Date.parse(PERIOD_END),
+      }
+      let loads = 0
+      const panel = createUsagePanel(async () => {
+        loads += 1
+        return {
+          result: { state: "usage", snapshot } satisfies UsageResult,
+          provenance: { kind: "environment" },
+        }
       })
       await panel.mount()
-      assertEqual(urls.length, 4)
-      assertEqual(calls[0]!.headers.authorization, "Bearer v2_key")
-      assertEqual(panel.state()?.provenance, { kind: "host" })
-      assertEqual(segment(panel.state()), SEGMENT)
+      assertEqual(loads, 1, "one load per mount")
+      assertEqual(segment(panel.state()), [
+        ["", ""],
+        ["Usage", "", "heading"],
+        ["5-hour", "$0.50 / $3.00 · 17%"],
+        ["Weekly", "$1.50 / $6.00 · 25% · resets in 4h 32m"],
+        ["Monthly", "$39.50 / $40.00 · 99% · renews in 5d"],
+        ["This cycle: 7,020 requests · 1.14B tokens · $9.41 spent", "", "value"],
+        ["via COMMANDCODE_API_KEY", "", "value"],
+      ])
       panel.unmount()
     },
   ],
@@ -193,33 +199,67 @@ run([
   [
     "no credential resolves: the notice renders and zero requests are made",
     async () => {
-      // The v1 cases use the panel's real input shape: the provider record
-      // *and* the TUI's own client, whose listing is an in-process read, not a
-      // billing request — the billing stub must stay untouched either way.
+      // The v1 cases use the panel's real loader: the provider record *and*
+      // the TUI's own client, whose listing is an in-process read, not a
+      // billing request — the billing stub must stay untouched either way. The
+      // v2 case is the bridge answering no-credential server-side.
       const idleClient: V1ProviderListClient = { provider: { list: async () => ({}) } }
-      const cases: Array<[string, () => TuiCredentialInput]> = [
-        ["v1 without a record", v1Input([], idleClient)],
+      const cases: Array<[string, () => Promise<UsagePanelState | undefined>]> = [
+        [
+          "v1 without a record",
+          async () => {
+            const { urls, fetch } = stubFetch(billingBodies())
+            const panel = createUsagePanel(
+              v1UsageLoader(v1Input([], idleClient), {
+                credential: NO_CREDENTIAL,
+                fetchOptions: { baseURL: BASE, fetch, env: {} },
+              }),
+            )
+            await panel.mount()
+            const state = panel.state()
+            assertEqual(urls.length, 0, "v1 without a record must not touch the network")
+            panel.unmount()
+            return state
+          },
+        ],
         [
           "v1 with a record the client cannot top up",
-          v1Input([{ id: "commandcode", options: {} }], idleClient),
+          async () => {
+            const { urls, fetch } = stubFetch(billingBodies())
+            const panel = createUsagePanel(
+              v1UsageLoader(v1Input([{ id: "commandcode", options: {} }], idleClient), {
+                credential: NO_CREDENTIAL,
+                fetchOptions: { baseURL: BASE, fetch, env: {} },
+              }),
+            )
+            await panel.mount()
+            const state = panel.state()
+            assertEqual(urls.length, 0, "an empty record must not touch the network")
+            panel.unmount()
+            return state
+          },
         ],
-        ["v2 without a live connection", v2Input("MISSING_KEY")],
+        [
+          "the v2 bridge answering no-credential",
+          async () => {
+            const { urls, fetch } = stubFetch(billingBodies())
+            const panel = createUsagePanel(async () => ({ result: { state: "no-credential" } }))
+            await panel.mount()
+            const state = panel.state()
+            assertEqual(urls.length, 0, "a bridged miss must not touch the network")
+            panel.unmount()
+            return state
+          },
+        ],
       ]
-      for (const [label, input] of cases) {
-        const { urls, fetch } = stubFetch(billingBodies())
-        const panel = createUsagePanel(input, {
-          credential: NO_CREDENTIAL,
-          fetchOptions: { baseURL: BASE, fetch, env: {} },
-        })
-        await panel.mount()
-        assertEqual(panel.state()?.result.state, "no-credential", label)
-        assertEqual(urls.length, 0, `${label}: a missing credential must not touch the network`)
-        assertEqual(segment(panel.state()), [
+      for (const [label, mountCase] of cases) {
+        const state = await mountCase()
+        assertEqual(state?.result.state, "no-credential", label)
+        assertEqual(segment(state), [
           ["", ""],
           ["Usage", "", "heading"],
           ["Usage needs COMMANDCODE_API_KEY — set it to see live limits", "", "value"],
         ])
-        panel.unmount()
       }
     },
   ],
@@ -235,10 +275,12 @@ run([
         [CREDITS]: dead,
         [SUMMARY]: dead,
       })
-      const panel = createUsagePanel(v1Input([{ id: "commandcode", key: "k" }]), {
-        credential: NO_CREDENTIAL,
-        fetchOptions: { baseURL: BASE, fetch, env: {} },
-      })
+      const panel = createUsagePanel(
+        v1UsageLoader(v1Input([{ id: "commandcode", key: "k" }]), {
+          credential: NO_CREDENTIAL,
+          fetchOptions: { baseURL: BASE, fetch, env: {} },
+        }),
+      )
       await panel.mount()
       assertEqual(panel.state()?.result.state, "unavailable")
       assertEqual(urls.length, 4, "the chain was attempted")
@@ -247,13 +289,9 @@ run([
         ["Usage", "", "heading"],
         ["Usage unavailable — could not read the Command Code billing API", "", "value"],
       ])
-      // A throwing resolver is the same degradation, with no request at all.
-      const throwing = createUsagePanel(v1Input([{ id: "commandcode", key: "k" }]), {
-        credential: NO_CREDENTIAL,
-        fetchOptions: { baseURL: BASE, fetch, env: {} },
-        resolveCredential: async () => {
-          throw new Error("resolver exploded")
-        },
+      // A throwing loader (a broken bridge) is the same degradation.
+      const throwing = createUsagePanel(async () => {
+        throw new Error("bridge exploded")
       })
       await throwing.mount()
       assertEqual(throwing.state()?.result.state, "unavailable")
@@ -274,11 +312,13 @@ run([
         return base.fetch(url, init)
       }) as unknown as typeof fetch
       const changes: UsagePanelState[] = []
-      const panel = createUsagePanel(v1Input([{ id: "commandcode", key: "k" }]), {
-        credential: NO_CREDENTIAL,
-        fetchOptions: { baseURL: BASE, fetch, env: {} },
-        onChange: (state) => changes.push(state),
-      })
+      const panel = createUsagePanel(
+        v1UsageLoader(v1Input([{ id: "commandcode", key: "k" }]), {
+          credential: NO_CREDENTIAL,
+          fetchOptions: { baseURL: BASE, fetch, env: {} },
+        }),
+        { onChange: (state) => changes.push(state) },
+      )
       await panel.mount()
       const first = panel.state()
       assert(first?.result.state === "usage")
@@ -301,14 +341,16 @@ run([
     async () => {
       const bodies = billingBodies()
       const base = stubFetch(bodies)
-      const panel = createUsagePanel(v1Input([{ id: "commandcode", key: "k" }]), {
-        credential: NO_CREDENTIAL,
-        fetchOptions: {
-          baseURL: BASE,
-          fetch: (async (url, init) => base.fetch(url, init)) as unknown as typeof fetch,
-          env: {},
-        },
-      })
+      const panel = createUsagePanel(
+        v1UsageLoader(v1Input([{ id: "commandcode", key: "k" }]), {
+          credential: NO_CREDENTIAL,
+          fetchOptions: {
+            baseURL: BASE,
+            fetch: (async (url, init) => base.fetch(url, init)) as unknown as typeof fetch,
+            env: {},
+          },
+        }),
+      )
       await panel.mount()
       // Mutate the record the stub reads: a refresh sees the new window.
       Object.assign(
@@ -337,10 +379,12 @@ run([
     async () => {
       let providers: readonly unknown[] = [{ id: "commandcode", key: "k" }]
       const { urls, fetch } = stubFetch(billingBodies())
-      const panel = createUsagePanel(() => ({ host: "v1", providers }), {
-        credential: NO_CREDENTIAL,
-        fetchOptions: { baseURL: BASE, fetch, env: {} },
-      })
+      const panel = createUsagePanel(
+        v1UsageLoader(() => ({ host: "v1", providers }), {
+          credential: NO_CREDENTIAL,
+          fetchOptions: { baseURL: BASE, fetch, env: {} },
+        }),
+      )
       await panel.mount()
       assertEqual(panel.state()?.result.state, "usage")
       providers = []
@@ -356,10 +400,12 @@ run([
     async () => {
       let providers: readonly unknown[] = []
       const { urls, fetch } = stubFetch(billingBodies())
-      const panel = createUsagePanel(() => ({ host: "v1", providers }), {
-        credential: NO_CREDENTIAL,
-        fetchOptions: { baseURL: BASE, fetch, env: {} },
-      })
+      const panel = createUsagePanel(
+        v1UsageLoader(() => ({ host: "v1", providers }), {
+          credential: NO_CREDENTIAL,
+          fetchOptions: { baseURL: BASE, fetch, env: {} },
+        }),
+      )
       await panel.mount()
       assertEqual(panel.state()?.result.state, "no-credential")
       assertEqual(urls.length, 0)

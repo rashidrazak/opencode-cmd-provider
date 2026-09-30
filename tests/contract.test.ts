@@ -171,7 +171,7 @@ run([
   [
     "Core never imports the excisable Deals slice (ADR-0004, ADR-0011)",
     () => {
-      // Deleting src/deals/ plus the two registration lines in
+      // Deleting src/deals/ plus the registration lines in
       // src/plugin/index.ts must leave Core (provider, catalog, env, the rest
       // of the plugin) intact. Plan identity lives in src/catalog/plans.ts
       // precisely so transport selection can read an explicit plan pin without

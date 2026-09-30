@@ -1,20 +1,24 @@
-// src/deals/tui-credential.ts — the credential the TUI host's Deals panel
+// src/deals/tui-credential.ts — the credential the v1 TUI host's Deals panel
 // reads usage with (issue #243, ADR-0020).
 //
 // The TUI host is a third process (ADR-0010) with no path to the ADR-0015
-// server seam: the v1 TUI holds the provider records its sync store already
-// fetched, and the v2 TUI holds the host's client-local integration data. This
-// module is that seam's TUI counterpart — one resolver, per-host inputs, one
-// ladder below them:
+// server seam, so each half resolves the credential from the state it already
+// holds. This module is the **v1** half: the provider records the TUI sync
+// store was seeded with, whose `options.apiKey ?? key` are the very fields the
+// v1 Host resolves the credential into and serializes without stripping
+// (ADR-0015's verified read), with the TUI's own `client.provider.list()` as
+// the same payload's live fallback. Below it, the package ladder:
+// `COMMANDCODE_API_KEY`, then the legacy auth files, keeping the file label as
+// provenance.
 //
-//   v1  the state record's own `options.apiKey ?? key`, then the TUI's own
-//       `client.provider.list()` when the record carries neither at runtime;
-//   v2  the provider's `integrationID` → the client-local integration record →
-//       its active connection; only the env branch is reachable, so an active
-//       stored credential resolves to undefined — the documented notice path —
-//       and the package ladder below applies (ADR-0015 rule 2);
-//   both  the package ladder: `COMMANDCODE_API_KEY`, then the legacy auth
-//       files, keeping the file label as provenance.
+// The **v2** half does not resolve locally: v2's provider payload no longer
+// carries the credential, and the TUI context has no connection service, so
+// the credential lives only behind the Host's server-side seam. The v2 panel
+// therefore asks the plugin's own server half over the plugin-RPC bridge
+// (src/deals/usage-rpc.ts), which resolves the Host's active connection —
+// stored credentials included — and fetches the snapshot itself. No key ever
+// reaches the TUI process for v2, and no fallback is attempted: the bridge
+// answers with the connected account or the notice.
 //
 // The result is `{ key, source }`: the key for the caller, a display-only
 // `UsageCredentialSource` for the panel's `via …` line (Host connection /
@@ -27,14 +31,13 @@ import {
   type ApiKeySource,
   type AuthKeyOptions,
 } from "../provider/auth-key.js"
-import { isRecord, stringValue } from "../provider/converters.js"
+import { isRecord } from "../provider/converters.js"
 import {
   hostCredentialFromEntry,
   hostCredentialFromV1,
   type V1ProviderListClient,
 } from "./host-credential.js"
 import type { UsageCredentialSource } from "./usage.js"
-import type { V2TuiContext } from "../plugin/v2-tui-types.js"
 
 /** Provider id both hosts register under — the record this resolver reads. */
 const PROVIDER_ID = "commandcode"
@@ -53,16 +56,6 @@ export interface TuiCredentialV1Input {
   /** The TUI's own SDK client — the fallback when the state record carries no credential. */
   readonly client?: V1ProviderListClient | undefined
 }
-
-/** v2 inputs: exactly what `V2TuiContext["data"]` already holds. */
-export interface TuiCredentialV2Input {
-  readonly host: "v2"
-  /** The host's client-local data store (`ctx.data`). */
-  readonly data: V2TuiContext["data"]
-}
-
-/** The caller's host inputs, discriminated by the TUI half asking. */
-export type TuiCredentialInput = TuiCredentialV1Input | TuiCredentialV2Input
 
 /**
  * Injection seams for tests and for callers with their own paths: the package
@@ -109,35 +102,9 @@ async function v1HostCredential(
 }
 
 /**
- * The v2 host rung: the `commandcode` provider's `integrationID` → the
- * client-local integration record → its active connection. The Host projects
- * `connections` in its own resolution order — stored credentials first, then
- * the env methods whose variable is set — and `connection.active()` is `[0]`,
- * so only the first connection is the one the session streams with. An active
- * credential connection holds a value this process never sees: the rung
- * yields undefined (the documented notice path) even when an env connection
- * sits behind it, and the ladder below then answers with its own provenance.
- */
-function v2HostCredential(
-  data: V2TuiContext["data"],
-  env: NodeJS.ProcessEnv,
-): TuiCredential | undefined {
-  const provider = data.location.provider.list()?.find((entry) => entry.id === PROVIDER_ID)
-  const integrationID = provider?.integrationID
-  if (integrationID === undefined) return undefined
-  const integration = data.location.integration.list()?.find((entry) => entry.id === integrationID)
-  // The mirrored shape is trusted for types only: a host payload that dropped
-  // `connections` is the next rung, never a crash (ADR-0020 rule 1).
-  const connection = integration?.connections?.[0]
-  if (connection?.type !== "env") return undefined
-  const key = stringValue(env[connection.name])
-  return key ? { key, source: { kind: "host" } } : undefined
-}
-
-/**
- * The package ladder below both hosts, as display provenance. The `option` arm
- * is unreachable through this resolver — it never hands the ladder an explicit
- * `apiKey` — so it maps to the host rung it would have stood for.
+ * The package ladder below the host rung, as display provenance. The `option`
+ * arm is unreachable through this resolver — it never hands the ladder an
+ * explicit `apiKey` — so it maps to the host rung it would have stood for.
  */
 function ladderSource(source: ApiKeySource): UsageCredentialSource {
   switch (source.kind) {
@@ -151,17 +118,16 @@ function ladderSource(source: ApiKeySource): UsageCredentialSource {
 }
 
 /**
- * The credential the TUI host streams with, or `undefined` when none resolves:
- * the host's own rung first (per host), then the package ladder — never a
+ * The credential the v1 TUI host streams with, or `undefined` when none
+ * resolves: the host's own record first, then the package ladder — never a
  * guessed account (ADR-0011). Callers make no request without a key.
  */
 export async function resolveTuiCredential(
-  input: TuiCredentialInput,
+  input: TuiCredentialV1Input,
   options: TuiCredentialOptions = {},
 ): Promise<TuiCredential | undefined> {
   const env = options.env ?? process.env
-  const host =
-    input.host === "v1" ? await v1HostCredential(input, env) : v2HostCredential(input.data, env)
+  const host = await v1HostCredential(input, env)
   if (host) return host
 
   const resolved = resolveApiKeyWithSource({

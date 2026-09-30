@@ -1,15 +1,14 @@
-// tests/tui-credential.test.ts — the TUI host's usage credential (issue #243,
-// ADR-0020): the v1 provider record and its client fallback, the v2
-// provider → integration → connection read, the package ladder below both,
-// and every no-credential outcome. Pure mock inputs — provider records, client
-// payloads, client-local integration data, an env object, and a temp auth file
-// — no network, no TUI runtime.
+// tests/tui-credential.test.ts — the v1 TUI host's usage credential (issue
+// #243, ADR-0020): the provider record the state already holds, its client
+// fallback, the package ladder below them, and every no-credential outcome.
+// The v2 half does not resolve locally anymore — its bridge is tested in
+// tests/usage-rpc.test.ts. Pure mock inputs — provider records, client
+// payloads, an env object, and a temp auth file — no network, no TUI runtime.
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { readFileSync } from "node:fs"
 import { resolveTuiCredential, type TuiCredentialOptions } from "../src/deals/tui-credential.js"
-import type { V2TuiContext, V2TuiIntegrationConnection } from "../src/plugin/v2-tui-types.js"
 import { assert, assertEqual, run } from "./harness.js"
 
 /** No ambient credential: tests only see what they inject. */
@@ -30,43 +29,7 @@ function providerList(entry?: Record<string, unknown>) {
   return { data: { all: entry ? [entry] : [], default: {}, connected: [] } }
 }
 
-/** A v2 client-local data store carrying the slices the resolver reads. */
-function v2Data(input: {
-  providers?: ReadonlyArray<{ id: string; integrationID?: string }>
-  integrations?: ReadonlyArray<{
-    id: string
-    connections: ReadonlyArray<V2TuiIntegrationConnection>
-  }>
-}): V2TuiContext["data"] {
-  return {
-    session: { get: () => undefined },
-    location: {
-      model: { list: () => [] },
-      provider: { list: () => input.providers ?? [] },
-      integration: {
-        list: () =>
-          (input.integrations ?? []).map((integration) => ({
-            name: "Command Code",
-            ...integration,
-          })),
-      },
-    },
-  } as unknown as V2TuiContext["data"]
-}
-
-/** The `commandcode` provider + integration pair a v2 host would project. */
-function v2Host(connections: ReadonlyArray<V2TuiIntegrationConnection>): V2TuiContext["data"] {
-  return v2Data({
-    providers: [{ id: "commandcode", integrationID: "commandcode" }],
-    integrations: [{ id: "commandcode", connections }],
-  })
-}
-
 run([
-  // ---------------------------------------------------------------------------
-  // v1 TUI: the provider record the state already holds (ADR-0015's read).
-  // ---------------------------------------------------------------------------
-
   [
     "v1: options.apiKey resolves from the state record, before key",
     async () => {
@@ -226,135 +189,12 @@ run([
   ],
 
   // ---------------------------------------------------------------------------
-  // v2 TUI: provider → client-local integration → the active connection.
+  // The package ladder below the v1 host rung.
   // ---------------------------------------------------------------------------
 
   [
-    "v2: the provider's integration env connection reads the named environment variable",
+    "environment rung: COMMANDCODE_API_KEY below the host rung",
     async () => {
-      assertEqual(
-        await resolveTuiCredential(
-          { host: "v2", data: v2Host([{ type: "env", name: "COMMANDCODE_API_KEY" }]) },
-          { env: { COMMANDCODE_API_KEY: "env_key" }, authPaths: [] },
-        ),
-        { key: "env_key", source: { kind: "host" } },
-      )
-      // The name is read from the connection, not assumed: a host that names
-      // its env method differently still resolves.
-      assertEqual(
-        await resolveTuiCredential(
-          { host: "v2", data: v2Host([{ type: "env", name: "CC_TUI_USAGE_KEY" }]) },
-          {
-            env: { COMMANDCODE_API_KEY: "env_key", CC_TUI_USAGE_KEY: "custom_key" },
-            authPaths: [],
-          },
-        ),
-        { key: "custom_key", source: { kind: "host" } },
-      )
-    },
-  ],
-
-  [
-    "v2: an active credential connection yields undefined — the documented notice path",
-    async () => {
-      // The store-only user: the value lives in the Host's credential store,
-      // which the TUI host never sees. No env connection exists (the env
-      // method only surfaces when its variable is set), so nothing resolves.
-      assertEqual(
-        await resolveTuiCredential(
-          {
-            host: "v2",
-            data: v2Host([{ type: "credential", id: "cred_1", label: "Command Code API key" }]),
-          },
-          NO_ENV,
-        ),
-        undefined,
-      )
-    },
-  ],
-
-  [
-    "v2: a stored credential stays active over a live env connection; the ladder answers with its own rung",
-    async () => {
-      // The Host projects stored credentials first and `active()` is [0], so
-      // with both present the session streams with the store credential — an
-      // account this process cannot reach. The package ladder below then reads
-      // COMMANDCODE_API_KEY itself, so the answer is labeled as that rung
-      // rather than claimed as the Host's.
-      assertEqual(
-        await resolveTuiCredential(
-          {
-            host: "v2",
-            data: v2Host([
-              { type: "credential", id: "cred_1", label: "Command Code API key" },
-              { type: "env", name: "COMMANDCODE_API_KEY" },
-            ]),
-          },
-          { env: { COMMANDCODE_API_KEY: "env_key" }, authPaths: [] },
-        ),
-        { key: "env_key", source: { kind: "environment" } },
-      )
-    },
-  ],
-
-  [
-    "v2: the rung degrades structurally — missing provider, integrationID, integration, or connections",
-    async () => {
-      const env = { COMMANDCODE_API_KEY: "env_key" }
-      const options = { env, authPaths: [] }
-      const cases: Array<[string, V2TuiContext["data"]]> = [
-        ["no provider record", v2Data({ integrations: [] })],
-        ["provider without an integrationID", v2Data({ providers: [{ id: "commandcode" }] })],
-        [
-          "integration record absent",
-          v2Data({ providers: [{ id: "commandcode", integrationID: "commandcode" }] }),
-        ],
-        [
-          "integration id does not match the provider",
-          v2Data({
-            providers: [{ id: "commandcode", integrationID: "other" }],
-            integrations: [{ id: "commandcode", connections: [{ type: "env", name: "X" }] }],
-          }),
-        ],
-        [
-          "connections empty",
-          v2Data({
-            providers: [{ id: "commandcode", integrationID: "commandcode" }],
-            integrations: [{ id: "commandcode", connections: [] }],
-          }),
-        ],
-        [
-          "connections field dropped by the host",
-          {
-            session: { get: () => undefined },
-            location: {
-              model: { list: () => [] },
-              provider: { list: () => [{ id: "commandcode", integrationID: "commandcode" }] },
-              integration: { list: () => [{ id: "commandcode", name: "Command Code" }] },
-            },
-          } as unknown as V2TuiContext["data"],
-        ],
-        ["env connection whose variable is unset", v2Host([{ type: "env", name: "MISSING_KEY" }])],
-      ]
-      for (const [label, data] of cases) {
-        // The rung yields nothing for each shape; the ladder below answers.
-        assertEqual(
-          await resolveTuiCredential({ host: "v2", data }, options),
-          { key: "env_key", source: { kind: "environment" } },
-          label,
-        )
-      }
-    },
-  ],
-
-  // ---------------------------------------------------------------------------
-  // The package ladder below both hosts.
-  // ---------------------------------------------------------------------------
-
-  [
-    "environment rung: COMMANDCODE_API_KEY below both host rungs",
-    async () => {
-      const resolved = { key: "env_key", source: { kind: "environment" } }
       assertEqual(
         await resolveTuiCredential(
           { host: "v1", providers: v1Providers() },
@@ -363,17 +203,7 @@ run([
             authPaths: [],
           },
         ),
-        resolved,
-      )
-      assertEqual(
-        await resolveTuiCredential(
-          { host: "v2", data: v2Data({}) },
-          {
-            env: { COMMANDCODE_API_KEY: "env_key" },
-            authPaths: [],
-          },
-        ),
-        resolved,
+        { key: "env_key", source: { kind: "environment" } },
       )
     },
   ],
@@ -405,24 +235,12 @@ run([
   ],
 
   [
-    "both halves share one ladder: identical inputs resolve identically",
-    async () => {
-      const options = { env: { COMMANDCODE_API_KEY: "env_key" }, authPaths: [] }
-      const v1 = await resolveTuiCredential({ host: "v1", providers: v1Providers() }, options)
-      const v2 = await resolveTuiCredential({ host: "v2", data: v2Data({}) }, options)
-      assertEqual(v1, v2)
-      assertEqual(await resolveTuiCredential({ host: "v2", data: v2Data({}) }, NO_ENV), undefined)
-    },
-  ],
-
-  [
-    "nothing resolves: undefined for both halves, so callers make no request",
+    "nothing resolves: undefined, so callers make no request",
     async () => {
       assertEqual(
         await resolveTuiCredential({ host: "v1", providers: v1Providers() }, NO_ENV),
         undefined,
       )
-      assertEqual(await resolveTuiCredential({ host: "v2", data: v2Data({}) }, NO_ENV), undefined)
     },
   ],
 
@@ -435,10 +253,6 @@ run([
         await resolveTuiCredential(
           { host: "v1", providers: v1Providers({ id: "commandcode", key: "v1_key" }) },
           NO_ENV,
-        ),
-        await resolveTuiCredential(
-          { host: "v2", data: v2Host([{ type: "env", name: "COMMANDCODE_API_KEY" }]) },
-          { env: { COMMANDCODE_API_KEY: "v2_key" }, authPaths: [] },
         ),
         await resolveTuiCredential(
           { host: "v1", providers: v1Providers() },

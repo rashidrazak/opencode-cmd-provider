@@ -10,9 +10,13 @@
 // `@opencode/plugin@2.0.8` (`dist/promise/{plugin,provider,model,integration,tool,aisdk}.d.ts`)
 // and `@opencode/schema@2.0.8` (`Provider.Info`, `Model.Info`, `Tool.Info`,
 // `Connection.Info`, `Credential.Value`). The `connection` surface has been
-// byte-identical from 2.0.0 through 2.0.8. Bumping the supported v2 line means
-// re-deriving these from the published package — tests/plugin-v2.test.ts pins
-// the parts we depend on.
+// byte-identical from 2.0.0 through 2.0.8. The `rpc` port surface
+// (`dist/promise/{plugin,rpc}.d.ts` + `@opencode/schema/rpc`'s
+// `PortableDefinition`) was re-derived against 2.0.19 and is present in every
+// 2.0.x release checked (2.0.3 through 2.0.20) — it carries the Deals usage
+// bridge (ADR-0020). Bumping the supported v2 line means re-deriving these
+// from the published package — tests/plugin-v2.test.ts pins the parts we
+// depend on.
 
 /** Provider record draft: `Provider.Info` with `DeepMutable` applied. */
 export interface V2ProviderInfo {
@@ -168,6 +172,23 @@ export type V2ConnectionInfo = V2ConnectionCredentialInfo | V2ConnectionEnvInfo
  */
 export type V2CredentialValue = { type: "key"; key: string } | { type: "oauth"; access: string }
 
+/**
+ * A portable RPC port definition (`Rpc.PortableDefinition`): an id, each
+ * method's portable input/output schemas, and its event map. The host
+ * validates the definition before serving it; the usage bridge's schemas are
+ * plain JSON Schema objects, which this mirror keeps opaque.
+ */
+export interface V2RpcDefinition {
+  readonly id: string
+  readonly methods: Readonly<Record<string, { readonly input: unknown; readonly output: unknown }>>
+  readonly events: Readonly<Record<string, unknown>>
+}
+
+/** The second `rpc` handler argument (`RpcCallContext`): caller cancellation. */
+export interface V2RpcCallContext {
+  readonly signal: AbortSignal
+}
+
 export interface V2ToolResult {
   content?: string | ReadonlyArray<{ type: "text"; text: string }>
   metadata?: Readonly<Record<string, unknown>>
@@ -228,6 +249,21 @@ export interface V2SetupContext {
   }
   readonly tool: {
     transform(callback: (editor: V2ToolEditor) => void): Promise<unknown>
+  }
+  /**
+   * The cross-plugin RPC surface (`RpcDomain`): `register` publishes a
+   * portable port the host serves and other plugins — the Deals TUI half
+   * included, through its own `client.rpc` — can call (ADR-0020's usage
+   * bridge). The resolved registration is not kept: nothing consumes its
+   * events or disposes it.
+   */
+  readonly rpc: {
+    register(
+      definition: V2RpcDefinition,
+      handlers: Readonly<
+        Record<string, (input: unknown, context: V2RpcCallContext) => Promise<unknown> | unknown>
+      >,
+    ): Promise<unknown>
   }
   readonly aisdk: {
     hook(

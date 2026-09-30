@@ -6,8 +6,14 @@
 // turns inside the cooldown (coalesced into one trailing refresh), the local
 // countdown clock with one confirmation per window roll, the 5 → 10 → 20 → 30
 // minute failure backoff with its success reset, and unmount cleanup.
-import { createUsagePanel, type UsagePanel, type UsagePanelState } from "../src/deals/tui-usage.js"
-import { renderUsageRows, type UsageResult } from "../src/deals/usage.js"
+import {
+  createUsagePanel,
+  v1UsageLoader,
+  type UsageLoadOutcome,
+  type UsagePanel,
+  type UsagePanelState,
+} from "../src/deals/tui-usage.js"
+import { renderUsageRows } from "../src/deals/usage.js"
 import { subscribeV1Idle } from "../src/deals/tui.js"
 import { createFakeClock, type FakeClock } from "./helpers/fake-clock.js"
 import { assert, assertEqual, run } from "./harness.js"
@@ -83,8 +89,8 @@ interface Harness {
 
 /**
  * A mounted-path panel over the real fetch orchestrator: the v1 host's
- * provider-record credential, a recording fetch that can be flipped to fail,
- * and the fake clock. Nothing here touches the network.
+ * provider-record credential through `v1UsageLoader`, a recording fetch that
+ * can be flipped to fail, and the fake clock. Nothing here touches the network.
  */
 function harness(options: FixtureResets = {}): Harness {
   const clock = createFakeClock(NOW)
@@ -99,10 +105,11 @@ function harness(options: FixtureResets = {}): Harness {
     return new Response(JSON.stringify(bodies[path]), { status: 200 })
   }) as unknown as typeof fetch
   const panel = createUsagePanel(
-    () => ({ host: "v1", providers: [{ id: "commandcode", key: "v1_key" }] }),
-    {
+    v1UsageLoader(() => ({ host: "v1", providers: [{ id: "commandcode", key: "v1_key" }] }), {
       credential: { env: {}, authPaths: [] },
       fetchOptions: { baseURL: BASE, fetch: fetchImpl, env: {} },
+    }),
+    {
       clock,
       onTick: (now) => ticks.push(now),
     },
@@ -393,25 +400,22 @@ run([
       const changes: UsagePanelState[] = []
       let signal: AbortSignal | undefined
       const panel = createUsagePanel(
-        () => ({ host: "v1", providers: [{ id: "commandcode", key: "k" }] }),
+        (request) => {
+          signal = request.signal
+          return new Promise<UsageLoadOutcome>((_, reject) => {
+            request.signal.addEventListener("abort", () => reject(new Error("aborted")))
+          })
+        },
         {
-          credential: { env: {}, authPaths: [] },
           clock,
-          resolveCredential: async () => ({ key: "k", source: { kind: "host" } }),
-          fetchSnapshot: (options) => {
-            signal = options.signal
-            return new Promise<UsageResult>((_, reject) => {
-              options.signal?.addEventListener("abort", () => reject(new Error("aborted")))
-            })
-          },
           onChange: (state) => changes.push(state),
         },
       )
       void panel.mount()
       await new Promise((resolve) => setImmediate(resolve))
-      assert(signal !== undefined, "the chain reached the fetch")
+      assert(signal !== undefined, "the chain reached the loader")
       panel.unmount()
-      assertEqual(signal?.aborted, true, "unmount cancels the in-flight fetch")
+      assertEqual(signal?.aborted, true, "unmount cancels the in-flight load")
       await new Promise((resolve) => setImmediate(resolve))
       assertEqual(changes, [], "an aborted chain publishes nothing")
       assertEqual(panel.state(), undefined, "no state was published")

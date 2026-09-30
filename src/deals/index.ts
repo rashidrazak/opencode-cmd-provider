@@ -1,9 +1,10 @@
 // src/deals/index.ts — server-side public entry for Deals intelligence
-// (catalog + enrichment + cmd_plan_summary tool). The TUI panel is a separate
-// host and is reached via tui.ts → src/deals/tui.tsx, never from the server
-// barrel, so the provider process does not load solid-js/@opentui. Deleting
-// this folder plus the two registration lines in src/plugin/index.ts leaves
-// Core (Snapshot, Auto-registration, provider/* streaming) byte-identical.
+// (catalog + enrichment + cmd_plan_summary tool + the usage RPC bridge). The
+// TUI panel is a separate host and is reached via tui.ts → src/deals/tui.tsx,
+// never from the server barrel, so the provider process does not load
+// solid-js/@opentui. Deleting this folder plus the registration lines in
+// src/plugin/index.ts leaves Core (Snapshot, Auto-registration, provider/*
+// streaming) byte-identical.
 
 // Catalog
 export {
@@ -41,3 +42,9 @@ export {
   resolvePlan,
 } from "./plan-summary.js"
 export type { PlanProvenance, PlanResolution, PlanSource } from "./plan-summary.js"
+
+// Usage bridge (v2 plugin-RPC port the server half registers for the TUI half,
+// ADR-0020) — server-side registration only; the TUI loader is loaded through
+// tui.ts → src/deals/usage-rpc.ts.
+export { registerUsageRpc } from "./usage-rpc.js"
+export type { UsageRpcInput, UsageRpcOutcome } from "./usage-rpc.js"

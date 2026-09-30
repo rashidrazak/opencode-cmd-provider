@@ -1,8 +1,9 @@
 // src/deals/tui-usage.ts — the sidebar panel's usage controller (issues #244,
 // #245): the mount chain that turns the TUI host's live state into the `Usage`
-// segment — resolve the credential (ADR-0020, #243), fetch one snapshot
-// (#242), keep the last successful snapshot when a later fetch fails — plus
-// the event-driven refresh policy that keeps it live without polling.
+// segment — one host *loader* per half (v1: resolve the credential locally,
+// then fetch; v2: ask the plugin's own server half over the RPC bridge,
+// src/deals/usage-rpc.ts) — plus the event-driven refresh policy that keeps it
+// live without polling.
 //
 // No polling: after mount, the only network triggers are a completed turn in
 // the watched session and a window roll. `turnCompleted()` is what the host
@@ -21,20 +22,21 @@
 //   - `unmount()` cancels the clock, the pending refresh and the in-flight
 //     chain through the fetch's abort signal.
 //
-// The chain itself shortens with use: the mount chain reads whoami and the
-// subscription record once (the `UsageScope` cache in src/deals/usage.ts) and
-// a routine refresh is credits + summary only.
+// The chain itself shortens with use: the load's scope cache (the `UsageScope`
+// in src/deals/usage.ts) survives between loads — round-tripped for v2 — so a
+// routine refresh is credits + summary only.
 //
 // Host-agnostic by design: no TUI runtime (solid-js), no runtime
-// `@opencode-ai/*` import. The caller supplies an *input thunk*, read at each
-// load, so a `/connect` or a provider re-registration between calls is
-// observed (ADR-0020 rule 3) — the resolver is never handed a cached record.
+// `@opencode-ai/*` import. The host loaders are built per panel, never per
+// module, so a `/connect` or a provider re-registration between calls is
+// observed (ADR-0020 rule 3).
 //
-// Degradations match the renderer's vocabulary: nothing resolving is the
-// notice and makes zero requests (ADR-0011); a throwing/failing chain is
-// `unavailable`; an `unavailable` after a successful load keeps the snapshot
-// on screen, while a chain that resolves nothing again publishes the notice
-// (there is no fresh-or-stale choice without a credential).
+// Degradations match the renderer's vocabulary: a loader answering
+// `no-credential` is the notice and makes zero requests (ADR-0011); a
+// throwing/failing loader is `unavailable`; an `unavailable` after a
+// successful load keeps the snapshot on screen, while a chain that resolves
+// nothing again publishes the notice (there is no fresh-or-stale choice
+// without a credential).
 import {
   fetchUsageSnapshot,
   type FetchUsageOptions,
@@ -45,19 +47,80 @@ import {
 } from "./usage.js"
 import {
   resolveTuiCredential,
-  type TuiCredential,
-  type TuiCredentialInput,
   type TuiCredentialOptions,
+  type TuiCredentialV1Input,
 } from "./tui-credential.js"
 
-/** The credential-resolver seam; defaults to the TUI host's own resolver. */
-export type TuiCredentialResolver = (
-  input: TuiCredentialInput,
-  options: TuiCredentialOptions,
-) => Promise<TuiCredential | undefined>
+/**
+ * What a load is asked for: the scope cached from earlier loads (absent on a
+ * mount), the panel's abort signal, and the render clock's instant. The
+ * loader may consult the host's live state — it is called per chain, never
+ * cached at mount (ADR-0020 rule 3).
+ */
+export interface UsageLoadRequest {
+  readonly scope?: UsageScope
+  readonly signal: AbortSignal
+  readonly now: number
+}
 
-/** The snapshot-fetch seam; defaults to the four-leg billing fetch. */
-export type UsageSnapshotFetcher = (options: FetchUsageOptions) => Promise<UsageResult>
+/**
+ * What a load answered: the renderable result, the scope to cache next (when
+ * the load refreshed it), and the display-only rung the credential answered
+ * for (never the key; ADR-0020 rule 2). A loader never throws for a host
+ * degradation — a missing credential is `no-credential`, a failed read is
+ * `unavailable` — and a throw is mapped to `unavailable` anyway.
+ */
+export interface UsageLoadOutcome {
+  readonly result: UsageResult
+  readonly scope?: UsageScope
+  readonly provenance?: UsageCredentialSource
+}
+
+/**
+ * One host half's load chain: v1 wraps `resolveTuiCredential` +
+ * `fetchUsageSnapshot`; v2 is `createUsageRpcLoader` over the plugin-RPC
+ * bridge. The controller never sees which half answered.
+ */
+export type UsageLoader = (request: UsageLoadRequest) => Promise<UsageLoadOutcome>
+
+/**
+ * The v1 half's loader: the panel's own chain, in this process — resolve the
+ * credential from the host state the input thunk reads *now*, then run the
+ * billing fetch with it. A missing credential answers the notice without a
+ * request; a failing client is the next rung, never an error (ADR-0015).
+ */
+export interface V1UsageLoaderOptions {
+  /** Credential-resolver inputs (env, auth-path and home overrides). */
+  credential?: TuiCredentialOptions
+  /** Fetch inputs (baseURL, fetch, env, catalog); the key/scope/signal/clock come from the load. */
+  fetchOptions?: Omit<FetchUsageOptions, "apiKey" | "scope" | "onScope" | "signal" | "now">
+}
+
+export function v1UsageLoader(
+  input: () => TuiCredentialV1Input,
+  options: V1UsageLoaderOptions = {},
+): UsageLoader {
+  return async (request) => {
+    const credential = await resolveTuiCredential(input(), options.credential ?? {})
+    if (credential === undefined) return { result: { state: "no-credential" } }
+    let scope = request.scope
+    const result = await fetchUsageSnapshot({
+      ...options.fetchOptions,
+      apiKey: credential.key,
+      scope,
+      onScope: (updated) => {
+        scope = updated
+      },
+      signal: request.signal,
+      now: request.now,
+    })
+    return {
+      result,
+      ...(scope === undefined ? {} : { scope }),
+      provenance: credential.source,
+    }
+  }
+}
 
 /**
  * What the panel renders for the usage segment: the latest load's result and,
@@ -111,14 +174,6 @@ export interface UsagePanelOptions {
   onChange?: (state: UsagePanelState) => void
   /** Called on every countdown tick with the new instant (the panel's render clock). */
   onTick?: (now: number) => void
-  /** Credential-resolver inputs (env, auth-path and home overrides). */
-  credential?: TuiCredentialOptions
-  /** Fetch inputs (baseURL, fetch, env, catalog); the key and scope come from the panel. */
-  fetchOptions?: Omit<FetchUsageOptions, "apiKey" | "scope" | "onScope" | "signal" | "now">
-  /** Credential-resolver seam for tests; defaults to `resolveTuiCredential`. */
-  resolveCredential?: TuiCredentialResolver
-  /** Snapshot-fetch seam for tests; defaults to `fetchUsageSnapshot`. */
-  fetchSnapshot?: UsageSnapshotFetcher
   /** Clock/timer seam for tests; defaults to the platform clock. */
   clock?: UsagePanelClock
 }
@@ -137,16 +192,12 @@ export interface UsagePanel {
 }
 
 /**
- * One panel's usage controller. `input` is called on every load — never
- * captured once — so the resolver reads the host state at the moment the
+ * One panel's usage controller. `load` is the half's chain — built by the
+ * caller (v1: `v1UsageLoader`; v2: `createUsageRpcLoader`), called on every
+ * load, never captured once, so the host state is read at the moment the
  * panel asks (ADR-0020 rule 3).
  */
-export function createUsagePanel(
-  input: () => TuiCredentialInput,
-  options: UsagePanelOptions = {},
-): UsagePanel {
-  const resolveCredential = options.resolveCredential ?? resolveTuiCredential
-  const fetchSnapshot = options.fetchSnapshot ?? fetchUsageSnapshot
+export function createUsagePanel(load: UsageLoader, options: UsagePanelOptions = {}): UsagePanel {
   const clock = options.clock ?? SYSTEM_CLOCK
 
   let state: UsagePanelState | undefined
@@ -200,25 +251,15 @@ export function createUsagePanel(
     lastAttemptAt = clock.now()
     let next: UsagePanelState
     try {
-      const credential = await resolveCredential(input(), options.credential ?? {})
-      if (credential === undefined) {
-        next = { result: { state: "no-credential" } }
-      } else {
-        const result = await fetchSnapshot({
-          ...options.fetchOptions,
-          apiKey: credential.key,
-          scope,
-          onScope: (updated) => {
-            scope = updated
-          },
-          signal: abort.signal,
-          now: clock.now(),
-        })
-        next = { result, provenance: credential.source }
-      }
+      const loaded = await load({ scope, signal: abort.signal, now: clock.now() })
+      if (loaded.scope !== undefined) scope = loaded.scope
+      next =
+        loaded.provenance === undefined
+          ? { result: loaded.result }
+          : { result: loaded.result, provenance: loaded.provenance }
     } catch {
-      // A throwing resolver or fetch is the unavailable state, never an
-      // exception escaping the panel's mount (ADR-0020 rule 1).
+      // A throwing loader is the unavailable state, never an exception
+      // escaping the panel's mount (ADR-0020 rule 1).
       next = { result: { state: "unavailable" } }
     }
     if (unmounted) return
