@@ -65,3 +65,16 @@ export function normalizePlan(value: unknown): PlanId | undefined {
   if (typeof value !== "string") return undefined
   return PLAN_ALIASES[value.toLowerCase()]
 }
+
+/**
+ * Subscription statuses that still identify a plan, mirroring the official
+ * Command Code CLI's own billing client. Any other status — canceled, unpaid,
+ * or one upstream adds later — resolves to unknown rather than reusing a plan
+ * the account no longer holds (ADR-0011). Shared by the billing surfaces: the
+ * `cmd_plan_summary` lookup and the usage snapshot's bundled cap fallbacks.
+ */
+export const PLAN_BEARING_SUBSCRIPTION_STATUSES: ReadonlySet<string> = new Set([
+  "active",
+  "trialing",
+  "past_due",
+])

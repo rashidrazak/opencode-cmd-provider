@@ -2,9 +2,12 @@
 // src/deals/tui.tsx — TUI plugin: "Command Code" deals section in the session
 // sidebar. Renders deal details from the picked model's enriched `cmd`
 // (produced by the server plugin's config hook on v1 and its provider transform
-// on v2). Every Command Code model gets the full fixed row set — a row the
-// model has no data for reads `N/A` instead of vanishing. Models from other
-// providers get nothing: the panel's visibility gate is the provider id.
+// on v2), plus the live `Usage` segment (issues #244/#245, src/deals/tui-usage.ts):
+// fetched once per panel mount, then refreshed on completed turns and window
+// rolls — never polled — with a local 30-second countdown clock. Every Command
+// Code model gets the full fixed row set — a row the model has no data for
+// reads `N/A` instead of vanishing. Models from other providers get nothing:
+// the panel's visibility gate is the provider id.
 //
 // Two hosts, two TUI contracts (ADR-0010), one default export:
 //   v1  `{ id, tui(api) }`        — `api.slots.register({ slots: { sidebar_content } })`
@@ -13,12 +16,24 @@
 // module is rejected outright and the sidebar never appears — the reason both
 // halves ship from this file. v1's reader only inspects `id`/`server`/`tui`, so
 // the extra `setup` is invisible to it (tests/contract.test.ts pins both).
-import { For, Show, createMemo } from "solid-js"
+// Each half subscribes to its own completed-turn signal (v1's `session.idle`
+// event bus, v2's `session.idle`/`session.execution.succeeded` data store)
+// and filters it to the panel's session before waking the refresh policy.
+import { For, Show, createMemo, createSignal, onCleanup, onMount } from "solid-js"
 import type { RGBA } from "@opentui/core"
 import type { Provider } from "@opencode-ai/sdk/v2"
 import type { TuiPlugin, TuiPluginApi, TuiPluginModule } from "@opencode-ai/plugin/tui"
 import { DEAL_SOURCE_URL, PLAN_CATALOG } from "./catalog.js"
 import { discountLabel, formatRate, todayIso } from "./format.js"
+import { renderUsageRows } from "./usage.js"
+import {
+  createUsagePanel,
+  v1UsageLoader,
+  type UsagePanel,
+  type UsagePanelState,
+} from "./tui-usage.js"
+import { createUsageRpcLoader } from "./usage-rpc.js"
+import type { TuiCredentialV1Input } from "./tui-credential.js"
 import type { PlanId } from "../catalog/plans.js"
 import type {
   V2TuiContext,
@@ -321,6 +336,27 @@ export function dealsRowsV2(
   return cmdRows(model.settings?.["cmd"] as Cmd | undefined, baseRates(base), today)
 }
 
+/**
+ * The panel's full row list: the model's fixed deals rows, then the `Usage`
+ * segment (#244). The visibility gate survives composition — an empty deals
+ * row list is a non-Command Code selection (or no selection), so the panel
+ * stays hidden even while a usage state exists. `now` is the segment's
+ * countdown clock — the panel body hands it the 30-second tick's instant
+ * (#245) so countdown text re-renders without a fetch.
+ */
+export function panelRows(
+  deals: DealsRow[],
+  usage: UsagePanelState | undefined,
+  now?: number,
+): DealsRow[] {
+  if (deals.length === 0) return []
+  // Before the first load settles there is no segment at all: an undefined
+  // state is "still loading", not the resolver's miss, so no notice flashes
+  // while the mount chain is in flight.
+  if (usage === undefined) return deals
+  return [...deals, ...renderUsageRows(usage.result, { provenance: usage.provenance, now })]
+}
+
 const id = "commandcode.deals"
 
 /** The panel itself, shared by both hosts: rows in, theme colours in. */
@@ -357,6 +393,79 @@ function DealsPanel(props: { rows: () => DealsRow[]; text: () => RGBA; textMuted
   )
 }
 
+/**
+ * The v1 half's live credential input (ADR-0020): the provider records the
+ * state already holds plus the TUI's own client. Built per load, never cached
+ * at mount, so a `/connect` or a provider re-registration is observed.
+ */
+export function v1UsageInput(api: TuiPluginApi): TuiCredentialV1Input {
+  return { host: "v1", providers: api.state.provider, client: api.client }
+}
+
+/**
+ * The v1 half's completed-turn adapter (#245): the event bus's `session.idle`
+ * for the watched session calls `notify`. `session` is a thunk so a slot
+ * re-rendered for another session cannot leave a stale filter behind. Returns
+ * the bus's own unsubscribe.
+ */
+export function subscribeV1Idle(
+  api: TuiPluginApi,
+  session: () => string,
+  notify: () => void,
+): () => void {
+  return api.event.on("session.idle", (event) => {
+    if (event.properties.sessionID === session()) notify()
+  })
+}
+
+/**
+ * One panel body's lifecycle, shared by both halves (#245): subscribe the
+ * host's completed-turn signal, start the mount chain, and cancel the clock,
+ * the subscription and any in-flight chain when the panel goes away.
+ */
+export function manageUsagePanel(panel: UsagePanel, subscribeIdle: () => () => void): void {
+  const unsubscribe = subscribeIdle()
+  onMount(() => {
+    void panel.mount()
+  })
+  onCleanup(() => {
+    unsubscribe()
+    panel.unmount()
+  })
+}
+
+/**
+ * The v1 panel body: rendered only while the selected model is a Command Code
+ * one, so the mount chain never reaches the billing API for another provider's
+ * selection. The controller lives as long as that selection does — one panel,
+ * one mount chain, no re-fetch on mid-session model switches.
+ */
+function CmdPanelV1(props: { api: TuiPluginApi; sessionID: string; model: () => V1Model }) {
+  const [usage, setUsage] = createSignal<UsagePanelState | undefined>(undefined)
+  const [now, setNow] = createSignal(Date.now())
+  const usagePanel = createUsagePanel(
+    v1UsageLoader(() => v1UsageInput(props.api)),
+    {
+      onChange: setUsage,
+      onTick: setNow,
+    },
+  )
+  manageUsagePanel(usagePanel, () =>
+    subscribeV1Idle(
+      props.api,
+      () => props.sessionID,
+      () => usagePanel.turnCompleted(),
+    ),
+  )
+  return (
+    <DealsPanel
+      rows={() => panelRows(dealsRows(props.model()), usage(), now())}
+      text={() => props.api.theme.current.text}
+      textMuted={() => props.api.theme.current.textMuted}
+    />
+  )
+}
+
 function DealsPanelV1(props: { api: TuiPluginApi; session_id: string }) {
   // Mid-session model switches update the session record (`session.updated`
   // reconciles it into the sync store), so reading `session.model` reactively
@@ -365,11 +474,9 @@ function DealsPanelV1(props: { api: TuiPluginApi; session_id: string }) {
     v1ModelFor(props.api.state.provider, props.api.state.session.get(props.session_id)?.model),
   )
   return (
-    <DealsPanel
-      rows={() => dealsRows(model())}
-      text={() => props.api.theme.current.text}
-      textMuted={() => props.api.theme.current.textMuted}
-    />
+    <Show when={model()}>
+      {(selected) => <CmdPanelV1 api={props.api} sessionID={props.session_id} model={selected} />}
+    </Show>
   )
 }
 
@@ -387,18 +494,70 @@ export function v2ThemeColors(theme: V2TuiTheme): { text: RGBA; muted: RGBA } {
     : { text: text.default, muted: text.subdued }
 }
 
+/**
+ * The v2 half's completed-turn adapter (#245): the data store's
+ * `session.idle` and `session.execution.succeeded` for the watched session
+ * call `notify`. `session` is a thunk so a slot re-rendered for another
+ * session cannot leave a stale filter behind. Returns the teardown that
+ * unsubscribes both.
+ */
+export function subscribeV2Idle(
+  ctx: V2TuiContext,
+  session: () => string,
+  notify: () => void,
+): () => void {
+  const offIdle = ctx.data.on("session.idle", (event) => {
+    if (event.data.sessionID === session()) notify()
+  })
+  const offSucceeded = ctx.data.on("session.execution.succeeded", (event) => {
+    if (event.data.sessionID === session()) notify()
+  })
+  return () => {
+    offIdle()
+    offSucceeded()
+  }
+}
+
+/**
+ * The v2 panel body, gated exactly like v1's: mounted only for a Command Code
+ * selection, one mount chain per panel — and one clock, one subscription and
+ * one abortable chain, all cancelled with it (#245). The chain is the RPC
+ * bridge (ADR-0020): the plugin's server half resolves the Host's connected
+ * credential and fetches the snapshot; this process never holds the key.
+ */
+function CmdPanelV2(props: { ctx: V2TuiContext; sessionID: string; model: () => V2PanelModel }) {
+  const [usage, setUsage] = createSignal<UsagePanelState | undefined>(undefined)
+  const [now, setNow] = createSignal(Date.now())
+  const usagePanel = createUsagePanel(createUsageRpcLoader(props.ctx.client), {
+    onChange: setUsage,
+    onTick: setNow,
+  })
+  manageUsagePanel(usagePanel, () =>
+    subscribeV2Idle(
+      props.ctx,
+      () => props.sessionID,
+      () => usagePanel.turnCompleted(),
+    ),
+  )
+  const colors = () => v2ThemeColors(props.ctx.theme)
+  return (
+    <DealsPanel
+      rows={() => panelRows(dealsRowsV2(props.model()), usage(), now())}
+      text={() => colors().text}
+      textMuted={() => colors().muted}
+    />
+  )
+}
+
 function DealsPanelV2(props: { ctx: V2TuiContext; sessionID: string }) {
   // Same idea as v1 against the v2 data store: `data` is the host's live
   // client-local state, so reading the session's model and the model catalog
   // inside the memo re-renders the panel when either changes.
   const model = createMemo(() => v2ModelFor(props.ctx.data, props.sessionID))
-  const colors = () => v2ThemeColors(props.ctx.theme)
   return (
-    <DealsPanel
-      rows={() => dealsRowsV2(model())}
-      text={() => colors().text}
-      textMuted={() => colors().muted}
-    />
+    <Show when={model()}>
+      {(selected) => <CmdPanelV2 ctx={props.ctx} sessionID={props.sessionID} model={selected} />}
+    </Show>
   )
 }
 

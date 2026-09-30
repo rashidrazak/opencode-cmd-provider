@@ -54,22 +54,19 @@ function providerEntry(result: unknown, providerID: string): Record<string, unkn
 }
 
 /**
- * The credential the v1 Host will use for `providerID`: `options.apiKey` (a
- * declared credential, which the Host prefers) before `key` (whatever the env
- * method or the auth store resolved). `source` distinguishes an env-supplied
- * key from a store one by matching it against the provider's own `env` names.
+ * The credential a v1 provider *entry* carries: `options.apiKey` (a declared
+ * credential, which the Host prefers) before `key` (whatever the env method or
+ * the auth store resolved). `source` distinguishes an env-supplied key from a
+ * store one by matching it against the provider's own `env` names.
  *
- * A rejection is deliberately *not* caught here — the tool seam already maps a
- * failing Host to the next ladder rung in one place.
+ * Split from `hostCredentialFromV1` so the TUI resolver (ADR-0020) reads the
+ * same order from the provider record its state already holds without
+ * re-implementing the read.
  */
-export async function hostCredentialFromV1(
-  client: V1ProviderListClient,
-  providerID: string,
+export function hostCredentialFromEntry(
+  entry: Record<string, unknown>,
   env: NodeJS.ProcessEnv = process.env,
-): Promise<HostCredential | undefined> {
-  const entry = providerEntry(await client.provider.list(), providerID)
-  if (!entry) return undefined
-
+): HostCredential | undefined {
   if (isRecord(entry.options)) {
     const configured = stringValue(entry.options.apiKey)
     if (configured) return { key: configured, source: "config" }
@@ -80,4 +77,20 @@ export async function hostCredentialFromV1(
   const names = Array.isArray(entry.env) ? entry.env : []
   const fromEnvironment = names.some((name) => typeof name === "string" && env[name] === key)
   return { key, source: fromEnvironment ? "environment" : "host" }
+}
+
+/**
+ * The credential the v1 Host will use for `providerID`, read from its own
+ * record through the plugin's SDK client.
+ *
+ * A rejection is deliberately *not* caught here — the tool seam already maps a
+ * failing Host to the next ladder rung in one place.
+ */
+export async function hostCredentialFromV1(
+  client: V1ProviderListClient,
+  providerID: string,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<HostCredential | undefined> {
+  const entry = providerEntry(await client.provider.list(), providerID)
+  return entry ? hostCredentialFromEntry(entry, env) : undefined
 }

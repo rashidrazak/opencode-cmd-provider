@@ -15,9 +15,15 @@
 // `@opencode/theme@2.0.3` (`dist/tui/types.d.ts`), except the theme slice,
 // which spans the `@opencode/theme@2.0.8` `text.default`/`text.subdued` →
 // `text.base`/`text.muted` rename (see V2TuiThemeText) because the supported
-// v2.0.x line includes both spellings. Bumping the supported v2 line means
-// re-deriving these from the published packages — tests/tui-deals-panel pins
-// the parts we depend on.
+// v2.0.x line includes both spellings, the client's RPC subclient slice the
+// usage bridge calls (`@opencode/client@2.0.3`'s `OpenCodeClient.rpc`;
+// re-checked against 2.0.19 — the TUI context's `client` is present from
+// 2.0.3 through 2.0.20), and the data store's turn events the usage refresh
+// subscribes to (`Data.on`, typed by `@opencode/client@2.0.3`'s
+// `SessionIdle` / `SessionExecutionSucceeded`).
+// Bumping the supported v2 line means re-deriving these from the published
+// packages — tests/tui-deals-panel and tests/tui-credential pin the parts we
+// depend on.
 import type { RGBA } from "@opentui/core"
 
 /**
@@ -114,20 +120,59 @@ export interface V2TuiModel {
 }
 
 /**
+ * The client slice the TUI half consumes: the RPC subclient factory
+ * (`OpenCodeClient.rpc`, present from `@opencode/client@2.0.3`). The usage
+ * bridge calls `client.rpc(definition)` and receives the port's subclient;
+ * the wire payloads are parsed structurally at the call site (ADR-0020), so
+ * this mirror pins only the method shape.
+ */
+export interface V2TuiRpcSubclient {
+  readonly usage: (
+    input: unknown,
+    callOptions?: { readonly signal?: AbortSignal },
+  ) => Promise<unknown>
+}
+
+export interface V2TuiClient {
+  readonly rpc: (definition: unknown) => V2TuiRpcSubclient
+}
+
+/**
+ * The two v2 data-store events that mark a completed turn (issue #245): the
+ * session going idle and the execution succeeding. Mirrored from
+ * `@opencode/client`'s event union (`SessionIdle` / `SessionExecutionSucceeded`
+ * — `Data.on` is typed by that union) and narrowed to the members this package
+ * reads; both carry `data.sessionID`.
+ */
+export type V2TuiTurnEvent =
+  | { readonly type: "session.idle"; readonly data: { readonly sessionID: string } }
+  | {
+      readonly type: "session.execution.succeeded"
+      readonly data: { readonly sessionID: string }
+    }
+
+/**
  * The v2 TUI context. `ui.slot` claims a place in the slot tree and returns the
- * release function; `data` is the host's live client-local store — reads are
+ * release function; `client` is the host's OpenCode client (the RPC bridge's
+ * transport); `data` is the host's live client-local store — reads are
  * reactive, so the claim's `render` is re-invoked when the selected model
- * changes.
+ * changes, and `on` subscribes to its turn events.
  */
 export interface V2TuiContext {
   readonly theme: V2TuiTheme
   readonly ui: {
     readonly slot: (claim: V2TuiSlotClaim) => () => void
   }
+  readonly client: V2TuiClient
   readonly data: {
     readonly session: {
       get(sessionID: string): V2TuiSession | undefined
     }
+    /** Subscribes to one of the turn events; returns the unsubscribe. */
+    readonly on: <Type extends V2TuiTurnEvent["type"]>(
+      type: Type,
+      handler: (event: Extract<V2TuiTurnEvent, { readonly type: Type }>) => void,
+    ) => () => void
     readonly location: {
       readonly model: {
         list(): readonly V2TuiModel[] | undefined

@@ -15,6 +15,7 @@ import {
   enrichCommandCodeModels,
   enrichCommandCodeModelsV2,
   planSummaryTool,
+  registerUsageRpc,
 } from "../deals/index.js"
 import { planSummaryV2Tool } from "../deals/plan-summary.js"
 import { hostCredentialFromV1 } from "../deals/host-credential.js"
@@ -74,17 +75,18 @@ const server: Plugin = async (input) => {
 }
 
 /**
- * v2 host: the same three capabilities through the transform API. The two Deals
- * intelligence seams — the provider enrichment pass and the `cmd_plan_summary`
- * tool — are supplied here, so deleting `src/deals/` plus these two lines still
- * leaves Core green (ADR-0004). The tool is handed the credential getter for the
- * Host's active connection, which is the only credential the session streams
- * with (ADR-0015).
+ * v2 host: the same three capabilities through the transform API. The Deals
+ * intelligence seams — the provider enrichment pass, the `cmd_plan_summary`
+ * tool and the usage RPC bridge — are supplied here, so deleting `src/deals/`
+ * plus these registrations still leaves Core green (ADR-0004). The tool and
+ * the bridge are handed the credential getter for the Host's active
+ * connection, which is the only credential the session streams with (ADR-0015).
  */
 const setup = async (ctx: V2SetupContext): Promise<void> =>
   setupCommandCode(ctx, {
     enrichProvider: enrichCommandCodeModelsV2,
     tools: [planSummaryV2Tool({ hostCredential: hostCredentialFromV2(ctx) })],
+    rpc: (rpcCtx) => registerUsageRpc(rpcCtx, hostCredentialFromV2(rpcCtx)),
   })
 
 export default { id: "commandcode", server, setup }

@@ -52,6 +52,12 @@ export interface V2SetupExtensions {
   enrichProvider?: (editor: V2ProviderEditor) => void
   /** Extra tools registered alongside the core set. */
   tools?: readonly V2ToolDefinition[]
+  /**
+   * Extra plugin-RPC ports, registered after everything else. The Deals usage
+   * bridge (ADR-0020) is the one consumer: the server half publishes the port
+   * the TUI half calls through its own `client.rpc`.
+   */
+  rpc?: (ctx: V2SetupContext) => Promise<void>
 }
 
 /**
@@ -81,6 +87,7 @@ export async function setupCommandCode(
       for (const tool of tools) editor.add(tool)
     })
   }
+  if (extensions.rpc !== undefined) await extensions.rpc(ctx)
   await ctx.aisdk.hook("sdk", provideSdk, { providerID: PROVIDER_ID })
 }
 

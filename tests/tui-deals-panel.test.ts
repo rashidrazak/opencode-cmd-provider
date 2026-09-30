@@ -1,18 +1,59 @@
 // tests/tui-deals-panel.test.ts — deals sidebar panel data extraction and the
-// two host contracts (v1 `tui(api)` slot map, v2 `setup(context)` slot claim).
+// two host contracts (v1 `tui(api)` slot map, v2 `setup(context)` slot claim),
+// plus the appended live `Usage` segment's wiring (issue #244) and the
+// completed-turn adapters each half subscribes through (issue #245).
 import plugin, {
   dealsRows,
   dealsRowsV2,
+  manageUsagePanel,
+  panelRows,
+  subscribeV1Idle,
+  subscribeV2Idle,
   v1ModelFor,
+  v1UsageInput,
   v2ModelFor,
   v2ThemeColors,
 } from "../src/deals/tui.js"
 import type { DealsRow } from "../src/deals/tui.js"
+import { createUsagePanel, type UsagePanel, type UsagePanelState } from "../src/deals/tui-usage.js"
+import { createUsageRpcLoader } from "../src/deals/usage-rpc.js"
+import { createRoot } from "solid-js"
 import type { Provider } from "@opencode-ai/sdk/v2"
+import type { TuiPluginApi } from "@opencode-ai/plugin/tui"
 import type { V2TuiContext, V2TuiSlotClaim, V2TuiTheme } from "../src/plugin/v2-tui-types.js"
 import { assertEqual, assert, run } from "./harness.js"
 
 const NA = "N/A"
+
+/** The render clock the usage fixtures pin their countdowns against. */
+const NOW = Date.parse("2026-10-01T12:00:00.000Z")
+
+/** A live reset 4h32m out, in milliseconds (above the seconds-heuristic floor). */
+const RESET_AT = NOW + (4 * 60 + 32) * 60_000
+
+/** Five days out, so the monthly meter's renewal suffix is exactly `5d`. */
+const PERIOD_END = NOW + 5 * 86_400_000
+
+/**
+ * One published usage state as the panel's controller hands it over: the three
+ * meters (with a countdown and a renewal, so `panelRows`'s `now` is
+ * load-bearing) and the host rung's provenance.
+ */
+function usageState(): UsagePanelState {
+  return {
+    result: {
+      state: "usage",
+      snapshot: {
+        limited: true,
+        fiveHour: { used: 0.5, cap: 3, exceeded: false },
+        weekly: { used: 1.5, cap: 6, exceeded: false, resetAt: RESET_AT },
+        monthly: { used: 39.5, cap: 40 },
+        periodEnd: PERIOD_END,
+      },
+    },
+    provenance: { kind: "host" },
+  }
+}
 
 /** PLAN_CATALOG display names the Allowance segment renders, in order. */
 const PLAN_LABELS = ["Go", "GOAT", "Pro", "Max 10×", "Max 20×", "Team Pro"]
@@ -704,6 +745,277 @@ run([
       assertFixedRows(dealsRows(missing), {})
     },
   ],
+  // ---------------------------------------------------------------------------
+  // The live `Usage` segment (issue #244): appended below the fixed rows from
+  // the panel's mount chain. The chain's fetch counts and retention rules are
+  // pinned in tests/tui-usage.test.ts; here the panel's composition and both
+  // halves' live credential inputs are.
+  // ---------------------------------------------------------------------------
+
+  [
+    "the panel appends the Usage segment below the fixed rows",
+    () => {
+      const deals = dealsRows({ options: { cmd: { free: false } } })
+      const rows = panelRows(deals, usageState(), NOW)
+      // The fixed rows are untouched and in front...
+      assertEqual(rows.slice(0, deals.length), deals)
+      // ...and the segment follows the last fixed row.
+      assert(
+        rows.findIndex(([label]) => label === "Usage") >
+          rows.findIndex(([label]) => label === "Tok/s"),
+        "the Usage heading must come after every fixed row",
+      )
+      assertEqual(rows[deals.length], ["", ""])
+      assertEqual(rows[deals.length + 1], ["Usage", "", "heading"])
+      assertEqual(row(rows, "5-hour"), ["5-hour", "$0.50 / $3.00 · 17%"])
+      assertEqual(row(rows, "Weekly"), ["Weekly", "$1.50 / $6.00 · 25% · resets in 4h 32m"])
+      assertEqual(row(rows, "Monthly"), ["Monthly", "$39.50 / $40.00 · 99% · renews in 5d"])
+      assertEqual(row(rows, "via Host connection"), ["via Host connection", "", "value"])
+    },
+  ],
+
+  [
+    "before the first load settles the panel shows the fixed rows only",
+    () => {
+      // An undefined state is "the mount chain is still in flight", not the
+      // resolver's miss: no notice may flash while the fetch is pending.
+      const deals = dealsRows({ options: { cmd: {} } })
+      assertEqual(panelRows(deals, undefined, NOW), deals)
+    },
+  ],
+
+  [
+    "each Usage degradation renders its line below the fixed rows",
+    () => {
+      const deals = dealsRows({ options: { cmd: {} } })
+      const cases: Array<[UsagePanelState, string]> = [
+        [
+          { result: { state: "no-credential" } },
+          "Usage needs COMMANDCODE_API_KEY — set it to see live limits",
+        ],
+        [
+          { result: { state: "unavailable" } },
+          "Usage unavailable — could not read the Command Code billing API",
+        ],
+      ]
+      for (const [state, line] of cases) {
+        const rows = panelRows(deals, state, NOW)
+        assertEqual(rows.slice(0, deals.length), deals)
+        assertEqual(rows[deals.length + 1], ["Usage", "", "heading"])
+        assertEqual(rows[deals.length + 2], [line, "", "value"])
+      }
+    },
+  ],
+
+  [
+    "the panel stays hidden for non-Command Code models, with or without usage",
+    () => {
+      for (const state of [undefined, usageState()]) {
+        assertEqual(panelRows(dealsRows(undefined), state, NOW), [])
+        assertEqual(panelRows([], state, NOW), [])
+      }
+    },
+  ],
+
+  [
+    "the v1 usage input reads the live host state",
+    () => {
+      const providers = [{ id: "commandcode", key: "k" }] as unknown as readonly Provider[]
+      const client = { provider: { list: async () => ({}) } }
+      const api = { state: { provider: providers }, client } as unknown as TuiPluginApi
+      assertEqual(v1UsageInput(api), { host: "v1", providers, client })
+      // The v2 half has no local resolver anymore: its chain is the RPC bridge,
+      // pinned by tests/usage-rpc.test.ts.
+    },
+  ],
+
+  [
+    "v1 idle adapter: only the watched session's session.idle wakes the panel",
+    () => {
+      const handlers: Array<(event: { properties: { sessionID: string } }) => void> = []
+      let offs = 0
+      const api = {
+        event: {
+          on: (_type: string, handler: (event: { properties: { sessionID: string } }) => void) => {
+            handlers.push(handler)
+            return () => {
+              offs += 1
+            }
+          },
+        },
+      } as unknown as TuiPluginApi
+      const notified: string[] = []
+      const unsubscribe = subscribeV1Idle(
+        api,
+        () => "ses_1",
+        () => notified.push("turn"),
+      )
+      assertEqual(handlers.length, 1, "one session.idle subscription")
+      handlers[0]!({ properties: { sessionID: "ses_2" } })
+      assertEqual(notified, [], "another session's turn is not this panel's")
+      handlers[0]!({ properties: { sessionID: "ses_1" } })
+      assertEqual(notified, ["turn"])
+      unsubscribe()
+      assertEqual(offs, 1, "the bus subscription is torn down")
+    },
+  ],
+
+  [
+    "v2 idle adapter: both turn events for the watched session wake the panel",
+    () => {
+      const handlers = new Map<string, Array<(event: { data: { sessionID: string } }) => void>>()
+      let offs = 0
+      const data = {
+        on: (_type: string, handler: (event: { data: { sessionID: string } }) => void) => {
+          handlers.set(_type, [...(handlers.get(_type) ?? []), handler])
+          return () => {
+            offs += 1
+          }
+        },
+      } as unknown as V2TuiContext["data"]
+      const notified: string[] = []
+      const unsubscribe = subscribeV2Idle(
+        { data } as unknown as V2TuiContext,
+        () => "ses_1",
+        () => notified.push("turn"),
+      )
+      assertEqual(
+        [...handlers.keys()].sort(),
+        ["session.execution.succeeded", "session.idle"],
+        "both turn events are subscribed",
+      )
+      handlers.get("session.idle")![0]!({ data: { sessionID: "ses_other" } })
+      handlers.get("session.execution.succeeded")![0]!({ data: { sessionID: "ses_other" } })
+      assertEqual(notified, [], "another session's turn is not this panel's")
+      handlers.get("session.idle")![0]!({ data: { sessionID: "ses_1" } })
+      handlers.get("session.execution.succeeded")![0]!({ data: { sessionID: "ses_1" } })
+      assertEqual(notified, ["turn", "turn"])
+      unsubscribe()
+      assertEqual(offs, 2, "both data-store subscriptions are torn down")
+    },
+  ],
+
+  [
+    "the shared panel lifecycle tears down the subscription and the panel on unmount",
+    () => {
+      // `manageUsagePanel` is the one lifecycle both host halves bind (#245):
+      // disposal must unsubscribe the idle signal and unmount the panel (its
+      // clock, trailing timer and in-flight chain are the panel's own teardown).
+      let offs = 0
+      let unmounts = 0
+      const stub: UsagePanel = {
+        state: () => undefined,
+        mount: async () => {},
+        refresh: async () => {},
+        turnCompleted: () => {},
+        unmount: () => {
+          unmounts += 1
+        },
+      }
+      const dispose = createRoot((dispose) => {
+        manageUsagePanel(stub, () => () => {
+          offs += 1
+        })
+        return dispose
+      })
+      dispose()
+      assertEqual(offs, 1, "the idle subscription is torn down with the panel")
+      assertEqual(unmounts, 1, "the panel is unmounted with the slot")
+    },
+  ],
+
+  [
+    "v1: a visible panel's mount chain feeds the appended segment",
+    async () => {
+      const providers = [
+        {
+          id: "commandcode",
+          key: "v1_key",
+          models: { "claude-sonnet-5": { options: { cmd: { free: false } } } },
+        },
+      ] as unknown as readonly Provider[]
+      const api = {
+        state: {
+          provider: providers,
+          session: {
+            get: () => ({
+              id: "ses_1",
+              model: { id: "claude-sonnet-5", providerID: "commandcode" },
+            }),
+          },
+        },
+        client: { provider: { list: async () => ({}) } },
+      } as unknown as TuiPluginApi
+      // The v1 chain runs the real loader shape; its credential plumbing
+      // (`Bearer v1_key`) is pinned in tests/tui-usage.test.ts, so this panel
+      // composition test stubs the outcome.
+      const panel = createUsagePanel(async () => usageState())
+      await panel.mount()
+      const model = v1ModelFor(providers, { id: "claude-sonnet-5", providerID: "commandcode" })
+      const rows = panelRows(dealsRows(model), panel.state(), NOW)
+      assertEqual(row(rows, "Status"), ["Status", "Paid"])
+      assertEqual(row(rows, "5-hour"), ["5-hour", "$0.50 / $3.00 · 17%"])
+      assertEqual(row(rows, "via Host connection"), ["via Host connection", "", "value"])
+      // The unmount cancels the panel's countdown clock — a live timer that
+      // would otherwise keep the test runner alive.
+      panel.unmount()
+    },
+  ],
+
+  [
+    "v2: a visible panel's mount chain feeds the appended segment through the RPC bridge",
+    async () => {
+      const data = {
+        session: {
+          get: () => ({
+            id: "ses_1",
+            model: { id: "claude-sonnet-5", providerID: "commandcode" },
+          }),
+        },
+        location: {
+          model: {
+            list: () => [
+              {
+                id: "claude-sonnet-5",
+                modelID: "claude-sonnet-5",
+                providerID: "commandcode",
+                settings: { cmd: { free: false } },
+              },
+            ],
+          },
+        },
+      } as unknown as V2TuiContext["data"]
+      let portCalls = 0
+      const ctx = {
+        data,
+        client: {
+          rpc: (definition: unknown) => {
+            assertEqual(
+              (definition as { id: string }).id,
+              "commandcode",
+              "the panel asks the plugin's own port",
+            )
+            return {
+              usage: async () => {
+                portCalls += 1
+                return { result: usageState().result, provenance: { kind: "host" } }
+              },
+            }
+          },
+        },
+      } as unknown as V2TuiContext
+      const panel = createUsagePanel(createUsageRpcLoader(ctx.client))
+      await panel.mount()
+      assertEqual(portCalls, 1, "one bridge call per mount chain")
+      const model = v2ModelFor(data, "ses_1")
+      const rows = panelRows(dealsRowsV2(model), panel.state(), NOW)
+      assertEqual(row(rows, "Status"), ["Status", "Paid"])
+      assertEqual(row(rows, "5-hour"), ["5-hour", "$0.50 / $3.00 · 17%"])
+      assertEqual(row(rows, "via Host connection"), ["via Host connection", "", "value"])
+      panel.unmount()
+    },
+  ],
+
   [
     "v1 half registers the snake_case sidebar_content slot",
     async () => {

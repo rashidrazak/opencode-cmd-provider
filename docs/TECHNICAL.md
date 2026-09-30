@@ -195,6 +195,56 @@ surfaces in two places:
   `Deals unavailable` banner with every row reading `N/A` and the tool says no
   deal data is bundled. Core (models, auth, streaming) is unaffected.
 
+### Live usage segment
+
+The sidebar's `Usage` segment (issue #241) reads the same billing API the
+official CLI's `/usage` overlay reads, one request per leg, each with a
+5-second abort budget and each failing on its own — a flaky leg drops only the
+rows it feeds:
+
+- `GET /alpha/whoami?limits=1` — the org scope for team accounts
+- `GET /alpha/billing/subscriptions[?orgId=]` — plan identity and the billing
+  period
+- `GET /alpha/billing/credits[?orgId=]` — the 5-hour and weekly windows and
+  the monthly credit pool
+- `GET /alpha/usage/summary[?orgId=][&since=<currentPeriodStart>]` — the
+  cycle's requests, tokens and spend
+
+The credential those reads use is resolved per TUI half (issue #243,
+[ADR-0020](adr/0020-tui-host-credential-for-usage.md)):
+
+- **v1 TUI:** the `commandcode` provider record the TUI state already holds
+  (the structural `options.apiKey ?? key` read), falling back to its own
+  `client.provider.list()` when the record carries neither at runtime; below
+  it, the package ladder — `COMMANDCODE_API_KEY`, then the legacy auth files,
+  keeping the file label as provenance. That ladder mirrors the transport's
+  own last resort, so it only answers what would actually stream.
+- **v2 TUI:** the plugin's own server half, over the plugin-RPC bridge
+  (`src/deals/usage-rpc.ts`): the server registers the `commandcode` port at
+  setup, resolves the Host's active connection per call — stored credentials
+  included, the read the TUI process cannot make — and runs the billing fetch
+  itself, returning the snapshot, the refreshed scope and the rung. The key
+  never leaves the server, and there is no fallback: no connected credential
+  answers the notice, and an unreachable bridge degrades to `unavailable`
+  rather than another account's numbers.
+
+Nothing resolving means zero requests and the one-line notice
+`Usage needs COMMANDCODE_API_KEY — set it to see live limits`; a resolved rung
+renders its muted `via …` provenance line.
+
+The refresh is event-driven, never polled (issue #245): **4 requests on
+mount** (whoami → subscriptions → credits → summary; the whoami org scope is
+cached for the panel's lifetime, and the subscription record is re-read only
+once its period has ended or it is over an hour old), **2 per throttled
+refresh** (credits + summary, triggered by a completed turn in the watched
+session at most once every five minutes — in-cooldown signals coalesce into
+one trailing refresh), and **zero while idle** — a 30-second local clock
+redraws the countdowns with no network and confirms each window roll with at
+most one refresh. A failed chain backs off 5 → 10 → 20 → 30 minutes while the
+last-good snapshot stays on screen; a success resets the ladder. The budget is
+unchanged on v2 — each chain is one plugin-RPC call, and the counts above are
+the billing requests the server half makes.
+
 ## Reasoning support
 
 Reasoning metadata derives from the generated classification module
@@ -549,24 +599,25 @@ Both e2e scripts are excluded from `npm test`.
 
 ## Design records
 
-| ADR                                                            | Decision                                                                  |
-| -------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| [0001](adr/0001-auto-registration-snapshot.md)                 | Auto-registration from a bundled snapshot, config-hook mutation           |
-| [0002](adr/0002-tag-driven-releases.md)                        | Tag-driven releases via GitHub Actions                                    |
-| [0003](adr/0003-release-gates.md)                              | Release gates and non-blocking catalog checks                             |
-| [0004](adr/0004-deals-intelligence-slice.md)                   | Deals intelligence as an excisable slice with visible degradation         |
-| [0005](adr/0005-rsc-primary-deals-cron.md)                     | RSC stream as the primary deals source, refreshed by cron                 |
-| [0006](adr/0006-derived-reasoning-classification.md)           | Reasoning capability derived from generated classification                |
-| [0007](adr/0007-auto-release.md)                               | Auto-release on merged catalog-refresh PRs                                |
-| [0008](adr/0008-models-md-primary-catalog.md)                  | The models.md table is the sole membership authority                      |
-| [0009](adr/0009-version-pinned-provider-specifier.md)          | Runtime provider pinned to the plugin's exact version                     |
-| [0010](adr/0010-dual-v1-v2-plugin-entrypoint.md)               | One package and entrypoint for OpenCode v1 and v2 (server and TUI halves) |
-| [0011](adr/0011-billing-derived-plan-identity.md)              | Plan identity from the billing subscription, never a default              |
-| [0012](adr/0012-connect-callback-budget-and-api-key-method.md) | Human-scale connect callback budget, `api` method without `authorize`     |
-| [0013](adr/0013-finish-reason-vocabulary.md)                   | A turn that ended is never reported with `unified: "other"`               |
-| [0014](adr/0014-unmodelled-block-refuses-resume.md)            | A resumed turn never silently drops a block the stream did not model      |
-| [0015](adr/0015-host-credential-for-tools.md)                  | The plan summary uses the Host's resolved credential, not a legacy file   |
-| [0016](adr/0016-openai-dialect-reasoning-history.md)           | The OpenAI dialect replays assistant reasoning in history                 |
-| [0017](adr/0017-plan-summary-provenance-line.md)               | The plan summary renders the account and the credential rung              |
-| [0018](adr/0018-usage-is-not-a-terminal.md)                    | A usage report is not by itself a terminal on the OpenAI dialect          |
-| [0019](adr/0019-out-of-vocabulary-efforts-snap.md)             | An unadvertised reasoning effort snaps to the nearest advertised level    |
+| ADR                                                            | Decision                                                                                 |
+| -------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| [0001](adr/0001-auto-registration-snapshot.md)                 | Auto-registration from a bundled snapshot, config-hook mutation                          |
+| [0002](adr/0002-tag-driven-releases.md)                        | Tag-driven releases via GitHub Actions                                                   |
+| [0003](adr/0003-release-gates.md)                              | Release gates and non-blocking catalog checks                                            |
+| [0004](adr/0004-deals-intelligence-slice.md)                   | Deals intelligence as an excisable slice with visible degradation                        |
+| [0005](adr/0005-rsc-primary-deals-cron.md)                     | RSC stream as the primary deals source, refreshed by cron                                |
+| [0006](adr/0006-derived-reasoning-classification.md)           | Reasoning capability derived from generated classification                               |
+| [0007](adr/0007-auto-release.md)                               | Auto-release on merged catalog-refresh PRs                                               |
+| [0008](adr/0008-models-md-primary-catalog.md)                  | The models.md table is the sole membership authority                                     |
+| [0009](adr/0009-version-pinned-provider-specifier.md)          | Runtime provider pinned to the plugin's exact version                                    |
+| [0010](adr/0010-dual-v1-v2-plugin-entrypoint.md)               | One package and entrypoint for OpenCode v1 and v2 (server and TUI halves)                |
+| [0011](adr/0011-billing-derived-plan-identity.md)              | Plan identity from the billing subscription, never a default                             |
+| [0012](adr/0012-connect-callback-budget-and-api-key-method.md) | Human-scale connect callback budget, `api` method without `authorize`                    |
+| [0013](adr/0013-finish-reason-vocabulary.md)                   | A turn that ended is never reported with `unified: "other"`                              |
+| [0014](adr/0014-unmodelled-block-refuses-resume.md)            | A resumed turn never silently drops a block the stream did not model                     |
+| [0015](adr/0015-host-credential-for-tools.md)                  | The plan summary uses the Host's resolved credential, not a legacy file                  |
+| [0016](adr/0016-openai-dialect-reasoning-history.md)           | The OpenAI dialect replays assistant reasoning in history                                |
+| [0017](adr/0017-plan-summary-provenance-line.md)               | The plan summary renders the account and the credential rung                             |
+| [0018](adr/0018-usage-is-not-a-terminal.md)                    | A usage report is not by itself a terminal on the OpenAI dialect                         |
+| [0019](adr/0019-out-of-vocabulary-efforts-snap.md)             | An unadvertised reasoning effort snaps to the nearest advertised level                   |
+| [0020](adr/0020-tui-host-credential-for-usage.md)              | The TUI host resolves its usage credential (v1 in-process, v2 via the plugin-RPC bridge) |
