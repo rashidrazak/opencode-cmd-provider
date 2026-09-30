@@ -98,7 +98,7 @@ export const MODEL_DEALS: Readonly<Record<string, ModelDeals>> = {
   "moonshotai/Kimi-K2.6": { tier: "opensource", benchmark: {"intelligence":27}, free: false, allowance: {"goat":20,"pro":30} },
   "moonshotai/Kimi-K2.7-Code": { tier: "opensource", benchmark: {"intelligence":25.8}, free: false, allowance: {"goat":60,"pro":70} },
   "moonshotai/Kimi-K2.7-Code-Highspeed": { tier: "opensource", free: false, allowance: {"goat":20,"pro":30} },
-  "moonshotai/Kimi-K3": { tier: "opensource", benchmark: {"intelligence":43.6}, free: false, allowance: {"goat":20,"pro":30} },
+  "moonshotai/Kimi-K3": { tier: "opensource", benchmark: {"intelligence":43.6}, free: false, allowance: {"goat":60,"pro":70} },
   "nvidia/nemotron-3-ultra-550b-a55b": { tier: "opensource", benchmark: {"intelligence":22.9}, free: false, allowance: {"goat":20,"pro":30} },
   "poolside/laguna-s-2.1-free": { tier: "opensource", free: true },
   "Qwen/Qwen3.6-Max-Preview": { tier: "opensource", benchmark: {"intelligence":28.4}, free: false, allowance: {"goat":20,"pro":30} },
