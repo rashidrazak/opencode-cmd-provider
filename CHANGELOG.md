@@ -1,3 +1,243 @@
+## 2.2.0 - 2026-10-01
+
+**Highlight — the sidebar becomes a live Rates & usage panel.** The panel that
+rendered the selected model's Deals rows now carries five segments —
+Tier/Status, Allowance, Rates, Other Information and live Usage — with every
+published rate band shown as a two-line `in | out | cache r | w` block, and the
+connected account's usage read from the billing API
+([#240](https://github.com/rashidrazak/opencode-cmd-provider/pull/240),
+[#247](https://github.com/rashidrazak/opencode-cmd-provider/pull/247)). On v2
+the numbers come from the account the session is actually connected with: the
+TUI half asks the plugin's own server half over the plugin-RPC bridge and the
+key never leaves the server (ADR-0020), so a legacy CLI login or
+`COMMANDCODE_API_KEY` beside the connection can no longer show another
+account's usage. A `/cmd-rates-usage` dialog — also the command palette's
+`Show, hide and reorder sidebar content` — shows, hides and reorders the
+segments per machine
+([#254](https://github.com/rashidrazak/opencode-cmd-provider/pull/254),
+ADR-0022). The usage chain is one parallel wave with field-wise last-good rows:
+a cold full snapshot lands in 16.3 s instead of the ~42 s sequential walk, and
+a remount paints from a 30-minute session cache
+([#252](https://github.com/rashidrazak/opencode-cmd-provider/pull/252)). The
+feature and its slice are renamed **Deals intelligence → Rates & usage**
+([#256](https://github.com/rashidrazak/opencode-cmd-provider/pull/256)) — the
+persisted segment layout and the old `/cmd-deals` command reset once. The rest
+of the release lands the catalog refreshed on 2026-09-30 — two new models from
+`command-code` 1.73.0, the deals refresh that raises Kimi K3's allowances for
+Command Code's one-week boost
+([#258](https://github.com/rashidrazak/opencode-cmd-provider/pull/258)) — and
+pins the `refresh:deals` output path.
+
+### Features
+
+- **The sidebar panel is segmented, with priced rate bands**
+  ([#240](https://github.com/rashidrazak/opencode-cmd-provider/pull/240)):
+  `Allowance` renders Go, GOAT, Pro, Max 10×, Max 20× and Team Pro; the legacy
+  Pro and Provider rows keep their catalog data — the plan summary and the
+  transport still read them — but are never panel rows. `Rates` prints each
+  published band (peak/off-peak, context-window tiers) as a
+  `Name: in | out | cache r | w` label over its per-million values, with
+  `Peak Windows` as its own muted block; a model with no published band falls
+  back to the host model cost in the same two-line shape, then `N/A`. `Other
+Information` closes the panel with `Deal`, `Was`, `Now`, `Intelligence` and
+  `Tok/s`. The panel resolves both the `base`/`muted` and `default`/`subdued`
+  theme spellings across the supported v2.0.x line, so its foreground is never
+  `undefined` on `@opencode/theme` 2.0.8+.
+- **The Usage segment reads live account usage**
+  ([#247](https://github.com/rashidrazak/opencode-cmd-provider/pull/247),
+  closes
+  [#241](https://github.com/rashidrazak/opencode-cmd-provider/issues/241)): a
+  four-leg billing chain (whoami → subscriptions → credits → summary), its
+  defensive parse and the sidebar rows. The segment mounts with the panel, one
+  loader per host half, and makes zero requests without a credential. v1 reads
+  the credential its provider record already carries; v2 registers a
+  plugin-RPC port (`registerUsageRpc`) whose handler resolves the Host's
+  active connection over the same seam `cmd_plan_summary` uses and runs the
+  fetch itself, so the key never leaves the server and the panel renders the
+  connected account's numbers or the unavailable notice — never another
+  account's. Refresh is event-driven: a 5-minute throttle with a coalesced
+  trailing refresh, a 30-second local countdown, one confirmation per window
+  roll, a 5 → 10 → 20 → 30-minute failure backoff, last-good retention and a
+  full teardown on unmount (ADR-0020).
+- **Meter bars and the extra-credit balance**
+  ([#249](https://github.com/rashidrazak/opencode-cmd-provider/pull/249)):
+  each meter is a muted label, a 33-cell bar over the 37-character sidebar
+  column (the four-character percentage field reserved), the `used / cap`
+  detail and its countdown; bars colour from the host theme's tones (green
+  ≤ 40%, yellow ≤ 80%, red above). `credits.purchasedCredits` parses into
+  `UsageSnapshot.purchasedCredits` (floored at zero), renders as the summary's
+  `Extra Credit` row and counts in `hasUsageData`, so the balance alone keeps
+  the segment renderable. The summary sub-section carries tokens in/out,
+  requests, spend and the purchased balance.
+- **The segments show, hide and reorder per machine**
+  ([#254](https://github.com/rashidrazak/opencode-cmd-provider/pull/254),
+  closes [#253](https://github.com/rashidrazak/opencode-cmd-provider/issues/253);
+  [#255](https://github.com/rashidrazak/opencode-cmd-provider/pull/255)): the
+  `/cmd-rates-usage` dialog — the same sentence the palette entry carries,
+  `Show, hide and reorder sidebar content` — drives ↑/↓ to move the cursor,
+  shift+↑/↓ to move a segment, space/enter to toggle, `r` to restore and esc
+  to close; changes apply live and persist per machine (v1 `api.kv`, v2
+  `ctx.storage`). Every
+  read normalizes — unknown or duplicate ids drop, a segment added later
+  appends in default order — so a foreign value cannot crash the panel and a
+  new segment cannot vanish. With every segment hidden the whole panel
+  disappears; the `Deals unavailable` banner stays pinned only while a catalog
+  segment shows (ADR-0022).
+- **The feature and slice are renamed Rates & usage**
+  ([#256](https://github.com/rashidrazak/opencode-cmd-provider/pull/256)):
+  `src/deals/` → `src/rates-usage/`, with the types, the TUI plugin id
+  (`commandcode.deals` → `commandcode.rates-usage`), the command id and the
+  persisted layout key renamed. `/cmd-rates-usage` replaces `/cmd-deals` with
+  no alias, and the layout-key change resets a saved per-machine layout once.
+  "Deals" stays where it names the RSC-derived data — the Deals catalog,
+  `MODEL_DEALS`, `refresh:deals`, the RSC fixtures and the `Deals unavailable`
+  banner.
+
+### Fixes
+
+- **The usage chain is one parallel wave and keeps its last-good rows**
+  ([#252](https://github.com/rashidrazak/opencode-cmd-provider/pull/252),
+  closes
+  [#251](https://github.com/rashidrazak/opencode-cmd-provider/issues/251)):
+  measured live, the four legs ran sequentially under a 5-second budget while
+  the API answers a leg in 8–18 s, so whoami, subscriptions and the summary
+  were dropped on every chain. Credits, subscriptions and the summary now
+  start together (whoami beside them on a cold chain) with the cached scope's
+  `orgId`/`since` applied when known — the wall clock is the slowest leg, and
+  the per-leg budget is 25 s. A speculative whoami-gated cold chain re-runs
+  scoped when whoami names an org, keeps the unscoped wave when it says no org
+  or fails, and never freezes an empty scope; the fetch merges field-wise with
+  the panel's previous snapshot, so a timed-out leg keeps its rows, while
+  plan/periodEnd follow the subscription slice (ADR-0011). Each landing leg
+  publishes — on v2 one `progress` event over the plugin-RPC port, correlated
+  by `callId` — and a session-keyed 30-minute in-memory cache seeds a
+  remounting panel. A cold full snapshot measured 16.3 s (partial meters at
+  15.3 s) against ~42 s for the CLI's sequential order, cached first paint
+  ~79 ms; `cmd_plan_summary`'s lookup budget moves 5 s → 25 s with it.
+- **`refresh:deals` writes the renamed catalog path**
+  ([#257](https://github.com/rashidrazak/opencode-cmd-provider/pull/257)):
+  after the rename, `DEFAULT_OUT` still pointed at `src/deals/catalog.ts`
+  while every other caller passes `--out`, so the bare refresh legs (cron,
+  release, the refresh skill) wrote a stray file and left the shipped catalog
+  stale. The constant is pinned by a regression test.
+- **The deals smoke test derives its allowance assertions from the fixture**
+  ([#258](https://github.com/rashidrazak/opencode-cmd-provider/pull/258)): the
+  test re-typed upstream's Kimi K3 goat/pro allowance numbers, so the first
+  legitimate allowance change went red — the spec
+  [#108](https://github.com/rashidrazak/opencode-cmd-provider/issues/108)
+  value-pin class its own header warns against. The expected numbers now read
+  back from the committed pricing-limits fixture, keeping the flow-through
+  contract pinned while upstream values stay fluid.
+
+### Documentation
+
+- **ADR-0020** records the v2 usage bridge and why the connected account never
+  falls back to the package ladder; **ADR-0022** records the segment layout,
+  its persistence and the two host keymap constraints; **ADR-0004** is renamed
+  to `0004-rates-usage-slice.md`. `README.md` carries the sidebar instructions
+  and `/cmd-rates-usage`, `docs/TECHNICAL.md` the internals, and `CONTEXT.md`
+  the new term plus the sidebar layout vocabulary.
+
+### Dependencies
+
+- `brace-expansion` 2.1.4 → 2.1.7 — transitive through `@opentui/solid`
+  ([#248](https://github.com/rashidrazak/opencode-cmd-provider/pull/248)).
+
+### Model catalog
+
+## Model catalog
+
+- **FACTS_PACKAGE_VERSION**: `1.69.0` → `1.73.0` — the refresh reads the newer
+  CLI bundle's `models.md`; the table below carries what moved.
+- **FACTS_LAST_REFRESHED**: `2026-09-29` → `2026-09-30`
+
+| Model                             | Change | Before | After                       |
+| --------------------------------- | ------ | ------ | --------------------------- |
+| `gpt-6.1-sol`                     | added  | —      | GPT-6.1 Sol · 1050000 ctx   |
+| `inclusionai/ling-3.1-flash:free` | added  | —      | Ling 3.1 Flash · 262000 ctx |
+
+### API divergence
+
+- Listing API matches package membership
+
+### Pinned slug map (5)
+
+- `claude-sonnet-5-5`: models-page slug not in the pinned map (docs-ahead; page evidence skipped)
+- `deepseek-v4-1-flash-fast`: models-page slug not in the pinned map (docs-ahead; page evidence skipped)
+- `gpt-6-1-sol`: models-page slug not in the pinned map (docs-ahead; page evidence skipped)
+- `jev`: models-page slug not in the pinned map (docs-ahead; page evidence skipped)
+- `ling-3-1-flash-free`: models-page slug not in the pinned map (docs-ahead; page evidence skipped)
+
+### Reasoning classification
+
+## Reasoning classification
+
+- **CLASSIFICATION_LAST_REFRESHED**: `2026-09-29` → `2026-09-30`
+
+| Model                             | Change | Before | After                                         |
+| --------------------------------- | ------ | ------ | --------------------------------------------- |
+| `gpt-6.1-sol`                     | new    | —      | efforts model (low, medium, high, xhigh, max) |
+| `inclusionai/ling-3.1-flash:free` | new    | —      | efforts model (low, medium, high)             |
+
+### Deals catalog
+
+## Deals catalog
+
+- **DEAL_LAST_REFRESHED**: `2026-09-29` → `2026-09-30`
+- **Upstream shape change**: the docs RSC payload no longer emits
+  `outputTokensPerSec` (verified against the live page: 0 occurrences, 87
+  benchmark records intact), so every benchmark's `tokPerSec` field drops to
+  absent.
+- **Kimi K3's allowance boost**: Command Code raised Kimi K3 from
+  goat $20 / pro $30 to goat $60 / pro $70 for a one-week boost through
+  2026-10-07; the catalog carries the boosted values, and the next refresh
+  after the promo picks the revert up.
+
+| Model                                   | Change    | Before                         | After                      |
+| --------------------------------------- | --------- | ------------------------------ | -------------------------- |
+| `claude-fable-5-1`                      | benchmark | intelligence 53.4, tok/s 66.8  | intelligence 53.4, tok/s — |
+| `claude-haiku-4-5-20251001`             | benchmark | intelligence 15.4, tok/s 98.4  | intelligence 15.4, tok/s — |
+| `claude-opus-5`                         | benchmark | intelligence 50.8, tok/s 53.7  | intelligence 50.8, tok/s — |
+| `claude-sonnet-5`                       | benchmark | intelligence 38.2, tok/s 82.8  | intelligence 38.2, tok/s — |
+| `claude-sonnet-5-5`                     | benchmark | —                              | intelligence 56, tok/s —   |
+| `deepseek/deepseek-v4-flash-vision-exp` | benchmark | intelligence 34.8, tok/s 228.7 | intelligence 34.8, tok/s — |
+| `deepseek/deepseek-v4-pro`              | benchmark | intelligence 36, tok/s 78.6    | intelligence 36, tok/s —   |
+| `deepseek/deepseek-v4.1-flash`          | benchmark | intelligence 39.5, tok/s 237.4 | intelligence 39.5, tok/s — |
+| `google/gemini-3.5-flash-lite`          | benchmark | intelligence 22.2, tok/s 370   | intelligence 22.2, tok/s — |
+| `google/gemini-3.8-flash`               | benchmark | intelligence 40.9, tok/s 342.8 | intelligence 40.9, tok/s — |
+| `gpt-5.3-codex`                         | benchmark | intelligence 32.5, tok/s 145.5 | intelligence 32.5, tok/s — |
+| `gpt-5.6-luna`                          | benchmark | intelligence 37.3, tok/s 140.7 | intelligence 37.3, tok/s — |
+| `gpt-5.6-sol`                           | benchmark | intelligence 47, tok/s 63.8    | intelligence 47, tok/s —   |
+| `gpt-5.6-terra`                         | benchmark | intelligence 42.1, tok/s 90.3  | intelligence 42.1, tok/s — |
+| `gpt-6-astra`                           | benchmark | intelligence 52.7, tok/s 57.9  | intelligence 52.7, tok/s — |
+| `gpt-6-luna`                            | benchmark | intelligence 37.3, tok/s 154.5 | intelligence 37.3, tok/s — |
+| `gpt-6-sol`                             | benchmark | intelligence 47.5, tok/s 116.3 | intelligence 47.5, tok/s — |
+| `gpt-6.1-sol`                           | added     | —                              | premium                    |
+| `inclusionai/ling-3.1-flash:free`       | added     | —                              | opensource (free)          |
+| `meta/muse-spark-1.3`                   | benchmark | intelligence 48.1, tok/s 247.5 | intelligence 48.1, tok/s — |
+| `meta/muse-spark-1.3-contributor`       | benchmark | intelligence 48.1, tok/s 247.5 | intelligence 48.1, tok/s — |
+| `MiniMaxAI/MiniMax-M3`                  | benchmark | intelligence 29.2, tok/s 159.3 | intelligence 29.2, tok/s — |
+| `moonshotai/Kimi-K2.7-Code`             | benchmark | intelligence 25.8, tok/s 52.4  | intelligence 25.8, tok/s — |
+| `moonshotai/Kimi-K3`                    | benchmark | intelligence 43.6, tok/s 37.7  | intelligence 43.6, tok/s — |
+| `moonshotai/Kimi-K3`                    | allowance | goat $20 / pro $30             | goat $60 / pro $70         |
+| `nvidia/nemotron-3-ultra-550b-a55b`     | benchmark | intelligence 22.9, tok/s 159.3 | intelligence 22.9, tok/s — |
+| `Qwen/Qwen3.7-Plus`                     | benchmark | intelligence 25.2, tok/s 61.9  | intelligence 25.2, tok/s — |
+| `Qwen/Qwen3.8-27B`                      | benchmark | intelligence 33.7, tok/s 46.5  | intelligence 33.7, tok/s — |
+| `Qwen/Qwen3.8-Max-0902`                 | benchmark | intelligence 45.4, tok/s 41.6  | intelligence 45.4, tok/s — |
+| `stepfun/Step-3.7-Flash`                | benchmark | intelligence 19.5, tok/s 196.7 | intelligence 19.5, tok/s — |
+| `stepfun/Step-5-Preview`                | benchmark | intelligence 43.7, tok/s 71.1  | intelligence 43.7, tok/s — |
+| `tencent/hy3-paid`                      | benchmark | intelligence 25.3, tok/s 92.5  | intelligence 25.3, tok/s — |
+| `thinkingmachines/inkling`              | benchmark | intelligence 25, tok/s 109.2   | intelligence 25, tok/s —   |
+| `thinkingmachines/inkling-small`        | benchmark | intelligence 27.8, tok/s 230.2 | intelligence 27.8, tok/s — |
+| `xai/grok-4.6`                          | benchmark | intelligence 44.3, tok/s 70.3  | intelligence 44.3, tok/s — |
+| `xai/grok-4.7`                          | benchmark | intelligence 46.4, tok/s 50.4  | intelligence 46.4, tok/s — |
+| `xiaomi/mimo-v2.5`                      | benchmark | intelligence 25.2, tok/s 39.5  | intelligence 25.2, tok/s — |
+| `xiaomi/mimo-v2.5-pro`                  | benchmark | intelligence 26, tok/s 50.4    | intelligence 26, tok/s —   |
+| `xiaomi/mimo-v2.6-flash`                | benchmark | —                              | intelligence 37.9, tok/s — |
+| `xiaomi/mimo-v2.6-pro`                  | benchmark | intelligence 46.3, tok/s 54.5  | intelligence 46.3, tok/s — |
+| `z-ai/glm-5.3-flash`                    | benchmark | intelligence 41.8, tok/s 48.8  | intelligence 41.8, tok/s — |
+| `zai-org/GLM-5.3`                       | benchmark | intelligence 44.8, tok/s 63.2  | intelligence 44.8, tok/s — |
+
 ## 2.1.11 - 2026-09-29
 
 ### Model catalog
