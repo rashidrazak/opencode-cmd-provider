@@ -124,8 +124,9 @@ export function v1UsageLoader(
 
 /**
  * What the panel renders for the usage segment: the latest load's result and,
- * when a credential resolved, the rung it read with — the muted `via …` line's
- * data (display only, never the key; ADR-0020 rule 2).
+ * when a credential resolved, the rung it read with (display data only, never
+ * the key; ADR-0020 rule 2). The panel no longer renders the rung — the load
+ * chain keeps reporting it.
  */
 export interface UsagePanelState {
   result: UsageResult

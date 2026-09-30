@@ -46,7 +46,7 @@ function billingBodies(): Record<string, unknown> {
         fiveHour: { used: 0.5, cap: 3, exceeded: false },
         weekly: { used: 1.5, cap: 6, exceeded: false, resetAt: NOW + 6 * 3_600_000 },
       },
-      credits: { monthlyCredits: 0.5 },
+      credits: { monthlyCredits: 0.5, purchasedCredits: 4.81934405 },
     },
     [SUMMARY]: { totalMonthlyCredits: 39.5 },
   }
@@ -150,6 +150,11 @@ run([
       assertEqual(auth.authorization, "Bearer host_key", "the Host's key did the fetch")
       assertEqual(outcome.result.state, "usage", "the snapshot travels back")
       assertEqual(outcome.provenance, { kind: "host" }, "the Host rung is named")
+      assertEqual(
+        outcome.result.state === "usage" ? outcome.result.snapshot.purchasedCredits : undefined,
+        4.81934405,
+        "the purchased extra-credit balance round-trips",
+      )
       assert(
         outcome.scope?.subscription?.since === PERIOD_START,
         "the refreshed scope travels back for the next call",
@@ -231,7 +236,12 @@ run([
       const outcome: UsageRpcOutcome = {
         result: {
           state: "usage",
-          snapshot: { plan: "go", limited: true, fiveHour: { used: 1, cap: 3, exceeded: false } },
+          snapshot: {
+            plan: "go",
+            limited: true,
+            fiveHour: { used: 1, cap: 3, exceeded: false },
+            purchasedCredits: 4.82,
+          },
         },
         provenance: { kind: "host" },
         scope: { orgId: "org_1", subscription: { readAt: NOW, since: PERIOD_START } },

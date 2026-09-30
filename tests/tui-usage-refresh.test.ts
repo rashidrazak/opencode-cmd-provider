@@ -137,14 +137,17 @@ function weeklyWindow(h: Harness): { resetAt: number } {
     .weekly
 }
 
-/** The rendered `Weekly` meter value at the panel's current clock instant. */
+/**
+ * The rendered `Weekly` meter detail at the panel's current clock instant
+ * (the label row's second following row: label, bar, detail).
+ */
 function weeklyValue(h: Harness): string {
   const state = h.panel.state()
   if (state?.result.state !== "usage") throw new Error("the panel holds a usage snapshot")
-  const rows = renderUsageRows(state.result, { provenance: state.provenance, now: h.clock.now() })
-  const row = rows.find(([label]) => label === "Weekly")
-  if (row === undefined) throw new Error("the Weekly meter must render")
-  return row[1]
+  const rows = renderUsageRows(state.result, { now: h.clock.now() })
+  const index = rows.findIndex(([label]) => label === "Weekly")
+  if (index === -1) throw new Error("the Weekly meter must render")
+  return rows[index + 2]![0]
 }
 
 run([
@@ -251,9 +254,9 @@ run([
     async () => {
       const h = harness({ weeklyResetAt: NOW + 90_000 })
       await h.panel.mount()
-      assertEqual(weeklyValue(h), "$1.50 / $6.00 · 25% · resets in 2m")
+      assertEqual(weeklyValue(h), "$1.50 / $6.00 · 2m")
       await h.clock.advance(MINUTE)
-      assertEqual(weeklyValue(h), "$1.50 / $6.00 · 25% · resets in 1m", "the tick re-rendered")
+      assertEqual(weeklyValue(h), "$1.50 / $6.00 · 1m", "the tick re-rendered")
       assertEqual(h.urls.length, 4, "ticks make no request")
 
       // The reset instant passes inside the throttle window: one confirmation
@@ -265,7 +268,7 @@ run([
       weeklyWindow(h).resetAt = NOW + 5 * HOUR + 5 * MINUTE
       await h.clock.advance(4 * MINUTE)
       assertEqual(paths(h).slice(4), [CREDITS, SUMMARY], "one confirming refresh")
-      assertEqual(weeklyValue(h), "$1.50 / $6.00 · 25% · resets in 5h", "the roll confirmed")
+      assertEqual(weeklyValue(h), "$1.50 / $6.00 · 5h", "the roll confirmed")
       await h.clock.advance(30 * MINUTE)
       assertEqual(h.urls.length, 6, "at most one refresh per window roll")
     },

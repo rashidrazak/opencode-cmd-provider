@@ -225,6 +225,8 @@ function parseSnapshot(value: unknown): UsageSnapshot | undefined {
   if (weekly !== undefined) snapshot.weekly = weekly
   const monthly = parseMonthly(value.monthly)
   if (monthly !== undefined) snapshot.monthly = monthly
+  const purchasedCredits = numberValue(value.purchasedCredits)
+  if (purchasedCredits !== undefined) snapshot.purchasedCredits = purchasedCredits
   const totals = parseTotals(value.totals)
   if (totals !== undefined) snapshot.totals = totals
   const periodEnd = numberValue(value.periodEnd)

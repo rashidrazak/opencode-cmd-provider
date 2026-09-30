@@ -6,7 +6,6 @@ import { readFileSync } from "node:fs"
 import {
   fetchUsageSnapshot,
   renderUsageRows,
-  type UsageCredentialSource,
   type UsageResult,
   type UsageScope,
   type UsageSnapshot,
@@ -136,9 +135,25 @@ function label(rows: DealsRow[], key: string): DealsRow | undefined {
   return rows.find(([name]) => name === key)
 }
 
-/** The text of the muted value line starting with `prefix`, if it rendered. */
-function valueLine(rows: DealsRow[], prefix: string): string | undefined {
-  return rows.find(([name, , kind]) => kind === "value" && name.startsWith(prefix))?.[0]
+/** The rendered segment for a snapshot at the pinned clock instant. */
+function usageRows(snapshot: UsageSnapshot): DealsRow[] {
+  return renderUsageRows({ state: "usage", snapshot }, { now: NOW })
+}
+
+/** The meter sub-section rows for `label`: its label, bar and detail rows. */
+function meter(rows: DealsRow[], key: string): DealsRow[] {
+  const index = rows.findIndex(([name]) => name === key)
+  return index === -1 ? [] : rows.slice(index, index + 3)
+}
+
+/** The meter bar row for `label`, if the meter rendered one. */
+function barRow(rows: DealsRow[], key: string): DealsRow | undefined {
+  return meter(rows, key)[1]
+}
+
+/** A 33-cell meter bar: `full` whole cells, one half cell, dots, then the cap. */
+function bar(full: number, half = 0): string {
+  return `${"█".repeat(full)}${half === 1 ? "▌" : ""}${"·".repeat(32 - full - half)}▏`
 }
 
 /**
@@ -239,7 +254,7 @@ run([
         const rows = renderUsageRows(result, { now: NOW })
         assert(label(rows, "5-hour") !== undefined, "the credits meter still renders")
         assert(label(rows, "Monthly") !== undefined, "the monthly meter still renders")
-        assert(valueLine(rows, "This cycle:") !== undefined, "the summary totals still render")
+        assert(label(rows, "Request") !== undefined, "the summary totals still render")
       }
 
       // subscriptions offline: no since pin, no plan, but every live row stays
@@ -259,7 +274,7 @@ run([
         const rows = renderUsageRows(result, { now: NOW })
         assert(label(rows, "5-hour") !== undefined)
         assert(label(rows, "Monthly") !== undefined)
-        assert(valueLine(rows, "This cycle:") !== undefined)
+        assert(label(rows, "Request") !== undefined)
       }
 
       // credits timeout: no meters, the summary totals still render
@@ -281,7 +296,7 @@ run([
         assertEqual(label(rows, "5-hour"), undefined, "no credits leg, no rolling meter")
         assertEqual(label(rows, "Weekly"), undefined)
         assert(label(rows, "Monthly") !== undefined, "spend + the bundled row still meter")
-        assert(valueLine(rows, "This cycle:") !== undefined, "the totals leg is untouched")
+        assert(label(rows, "Request") !== undefined, "the totals leg is untouched")
       }
 
       // summary unparseable: no totals, the windows still render
@@ -300,8 +315,28 @@ run([
         const rows = renderUsageRows(result, { now: NOW })
         assert(label(rows, "5-hour") !== undefined)
         assert(label(rows, "Weekly") !== undefined)
-        assertEqual(valueLine(rows, "This cycle:"), undefined, "no summary leg, no totals")
+        assertEqual(label(rows, "Request"), undefined, "no summary leg, no totals")
       }
+    },
+  ],
+
+  [
+    "the purchased extra-credit balance parses from the credits leg, floored at zero",
+    async () => {
+      const positive = await fetchSnapshot({
+        credits: { credits: { monthlyCredits: 0.5, purchasedCredits: 4.81934405 } },
+      })
+      assertEqual(positive.purchasedCredits, 4.81934405, "the CLI's Extra Credits figure")
+      const zero = await fetchSnapshot({
+        credits: { credits: { monthlyCredits: 0.5, purchasedCredits: 0 } },
+      })
+      assertEqual(zero.purchasedCredits, 0, "a zero balance is data, not absence")
+      const negative = await fetchSnapshot({
+        credits: { credits: { monthlyCredits: 0.5, purchasedCredits: -3 } },
+      })
+      assertEqual(negative.purchasedCredits, 0, "an unreadable negative floors at zero")
+      const missing = await fetchSnapshot()
+      assertEqual(missing.purchasedCredits, undefined, "a payload without it stays absent")
     },
   ],
 
@@ -766,7 +801,7 @@ run([
   // ---------------------------------------------------------------------------
 
   [
-    "renders the full pinned segment: heading, three meters, cycle totals, provenance",
+    "renders the full pinned segment: heading, three meter sub-sections, the summary",
     () => {
       const snapshot: UsageSnapshot = {
         plan: "go",
@@ -774,6 +809,7 @@ run([
         fiveHour: { used: 0.5, cap: 3, exceeded: false },
         weekly: { used: 1.53, cap: 6, exceeded: false, resetAt: NOW + (4 * 60 + 32) * 60_000 },
         monthly: { used: 9.41, cap: 40 },
+        purchasedCredits: 4.82,
         totals: {
           requests: 7020,
           tokens: 1135619637,
@@ -783,42 +819,40 @@ run([
         },
         periodEnd: NOW + 5 * DAY,
       }
-      assertEqual(
-        renderUsageRows({ state: "usage", snapshot }, { provenance: { kind: "host" }, now: NOW }),
-        [
-          ["", ""],
-          ["Usage", "", "heading"],
-          ["5-hour", "$0.50 / $3.00 · 17%"],
-          ["Weekly", "$1.53 / $6.00 · 26% · resets in 4h 32m"],
-          ["Monthly", "$9.41 / $40.00 · 24% · renews in 5d"],
-          [
-            "This cycle: 7,020 requests · 1.14B tokens (1.13B in / 5.83M out) · $9.41 spent",
-            "",
-            "value",
-          ],
-          ["via Host connection", "", "value"],
-        ],
-      )
+      assertEqual(usageRows(snapshot), [
+        ["", ""],
+        ["Usage", "", "heading"],
+        ["5-hour", "", "value"],
+        [bar(5, 1), " 17%", "bar", "success"],
+        ["$0.50 / $3.00", "", "value"],
+        ["", ""],
+        ["Weekly", "", "value"],
+        [bar(8, 1), " 26%", "bar", "success"],
+        ["$1.53 / $6.00 · 4h 32m", "", "value"],
+        ["", ""],
+        ["Monthly", "", "value"],
+        [bar(7, 1), " 24%", "bar", "success"],
+        ["$9.41 / $40.00 · 5d", "", "value"],
+        ["", ""],
+        ["Token In", "1.13B"],
+        ["Token Out", "5.83M"],
+        ["Request", "7,020"],
+        ["Total Spent", "$9.41"],
+        ["Extra Credit", "$4.82"],
+      ])
     },
   ],
 
   [
-    "an idle window renders used/cap with no countdown",
+    "an idle window renders its bar and used/cap with no countdown",
     () => {
-      assertEqual(
-        renderUsageRows(
-          {
-            state: "usage",
-            snapshot: { limited: true, fiveHour: { used: 0, cap: 3, exceeded: false } },
-          },
-          { now: NOW },
-        ),
-        [
-          ["", ""],
-          ["Usage", "", "heading"],
-          ["5-hour", "$0.00 / $3.00 · 0%"],
-        ],
-      )
+      assertEqual(usageRows({ limited: true, fiveHour: { used: 0, cap: 3, exceeded: false } }), [
+        ["", ""],
+        ["Usage", "", "heading"],
+        ["5-hour", "", "value"],
+        [bar(0), "  0%", "bar", "success"],
+        ["$0.00 / $3.00", "", "value"],
+      ])
     },
   ],
 
@@ -826,24 +860,20 @@ run([
     "limited:false renders the pay-as-you-go line and skips the rolling meters",
     () => {
       assertEqual(
-        renderUsageRows(
-          {
-            state: "usage",
-            snapshot: {
-              plan: "provider",
-              limited: false,
-              fiveHour: { used: 5, cap: 3, exceeded: true },
-              weekly: { used: 5, cap: 6, exceeded: false },
-              totals: { requests: 12, cost: 1.5 },
-            },
-          },
-          { now: NOW },
-        ),
+        usageRows({
+          plan: "provider",
+          limited: false,
+          fiveHour: { used: 5, cap: 3, exceeded: true },
+          weekly: { used: 5, cap: 6, exceeded: false },
+          totals: { requests: 12, cost: 1.5 },
+        }),
         [
           ["", ""],
           ["Usage", "", "heading"],
           ["No rolling windows on this plan — usage is pay-as-you-go", "", "value"],
-          ["This cycle: 12 requests · $1.50 spent", "", "value"],
+          ["", ""],
+          ["Request", "12"],
+          ["Total Spent", "$1.50"],
         ],
       )
     },
@@ -882,43 +912,50 @@ run([
   [
     "numbers format as decided: percent clamped, money 2dp, tokens compact",
     () => {
-      const rows = renderUsageRows(
-        {
-          state: "usage",
-          snapshot: {
-            limited: true,
-            fiveHour: { used: 10, cap: 4, exceeded: true },
-            weekly: { used: 0, cap: 0, exceeded: false },
-            monthly: { used: 1.5, cap: 3.5 },
-            totals: { requests: 1234567, tokens: 999999, cost: 2.5 },
-          },
-        },
-        { now: NOW },
-      )
-      assertEqual(label(rows, "5-hour"), ["5-hour", "$10.00 / $4.00 · 100%"])
-      assertEqual(label(rows, "Weekly"), ["Weekly", "$0.00 / $0.00 · 0%"])
-      assertEqual(label(rows, "Monthly"), ["Monthly", "$1.50 / $3.50 · 43%"])
-      assertEqual(
-        valueLine(rows, "This cycle:"),
-        "This cycle: 1,234,567 requests · 1M tokens · $2.50 spent",
-      )
+      const rows = usageRows({
+        limited: true,
+        fiveHour: { used: 10, cap: 4, exceeded: true },
+        weekly: { used: 0, cap: 0, exceeded: false },
+        monthly: { used: 1.5, cap: 3.5 },
+        totals: { requests: 1234567, tokens: 999999, cost: 2.5 },
+      })
+      // Over-cap is clamped to 100; a zero cap reads 0; the rest round.
+      assertEqual(meter(rows, "5-hour"), [
+        ["5-hour", "", "value"],
+        [bar(32), "100%", "bar", "error"],
+        ["$10.00 / $4.00", "", "value"],
+      ])
+      assertEqual(meter(rows, "Weekly"), [
+        ["Weekly", "", "value"],
+        [bar(0), "  0%", "bar", "success"],
+        ["$0.00 / $0.00", "", "value"],
+      ])
+      assertEqual(meter(rows, "Monthly"), [
+        ["Monthly", "", "value"],
+        [bar(14), " 43%", "bar", "warning"],
+        ["$1.50 / $3.50", "", "value"],
+      ])
+      assertEqual(label(rows, "Tokens"), ["Tokens", "1M"])
+      assertEqual(label(rows, "Request"), ["Request", "1,234,567"])
+      assertEqual(label(rows, "Total Spent"), ["Total Spent", "$2.50"])
     },
   ],
 
   [
-    "a window with no cap renders used-only, never a fabricated cap",
+    "a window with no cap renders used-only and omits the bar",
     () => {
-      const rows = renderUsageRows(
-        {
-          state: "usage",
-          snapshot: {
-            limited: true,
-            fiveHour: { used: 1.5, exceeded: false, resetAt: NOW + 30 * 60_000 },
-          },
-        },
-        { now: NOW },
+      assertEqual(
+        usageRows({
+          limited: true,
+          fiveHour: { used: 1.5, exceeded: false, resetAt: NOW + 30 * 60_000 },
+        }),
+        [
+          ["", ""],
+          ["Usage", "", "heading"],
+          ["5-hour", "", "value"],
+          ["$1.50 used · 30m", "", "value"],
+        ],
       )
-      assertEqual(label(rows, "5-hour"), ["5-hour", "$1.50 used · resets in 30m"])
     },
   ],
 
@@ -926,96 +963,121 @@ run([
     "countdowns use the CLI's d/h/m format and stop at the reset",
     () => {
       const countdown = (ms: number) =>
-        label(
-          renderUsageRows(
-            {
-              state: "usage",
-              snapshot: {
-                limited: true,
-                fiveHour: { used: 0, cap: 1, exceeded: false, resetAt: NOW + ms },
-              },
-            },
-            { now: NOW },
-          ),
+        meter(
+          usageRows({
+            limited: true,
+            fiveHour: { used: 0, cap: 1, exceeded: false, resetAt: NOW + ms },
+          }),
           "5-hour",
-        )?.[1]
-      assertEqual(countdown(2 * DAY + 3 * HOUR), "$0.00 / $1.00 · 0% · resets in 2d 3h")
-      assertEqual(countdown(HOUR + 5 * 60_000), "$0.00 / $1.00 · 0% · resets in 1h 5m")
-      assertEqual(countdown(59_000), "$0.00 / $1.00 · 0% · resets in 1m")
+        )[2]?.[0]
+      assertEqual(countdown(2 * DAY + 3 * HOUR), "$0.00 / $1.00 · 2d 3h")
+      assertEqual(countdown(HOUR + 5 * 60_000), "$0.00 / $1.00 · 1h 5m")
+      assertEqual(countdown(59_000), "$0.00 / $1.00 · 1m")
       // A reset that already passed carries no countdown.
-      assertEqual(countdown(-HOUR), "$0.00 / $1.00 · 0%")
+      assertEqual(countdown(-HOUR), "$0.00 / $1.00")
     },
   ],
 
   [
-    "the renewal reads in whole days, floored at today",
+    "the renewal reads in whole days, floored at zero",
     () => {
       const monthlyAt = (periodEnd: number | undefined) =>
+        meter(usageRows({ limited: true, monthly: { used: 1, cap: 10 }, periodEnd }), "Monthly")
+      assertEqual(monthlyAt(NOW + 5 * DAY)[2], ["$1.00 / $10.00 · 5d", "", "value"])
+      // Four hours still rounds to a day (the CLI's ceil).
+      assertEqual(monthlyAt(NOW + 2 * HOUR)[2], ["$1.00 / $10.00 · 1d", "", "value"])
+      // A period already past floors at zero, never a negative count.
+      assertEqual(monthlyAt(NOW - HOUR)[2], ["$1.00 / $10.00 · 0d", "", "value"])
+      assertEqual(monthlyAt(undefined)[2], ["$1.00 / $10.00", "", "value"])
+      assertEqual(monthlyAt(NOW + 5 * DAY)[1], [bar(3), " 10%", "bar", "success"])
+    },
+  ],
+
+  [
+    "the percentage field reserves three digits plus the sign",
+    () => {
+      const percentAt = (used: number, cap: number) =>
+        barRow(
+          usageRows({ limited: true, fiveHour: { used, cap, exceeded: false } }),
+          "5-hour",
+        )?.[1]
+      assertEqual(percentAt(0.06, 1), "  6%")
+      assertEqual(percentAt(0.36, 1), " 36%")
+      assertEqual(percentAt(1, 1), "100%")
+    },
+  ],
+
+  [
+    "the bar tone follows the progress: green ≤ 40, yellow ≤ 80, red above",
+    () => {
+      const toneAt = (used: number, cap: number) =>
+        barRow(
+          usageRows({ limited: true, fiveHour: { used, cap, exceeded: false } }),
+          "5-hour",
+        )?.[3]
+      assertEqual(toneAt(0.4, 1), "success", "40% stays green")
+      assertEqual(toneAt(0.41, 1), "warning", "41% is yellow")
+      assertEqual(toneAt(0.8, 1), "warning", "80% stays yellow")
+      assertEqual(toneAt(0.81, 1), "error", "81% is red")
+      assertEqual(toneAt(1, 1), "error")
+    },
+  ],
+
+  [
+    "the bar fills to the nearest half cell, dots the rest, and keeps its cap",
+    () => {
+      const barAt = (used: number, cap: number) =>
+        barRow(
+          usageRows({ limited: true, fiveHour: { used, cap, exceeded: false } }),
+          "5-hour",
+        )?.[0]
+      // The pinned glyph set: full cell, half cell, empty dot, end cap.
+      assertEqual(barAt(0, 1), `${"·".repeat(32)}▏`)
+      assertEqual(barAt(0.06, 1), `${"█".repeat(2)}${"·".repeat(30)}▏`)
+      assertEqual(barAt(0.36, 1), `${"█".repeat(11)}▌${"·".repeat(20)}▏`)
+      assertEqual(barAt(0.5, 1), `${"█".repeat(16)}${"·".repeat(16)}▏`)
+      assertEqual(barAt(1, 1), `${"█".repeat(32)}▏`)
+    },
+  ],
+
+  [
+    "the summary sub-section renders only the totals the summary carries",
+    () => {
+      const rows = (totals: UsageTotals) =>
+        usageRows({ limited: true, totals, fiveHour: { used: 0, cap: 1, exceeded: false } })
+      assertEqual(label(rows({ tokensIn: 1000 }), "Token In"), ["Token In", "1K"])
+      assertEqual(label(rows({ tokensOut: 500 }), "Token Out"), ["Token Out", "500"])
+      // A total without the in/out split falls back to the one `Tokens` line.
+      assertEqual(label(rows({ tokens: 2000 }), "Tokens"), ["Tokens", "2K"])
+      assertEqual(label(rows({ tokensIn: 1000, tokensOut: 500 }), "Tokens"), undefined)
+      assertEqual(label(rows({ requests: 12 }), "Request"), ["Request", "12"])
+      assertEqual(label(rows({ cost: 0 }), "Total Spent"), ["Total Spent", "$0.00"])
+      for (const name of ["Token In", "Token Out", "Tokens", "Request", "Total Spent"]) {
+        assertEqual(label(rows({}), name), undefined, `${name} must not render without data`)
+      }
+    },
+  ],
+
+  [
+    "the Extra Credit row renders the purchased balance, whatever its value",
+    () => {
+      const extra = (purchasedCredits?: number) =>
         label(
-          renderUsageRows(
-            {
-              state: "usage",
-              snapshot: { limited: true, monthly: { used: 1, cap: 10 }, periodEnd },
-            },
-            { now: NOW },
-          ),
-          "Monthly",
+          usageRows({
+            limited: true,
+            fiveHour: { used: 0, cap: 1, exceeded: false },
+            ...(purchasedCredits === undefined ? {} : { purchasedCredits }),
+          }),
+          "Extra Credit",
         )
-      assertEqual(monthlyAt(NOW + 5 * DAY), ["Monthly", "$1.00 / $10.00 · 10% · renews in 5d"])
-      // Four hours still rounds to a day (the CLI's ceil), not "renews today".
-      assertEqual(monthlyAt(NOW + 2 * HOUR), ["Monthly", "$1.00 / $10.00 · 10% · renews in 1d"])
-      assertEqual(monthlyAt(NOW - HOUR), ["Monthly", "$1.00 / $10.00 · 10% · renews today"])
-      assertEqual(monthlyAt(undefined), ["Monthly", "$1.00 / $10.00 · 10%"])
-    },
-  ],
-
-  [
-    "the provenance line names the rung, and a file label stays inert",
-    () => {
-      const rows = (provenance?: UsageCredentialSource) =>
-        renderUsageRows(
-          {
-            state: "usage",
-            snapshot: { limited: true, fiveHour: { used: 0, cap: 3, exceeded: false } },
-          },
-          { now: NOW, provenance },
-        )
-      assertEqual(valueLine(rows({ kind: "host" }), "via "), "via Host connection")
-      assertEqual(valueLine(rows({ kind: "environment" }), "via "), "via COMMANDCODE_API_KEY")
-      // A store's path is data: it cannot break the line or its code span.
-      assertEqual(
-        valueLine(rows({ kind: "file", label: "~/.command\ncode/auth.json" }), "via "),
-        "via legacy file `~/.command code/auth.json`",
-      )
-      assertEqual(
-        valueLine(rows({ kind: "file", label: "auth|`file`.json" }), "via "),
-        "via legacy file `auth file .json`",
-      )
-      // An empty store label still names the rung.
-      assertEqual(valueLine(rows({ kind: "file", label: "  " }), "via "), "via legacy file")
-      assertEqual(valueLine(rows(undefined), "via "), undefined)
-    },
-  ],
-
-  [
-    "the cycle line renders only the totals the summary carries",
-    () => {
-      const cycle = (totals: UsageTotals) =>
-        valueLine(
-          renderUsageRows(
-            {
-              state: "usage",
-              snapshot: { limited: true, totals, fiveHour: { used: 0, cap: 1, exceeded: false } },
-            },
-            { now: NOW },
-          ),
-          "This cycle:",
-        )
-      assertEqual(cycle({ requests: 12 }), "This cycle: 12 requests")
-      assertEqual(cycle({ cost: 0 }), "This cycle: $0.00 spent")
-      assertEqual(cycle({ tokensIn: 1000 }), "This cycle: 1K in tokens")
-      assertEqual(cycle({ tokensIn: 1000, tokensOut: 500 }), "This cycle: 1K in / 500 out tokens")
-      assertEqual(cycle({}), undefined)
+      assertEqual(extra(4.81934405), ["Extra Credit", "$4.82"])
+      assertEqual(extra(0), ["Extra Credit", "$0.00"], "a zero balance is shown, not hidden")
+      assertEqual(extra(undefined), undefined, "no parsed balance, no row")
+      // The balance alone keeps the segment renderable — no meters needed.
+      assertEqual(label(usageRows({ purchasedCredits: 5 }), "Extra Credit"), [
+        "Extra Credit",
+        "$5.00",
+      ])
     },
   ],
 
