@@ -49,7 +49,7 @@ import { snapshotIndex } from "./snapshot-index.mjs"
 export const DEFAULT_RSC_PRICING_URL = RSC_PAGES.pricing.defaultUrl
 export const DEFAULT_RSC_GOAT_URL = RSC_PAGES.goat.defaultUrl
 export const DEFAULT_RSC_PRO_URL = RSC_PAGES.pro.defaultUrl
-const DEFAULT_OUT = resolve(import.meta.dirname, "..", "src", "deals", "catalog.ts")
+export const DEFAULT_OUT = resolve(import.meta.dirname, "..", "src", "rates-usage", "catalog.ts")
 
 // Coverage gate for the RSC path. Re-exported under its historical name:
 // The gate itself lives in the shared record source so the classification

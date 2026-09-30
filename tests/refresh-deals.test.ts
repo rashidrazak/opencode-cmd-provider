@@ -18,11 +18,13 @@
 // change and required a human to update the pins before the cron could
 // proceed. The synthetic-record approach below keeps the parser's
 // behavior pinned while the values stay fluid.
-import { readFileSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
+import { fileURLToPath } from "node:url"
 import { extractPlanPageRsc, extractPricingLimitsRsc } from "../scripts/parse-rsc.mjs"
 import {
   buildPlanRows,
   buildRscInputs,
+  DEFAULT_OUT,
   discountFor,
   emitDealsModuleFromRsc,
   missingDealsModelsFromRsc,
@@ -648,6 +650,19 @@ run([
         ],
       )
       assertEqual([...parsePreviousPlanRows("").entries()], [], "no rows in empty text")
+    },
+  ],
+  [
+    "the generator's default output is the shipped Rates & usage catalog",
+    () => {
+      // The bare `npm run refresh` leg (cron, release, the refresh skill)
+      // depends on DEFAULT_OUT; every other caller passes --out. The
+      // rates-usage rename left the constant on the moved-away path, so the
+      // shipped catalog silently went stale. Pin it to the module the
+      // slice imports.
+      const shipped = fileURLToPath(new URL("../src/rates-usage/catalog.ts", import.meta.url))
+      assertEqual(DEFAULT_OUT, shipped, "DEFAULT_OUT must match the shipped catalog path")
+      assert(existsSync(DEFAULT_OUT), "the default output must exist")
     },
   ],
 ])
