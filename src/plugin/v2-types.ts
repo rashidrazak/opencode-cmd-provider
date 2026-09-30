@@ -189,6 +189,17 @@ export interface V2RpcCallContext {
   readonly signal: AbortSignal
 }
 
+/**
+ * The resolved `rpc.register` value (`RpcRegistration`): the port's event
+ * channel. `emit` publishes one portable event — the usage bridge's
+ * `progress` frames (#251) — to every subscriber of the port.
+ */
+export interface V2RpcRegistration {
+  readonly events: {
+    readonly emit: (name: string, data: Record<string, unknown>) => Promise<void>
+  }
+}
+
 export interface V2ToolResult {
   content?: string | ReadonlyArray<{ type: "text"; text: string }>
   metadata?: Readonly<Record<string, unknown>>
@@ -254,8 +265,8 @@ export interface V2SetupContext {
    * The cross-plugin RPC surface (`RpcDomain`): `register` publishes a
    * portable port the host serves and other plugins — the Deals TUI half
    * included, through its own `client.rpc` — can call (ADR-0020's usage
-   * bridge). The resolved registration is not kept: nothing consumes its
-   * events or disposes it.
+   * bridge). The resolved registration carries the port's event channel,
+   * which the usage bridge emits progress frames through (#251).
    */
   readonly rpc: {
     register(
@@ -263,7 +274,7 @@ export interface V2SetupContext {
       handlers: Readonly<
         Record<string, (input: unknown, context: V2RpcCallContext) => Promise<unknown> | unknown>
       >,
-    ): Promise<unknown>
+    ): Promise<V2RpcRegistration>
   }
   readonly aisdk: {
     hook(

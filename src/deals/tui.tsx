@@ -33,6 +33,7 @@ import {
   type UsagePanelState,
 } from "./tui-usage.js"
 import { createUsageRpcLoader } from "./usage-rpc.js"
+import { globalUsageCache } from "./usage-cache.js"
 import type { TuiCredentialV1Input } from "./tui-credential.js"
 import type { PlanId } from "../catalog/plans.js"
 import type {
@@ -470,6 +471,7 @@ function CmdPanelV1(props: { api: TuiPluginApi; sessionID: string; model: () => 
   const usagePanel = createUsagePanel(
     v1UsageLoader(() => v1UsageInput(props.api)),
     {
+      cache: { key: props.sessionID, store: globalUsageCache() },
       onChange: setUsage,
       onTick: setNow,
     },
@@ -571,6 +573,7 @@ function CmdPanelV2(props: { ctx: V2TuiContext; sessionID: string; model: () => 
   const [usage, setUsage] = createSignal<UsagePanelState | undefined>(undefined)
   const [now, setNow] = createSignal(Date.now())
   const usagePanel = createUsagePanel(createUsageRpcLoader(props.ctx.client), {
+    cache: { key: props.sessionID, store: globalUsageCache() },
     onChange: setUsage,
     onTick: setNow,
   })

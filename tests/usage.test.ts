@@ -130,6 +130,21 @@ async function fetchSnapshot(
   return (result as { state: "usage"; snapshot: UsageSnapshot }).snapshot
 }
 
+/** The last-good snapshot a refresh merges over (#251). */
+function previousSnapshot(): UsageSnapshot {
+  return {
+    plan: "go",
+    limited: true,
+    fiveHour: { used: 0.5, cap: 3, exceeded: false },
+    weekly: { used: 1.5, cap: 6, exceeded: false, resetAt: MS_RESET },
+    monthly: { used: 39.5, cap: 40 },
+    purchasedCredits: 4.8,
+    totals: { requests: 7020, tokens: 1135619637, cost: 9.41 },
+    periodEnd: Date.parse(PERIOD_END),
+    periodBasis: "billing-period",
+  }
+}
+
 /** A row by label. */
 function label(rows: DealsRow[], key: string): DealsRow | undefined {
   return rows.find(([name]) => name === key)
@@ -173,7 +188,7 @@ run([
   // ---------------------------------------------------------------------------
 
   [
-    "the chain is whoami → subscriptions → credits → summary, org-scoped and Bearer-only",
+    "a cold chain runs whoami beside the wave; an org whoami re-runs it scoped",
     async () => {
       const { calls, fetch } = stubFetch(fullBodies({ whoami: whoami("org_42") }))
       const result = await fetchUsageSnapshot({ apiKey: "k", baseURL: BASE, fetch, env: {} })
@@ -198,18 +213,85 @@ run([
       })
       assertEqual(
         calls.map((call) => new URL(call.url).pathname),
-        [WHOAMI, SUBSCRIPTIONS, CREDITS, SUMMARY],
-        "documented leg order",
+        [WHOAMI, SUBSCRIPTIONS, CREDITS, SUMMARY, SUBSCRIPTIONS, CREDITS, SUMMARY],
+        "the speculative unscoped wave is discarded and re-run scoped",
       )
       assertEqual(query(calls[0]!.url).get("limits"), "1", "whoami asks for the limits view")
-      assertEqual(query(calls[1]!.url).get("orgId"), "org_42", "team requests scope to the org")
-      assertEqual(query(calls[2]!.url).get("orgId"), "org_42")
-      assertEqual(query(calls[3]!.url).get("orgId"), "org_42")
-      assertEqual(query(calls[3]!.url).get("since"), PERIOD_START, "the summary pins the period")
+      assertEqual(
+        query(calls[1]!.url).get("orgId"),
+        null,
+        "the speculative wave starts before the org is known",
+      )
+      assertEqual(query(calls[4]!.url).get("orgId"), "org_42", "the re-run is org-scoped")
+      assertEqual(query(calls[5]!.url).get("orgId"), "org_42")
+      assertEqual(query(calls[6]!.url).get("orgId"), "org_42")
+      assertEqual(
+        query(calls[6]!.url).get("since"),
+        null,
+        "a cold summary is unpinned: the period start is not known when the wave starts",
+      )
       for (const call of calls) {
         assertEqual(call.headers, { authorization: "Bearer k" }, "Bearer auth only")
         assert(call.signal instanceof AbortSignal, "each leg carries the abort budget")
       }
+    },
+  ],
+
+  [
+    "an orgless cold chain keeps the one speculation wave and settles the orgless scope",
+    async () => {
+      const { calls, fetch } = stubFetch(fullBodies())
+      let capturedScope: UsageScope | undefined
+      const result = await fetchUsageSnapshot({
+        apiKey: "k",
+        baseURL: BASE,
+        fetch,
+        env: {},
+        now: NOW,
+        onScope: (scope) => {
+          capturedScope = scope
+        },
+      })
+      assertEqual(
+        calls.map((call) => new URL(call.url).pathname),
+        [WHOAMI, SUBSCRIPTIONS, CREDITS, SUMMARY],
+        "no re-run for an orgless account",
+      )
+      assert(result.state === "usage")
+      assertEqual(capturedScope, {
+        subscription: {
+          plan: "go",
+          since: PERIOD_START,
+          periodEnd: Date.parse(PERIOD_END),
+          readAt: NOW,
+        },
+      })
+    },
+  ],
+
+  [
+    "a failed whoami keeps the wave unscoped and publishes no scope",
+    async () => {
+      const { calls, fetch } = stubFetch(fullBodies(), {
+        [WHOAMI]: () => new Response("boom", { status: 500 }),
+      })
+      let capturedScope: UsageScope | undefined
+      const result = await fetchUsageSnapshot({
+        apiKey: "k",
+        baseURL: BASE,
+        fetch,
+        env: {},
+        onScope: (scope) => {
+          capturedScope = scope
+        },
+      })
+      assertEqual(
+        calls.map((call) => new URL(call.url).pathname),
+        [WHOAMI, SUBSCRIPTIONS, CREDITS, SUMMARY],
+        "the CLI's own unscoped path when whoami fails",
+      )
+      assert(result.state === "usage", "the rest of the wave still answers")
+      assertEqual(capturedScope, undefined, "no cache is frozen; the next chain retries whoami")
     },
   ],
 
@@ -389,10 +471,11 @@ run([
   ],
 
   [
-    "each billing request arms the 5-second abort budget",
+    "each billing request arms the 25-second abort budget",
     async () => {
       // `AbortSignal.timeout` carries no readable duration, so the budget is
-      // observed at the seam: every leg arms exactly one 5000 ms signal.
+      // observed at the seam: every leg arms exactly one 25000 ms signal (the
+      // live API answers a leg in 8–18 s, so a tighter budget drops data).
       const original = AbortSignal.timeout
       const budgets: number[] = []
       AbortSignal.timeout = ((ms: number) => {
@@ -405,7 +488,7 @@ run([
       } finally {
         AbortSignal.timeout = original
       }
-      assertEqual(budgets, [5000, 5000, 5000, 5000], "one budget per leg")
+      assertEqual(budgets, [25_000, 25_000, 25_000, 25_000], "one budget per leg")
     },
   ],
 
@@ -442,7 +525,7 @@ run([
   ],
 
   [
-    "a numeric period start pins `since` verbatim and a seconds period end converts",
+    "a numeric period start pins `since` verbatim once cached, and a seconds period end converts",
     async () => {
       const { calls, fetch } = stubFetch(
         fullBodies({
@@ -456,10 +539,46 @@ run([
           },
         }),
       )
-      const result = await fetchUsageSnapshot({ apiKey: "k", baseURL: BASE, fetch, env: {} })
-      assertEqual(query(calls[3]!.url).get("since"), "1700000000")
-      const snapshot = (result as { state: "usage"; snapshot: UsageSnapshot }).snapshot
-      assertEqual(snapshot.periodEnd, 1_700_000_600_000)
+      let capturedScope: UsageScope | undefined
+      const first = await fetchUsageSnapshot({
+        apiKey: "k",
+        baseURL: BASE,
+        fetch,
+        env: {},
+        now: NOW,
+        onScope: (scope) => {
+          capturedScope = scope
+        },
+      })
+      assertEqual(
+        query(calls[3]!.url).get("since"),
+        null,
+        "a cold summary is unpinned — the period start is not known when the wave starts",
+      )
+      const snapshot = (first as { state: "usage"; snapshot: UsageSnapshot }).snapshot
+      assertEqual(snapshot.periodEnd, 1_700_000_600_000, "a seconds period end converts")
+      assertEqual(capturedScope?.subscription?.since, "1700000000", "the numeric start stringifies")
+
+      calls.length = 0
+      const second = await fetchUsageSnapshot({
+        apiKey: "k",
+        baseURL: BASE,
+        fetch,
+        env: {},
+        now: NOW + 60_000,
+        scope: capturedScope,
+      })
+      assertEqual(
+        calls.map((call) => new URL(call.url).pathname),
+        [SUBSCRIPTIONS, CREDITS, SUMMARY],
+        "the period end is long past, so the record is re-read",
+      )
+      assertEqual(
+        query(calls[2]!.url).get("since"),
+        "1700000000",
+        "the cached period start pins the summary verbatim",
+      )
+      assert(second.state === "usage")
     },
   ],
 
@@ -776,7 +895,7 @@ run([
   ],
 
   [
-    "the caller's abort signal joins every leg's five-second budget",
+    "the caller's abort signal joins every leg's own abort budget",
     async () => {
       const controller = new AbortController()
       controller.abort()
@@ -793,6 +912,160 @@ run([
         assert((call.signal as AbortSignal).aborted, "each leg carries the caller's abort")
       }
       assert(result.state === "usage", "the stub ignores signals; the plumbing is what is pinned")
+    },
+  ],
+
+  // ---------------------------------------------------------------------------
+  // The last-good merge and progressive publication (issue #251): a chain that
+  // cannot refresh every leg keeps the previous snapshot's rows, its own
+  // success is measured by the data it did bring, and each landing leg
+  // publishes the merged view before the slower legs answer.
+  // ---------------------------------------------------------------------------
+
+  [
+    "a failed summary leg keeps the previous totals and period basis",
+    async () => {
+      const scope: UsageScope = {
+        subscription: {
+          plan: "go",
+          since: PERIOD_START,
+          periodEnd: Date.parse(PERIOD_END),
+          readAt: NOW,
+        },
+      }
+      const { fetch } = stubFetch(
+        {
+          [CREDITS]: {
+            windowLimits: { limited: true, fiveHour: { used: 1, cap: 3, exceeded: false } },
+            credits: { monthlyCredits: 0.5 },
+          },
+        },
+        { [SUMMARY]: () => new Response("boom", { status: 500 }) },
+      )
+      const result = await fetchUsageSnapshot({
+        apiKey: "k",
+        baseURL: BASE,
+        fetch,
+        env: {},
+        scope,
+        previous: previousSnapshot(),
+        now: NOW,
+      })
+      assert(result.state === "usage")
+      assertEqual(
+        result.snapshot.fiveHour,
+        { used: 1, cap: 3, exceeded: false },
+        "the credits leg refreshed the meter",
+      )
+      assertEqual(result.snapshot.totals, previousSnapshot().totals, "the totals stay on screen")
+      assertEqual(result.snapshot.periodBasis, "billing-period")
+      assertEqual(result.snapshot.purchasedCredits, 4.8, "the extra-credit row stays too")
+    },
+  ],
+
+  [
+    "a chain with no answering leg is unavailable — never a previous-only success",
+    async () => {
+      const dead = () => new Response("boom", { status: 500 })
+      const scope: UsageScope = {
+        subscription: {
+          plan: "go",
+          since: PERIOD_START,
+          periodEnd: Date.parse(PERIOD_END),
+          readAt: NOW,
+        },
+      }
+      const { fetch } = stubFetch({}, { [CREDITS]: dead, [SUMMARY]: dead })
+      assertEqual(
+        await fetchUsageSnapshot({
+          apiKey: "k",
+          baseURL: BASE,
+          fetch,
+          env: {},
+          scope,
+          previous: previousSnapshot(),
+          now: NOW,
+        }),
+        { state: "unavailable" },
+        "the panel's backoff ladder must read a failed chain as a failure",
+      )
+    },
+  ],
+
+  [
+    "a canceled subscription clears the plan instead of resurrecting the previous one",
+    async () => {
+      const stale: UsageScope = {
+        subscription: { plan: "go", since: PERIOD_START, periodEnd: NOW - 1, readAt: NOW - 60_000 },
+      }
+      const bodies = fullBodies({
+        subscriptions: { data: { status: "canceled", planId: "individual-go" } },
+      })
+      const { fetch } = stubFetch(bodies)
+      const result = await fetchUsageSnapshot({
+        apiKey: "k",
+        baseURL: BASE,
+        fetch,
+        env: {},
+        scope: stale,
+        previous: previousSnapshot(),
+        now: NOW,
+      })
+      assert(result.state === "usage")
+      assertEqual(result.snapshot.plan, undefined, "the status gate must not resurrect a plan")
+      assertEqual(
+        result.snapshot.fiveHour,
+        { used: 0, cap: 3, exceeded: false },
+        "the live meter still renders",
+      )
+    },
+  ],
+
+  [
+    "a landing leg publishes its merged view before the slower legs answer",
+    async () => {
+      const gates: Record<string, (response: Response) => void> = {}
+      const fetch = (async (url: string) => {
+        const path = url.replace(BASE, "").split("?")[0]!
+        return await new Promise<Response>((resolve) => {
+          gates[path] = resolve
+        })
+      }) as unknown as typeof fetch
+      const partials: UsageSnapshot[] = []
+      const pending = fetchUsageSnapshot({
+        apiKey: "k",
+        baseURL: BASE,
+        fetch,
+        env: {},
+        now: NOW,
+        onPartial: (result) => {
+          if (result.state === "usage") partials.push(result.snapshot)
+        },
+      })
+      const settle = async (): Promise<void> => {
+        await new Promise((resolve) => setImmediate(resolve))
+      }
+      await settle()
+      assertEqual(partials.length, 0, "nothing is published before whoami decides")
+      gates[WHOAMI]!(new Response(JSON.stringify(whoami()), { status: 200 }))
+      await settle()
+      gates[CREDITS]!(new Response(JSON.stringify(fullBodies()[CREDITS]), { status: 200 }))
+      await settle()
+      assertEqual(partials.length, 1, "the credits leg publishes the meters first")
+      assertEqual(partials[0]!.fiveHour, { used: 0, cap: 3, exceeded: false })
+      assertEqual(partials[0]!.totals, undefined, "the summary has not landed yet")
+      gates[SUMMARY]!(new Response(JSON.stringify(PROBE_SUMMARY), { status: 200 }))
+      await settle()
+      assertEqual(partials.length, 2)
+      assertEqual(partials[1]!.totals?.requests, 7020, "the totals join the merged view")
+      assertEqual(partials[1]!.plan, undefined, "no plan until subscriptions lands")
+      gates[SUBSCRIPTIONS]!(
+        new Response(JSON.stringify(subscription("individual-go")), { status: 200 }),
+      )
+      const result = await pending
+      assertEqual(partials.length, 3, "the subscription leg publishes the plan")
+      assert(result.state === "usage")
+      assertEqual(partials[2], result.snapshot, "the final view equals the last published one")
     },
   ],
 

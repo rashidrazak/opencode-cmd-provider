@@ -26,6 +26,14 @@
 // in src/deals/usage.ts) survives between loads — round-tripped for v2 — so a
 // routine refresh is credits + summary only.
 //
+// Since #251 the controller also carries the last-good state across panels: a
+// `cache` binding (the session key and the shared store) seeds the panel
+// before its first chain settles, the load request hands the fetch the
+// previous snapshot to merge over, and each `onPartial` a chain reports
+// renders immediately — the segment fills in as legs land, and no failed
+// refresh can blank it. Partials never touch the backoff ladder or the roll
+// bookkeeping; only a settled outcome does.
+//
 // Host-agnostic by design: no TUI runtime (solid-js), no runtime
 // `@opencode-ai/*` import. The host loaders are built per panel, never per
 // module, so a `/connect` or a provider re-registration between calls is
@@ -50,15 +58,25 @@ import {
   type TuiCredentialOptions,
   type TuiCredentialV1Input,
 } from "./tui-credential.js"
+import type { UsageCache } from "./usage-cache.js"
 
 /**
  * What a load is asked for: the scope cached from earlier loads (absent on a
- * mount), the panel's abort signal, and the render clock's instant. The
- * loader may consult the host's live state — it is called per chain, never
- * cached at mount (ADR-0020 rule 3).
+ * mount), the panel's last-good snapshot to merge over (#251), the panel's
+ * abort signal, and the render clock's instant. The loader may consult the
+ * host's live state — it is called per chain, never cached at mount (ADR-0020
+ * rule 3).
  */
 export interface UsageLoadRequest {
   readonly scope?: UsageScope
+  /** The panel's last-good snapshot; the fetch merges field-wise over it. */
+  readonly previous?: UsageSnapshot
+  /**
+   * Progressive publication (#251): a chain calls this as its legs land with
+   * the merged-so-far state, so the panel can render the fast legs while the
+   * slow ones are still in flight. Only renderable (`usage`) states.
+   */
+  readonly onPartial?: (state: UsagePanelState) => void
   readonly signal: AbortSignal
   readonly now: number
 }
@@ -108,8 +126,12 @@ export function v1UsageLoader(
       ...options.fetchOptions,
       apiKey: credential.key,
       scope,
+      previous: request.previous,
       onScope: (updated) => {
         scope = updated
+      },
+      onPartial: (partial) => {
+        request.onPartial?.({ result: partial, provenance: credential.source })
       },
       signal: request.signal,
       now: request.now,
@@ -170,7 +192,25 @@ function rollResets(snapshot: UsageSnapshot): Array<[RollWindow, number | undefi
   ]
 }
 
+/**
+ * The panel's binding to the shared last-good store (#251): the session key
+ * this panel's state lives under, and the store itself (the TUI halves' one
+ * `globalUsageCache()`, or a test's fresh factory).
+ */
+export interface UsagePanelCache {
+  readonly key: string
+  readonly store: UsageCache
+}
+
 export interface UsagePanelOptions {
+  /**
+   * The session-keyed last-good store (#251): the controller seeds itself from
+   * `store.read(key)` before its first chain settles — a remount cannot blank
+   * the segment — and writes every state it publishes back, so the next
+   * remount seeds the same way. The seed itself is not re-written: the store's
+   * TTL tracks when the data was last fetched, not last displayed.
+   */
+  cache?: UsagePanelCache
   /** Called whenever a load changes what the panel shows (a kept snapshot publishes nothing). */
   onChange?: (state: UsagePanelState) => void
   /** Called on every countdown tick with the new instant (the panel's render clock). */
@@ -224,7 +264,30 @@ export function createUsagePanel(load: UsageLoader, options: UsagePanelOptions =
 
   const publish = (next: UsagePanelState): void => {
     state = next
+    // Every published state is the next panel's seed; the seed itself is not
+    // re-written (the TTL tracks when the data was last fetched).
+    if (options.cache !== undefined) options.cache.store.write(options.cache.key, next)
     options.onChange?.(next)
+  }
+
+  // A seeded panel (#251) renders the last-good snapshot from the moment it is
+  // created — a remount cannot blank the segment — and starts its first chain
+  // from that state. The seed never enters the backoff/roll bookkeeping: it is
+  // the cache's view, not this panel's outcome.
+  const seed = options.cache?.store.read(options.cache.key)
+  if (seed !== undefined) {
+    state = seed
+    options.onChange?.(seed)
+  }
+
+  /** A partial load (#251): renders immediately, changes no policy bookkeeping. */
+  const publishPartial = (partial: UsagePanelState): void => {
+    if (unmounted || partial.result.state !== "usage") return
+    publish(
+      partial.provenance === undefined
+        ? { result: partial.result }
+        : { result: partial.result, provenance: partial.provenance },
+    )
   }
 
   /** A success resets the backoff ladder; `unavailable` climbs it; no-credential is neither. */
@@ -250,9 +313,16 @@ export function createUsagePanel(load: UsageLoader, options: UsagePanelOptions =
   const attempt = async (): Promise<void> => {
     if (unmounted) return
     lastAttemptAt = clock.now()
+    const previous = state?.result.state === "usage" ? state.result.snapshot : undefined
     let next: UsagePanelState
     try {
-      const loaded = await load({ scope, signal: abort.signal, now: clock.now() })
+      const loaded = await load({
+        scope,
+        ...(previous === undefined ? {} : { previous }),
+        onPartial: publishPartial,
+        signal: abort.signal,
+        now: clock.now(),
+      })
       if (loaded.scope !== undefined) scope = loaded.scope
       next =
         loaded.provenance === undefined

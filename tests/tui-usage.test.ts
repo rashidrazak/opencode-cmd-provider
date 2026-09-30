@@ -9,8 +9,15 @@
 // — never the network — and no TUI runtime: the controller is host-agnostic
 // and each half feeds it one loader through `src/deals/tui-usage.ts`.
 import { readFileSync } from "node:fs"
-import { createUsagePanel, v1UsageLoader, type UsagePanelState } from "../src/deals/tui-usage.js"
+import {
+  createUsagePanel,
+  v1UsageLoader,
+  type UsageLoadOutcome,
+  type UsageLoadRequest,
+  type UsagePanelState,
+} from "../src/deals/tui-usage.js"
 import { renderUsageRows, type UsageResult, type UsageSnapshot } from "../src/deals/usage.js"
+import { createUsageCache } from "../src/deals/usage-cache.js"
 import type { TuiCredentialV1Input } from "../src/deals/tui-credential.js"
 import type { V1ProviderListClient } from "../src/deals/host-credential.js"
 import { assert, assertEqual, run } from "./harness.js"
@@ -172,7 +179,10 @@ run([
       assert(state?.result.state === "usage", "the mount must publish a snapshot")
       assertEqual(state.provenance, { kind: "host" })
       assertEqual(segment(state), SEGMENT, "the panel's pinned segment")
-      assertEqual(changes.length, 1, "one publish per settled mount")
+      // #251: each landing leg publishes its merged view, then the settled
+      // outcome — four publishes for this four-leg chain.
+      assertEqual(changes.length, 4, "three partials and the settled outcome")
+      assertEqual(changes.at(-1), state, "the settled outcome is the last publish")
       // Every mounting test ends with `unmount`: it cancels the countdown
       // clock, whose live timer would otherwise keep the runner alive.
       panel.unmount()
@@ -354,6 +364,7 @@ run([
       const first = panel.state()
       assert(first?.result.state === "usage")
       assertEqual(base.urls.length, 4)
+      const publishesAtMount = changes.length
 
       failing = true
       await panel.refresh()
@@ -361,7 +372,7 @@ run([
       // The mount cached the scope, so the refresh chain is the two live legs
       // (credits + summary) — four mount requests plus two refresh requests.
       assertEqual(attempted.length, 6, "the refresh ran its own credits + summary chain")
-      assertEqual(changes.length, 1, "a kept snapshot publishes nothing")
+      assertEqual(changes.length, publishesAtMount, "a kept snapshot publishes nothing")
       assertEqual(segment(panel.state()), SEGMENT, "the numbers stay rendered")
       panel.unmount()
     },
@@ -446,6 +457,85 @@ run([
       await panel.refresh()
       assertEqual(panel.state()?.result.state, "usage")
       assertEqual(urls.length, 4)
+      panel.unmount()
+    },
+  ],
+
+  [
+    "a cached state seeds the panel before its chain settles and survives a failed mount",
+    async () => {
+      const store = createUsageCache()
+      const seeded: UsageSnapshot = {
+        plan: "go",
+        limited: true,
+        fiveHour: { used: 0.5, cap: 3, exceeded: false },
+        totals: { requests: 7 },
+      }
+      store.write("ses_1", {
+        result: { state: "usage", snapshot: seeded },
+        provenance: { kind: "host" },
+      })
+      const changes: UsagePanelState[] = []
+      const panel = createUsagePanel(
+        async () => {
+          throw new Error("bridge down")
+        },
+        { cache: { key: "ses_1", store }, onChange: (state) => changes.push(state) },
+      )
+      // The seed renders synchronously — a remount cannot blank the segment.
+      assertEqual(panel.state()?.result, { state: "usage", snapshot: seeded })
+      assertEqual(changes.length, 1, "the seed is published once")
+      await panel.mount()
+      assertEqual(panel.state()?.result.state, "usage", "a failed mount keeps the seed")
+      assertEqual(changes.at(-1)?.result, { state: "usage", snapshot: seeded })
+      panel.unmount()
+    },
+  ],
+
+  [
+    "the panel hands the loader its last-good snapshot and forwards partial states",
+    async () => {
+      const requests: UsageLoadRequest[] = []
+      const load = async (request: UsageLoadRequest): Promise<UsageLoadOutcome> => {
+        requests.push(request)
+        const partial: UsageSnapshot = {
+          limited: true,
+          fiveHour: { used: 1, cap: 3, exceeded: false },
+        }
+        request.onPartial?.({
+          result: { state: "usage", snapshot: partial },
+          provenance: { kind: "environment" },
+        })
+        return { result: { state: "unavailable" } }
+      }
+      const store = createUsageCache()
+      const preloaded: UsageSnapshot = {
+        limited: true,
+        weekly: { used: 2, cap: 6, exceeded: false },
+      }
+      store.write("ses_2", { result: { state: "usage", snapshot: preloaded } })
+      const changes: UsagePanelState[] = []
+      const panel = createUsagePanel(load, {
+        cache: { key: "ses_2", store },
+        onChange: (state) => changes.push(state),
+      })
+      await panel.mount()
+      assertEqual(requests.length, 1)
+      assertEqual(requests[0]!.previous, preloaded, "the seed is the merge base")
+      assertEqual(
+        panel.state()?.result,
+        {
+          state: "usage",
+          snapshot: { limited: true, fiveHour: { used: 1, cap: 3, exceeded: false } },
+        },
+        "the partial published as-is",
+      )
+      assertEqual(
+        panel.state()?.provenance,
+        { kind: "environment" },
+        "the partial carries its rung",
+      )
+      assertEqual(store.read("ses_2")?.result.state, "usage", "the partial is cached for a remount")
       panel.unmount()
     },
   ],
