@@ -11,7 +11,7 @@ import {
   registerUsageRpc,
   type UsageRpcOutcome,
 } from "../src/deals/usage-rpc.js"
-import type { UsageLoadRequest } from "../src/deals/tui-usage.js"
+import type { UsageLoadRequest, UsagePanelState } from "../src/deals/tui-usage.js"
 import type { HostCredential } from "../src/provider/auth-key.js"
 import type { V2RpcCallContext, V2SetupContext } from "../src/plugin/v2-types.js"
 import type { V2TuiClient } from "../src/plugin/v2-tui-types.js"
@@ -73,16 +73,25 @@ function stubFetch(bodies: Record<string, unknown> = billingBodies()): {
 interface RegisteredPort {
   definition: unknown
   handlers: Record<string, (input: unknown, context: V2RpcCallContext) => Promise<unknown>>
+  /** The `progress` frames the handler emitted (#251). */
+  emitted: Array<{ name: string; data: Record<string, unknown> }>
 }
 
-/** A minimal server context: only `rpc.register` is reached. */
+/** A minimal server context: only `rpc.register` is reached, with its events. */
 function fakeServerCtx(): { ctx: V2SetupContext; port(): RegisteredPort } {
   let registered: RegisteredPort | undefined
   const ctx = {
     rpc: {
       register: async (definition: unknown, handlers: unknown) => {
-        registered = { definition, handlers: handlers as RegisteredPort["handlers"] }
-        return {}
+        const emitted: RegisteredPort["emitted"] = []
+        registered = { definition, handlers: handlers as RegisteredPort["handlers"], emitted }
+        return {
+          events: {
+            emit: async (name: string, data: Record<string, unknown>) => {
+              emitted.push({ name, data })
+            },
+          },
+        }
       },
     },
   } as unknown as V2SetupContext
@@ -113,14 +122,83 @@ function request(scope?: unknown): UsageLoadRequest {
 
 run([
   [
-    "the port definition pins one method, object schemas, no events",
+    "the port definition pins one method, object schemas, and the progress event",
     () => {
       assertEqual(USAGE_RPC_DEFINITION.id, "commandcode")
       assertEqual(Object.keys(USAGE_RPC_DEFINITION.methods), ["usage"])
       const method = USAGE_RPC_DEFINITION.methods.usage
       assertEqual((method.input as { type: string }).type, "object")
       assertEqual((method.output as { type: string }).type, "object")
-      assertEqual(Object.keys(USAGE_RPC_DEFINITION.events), [])
+      assertEqual(Object.keys(USAGE_RPC_DEFINITION.events), ["progress"])
+      const schema = USAGE_RPC_DEFINITION.events.progress.schema
+      assertEqual(schema.type, "object")
+      assertEqual(schema.required, ["callId", "result"])
+      assertEqual(schema.additionalProperties, false)
+      // The three input fields the caller may send (issue #251).
+      assertEqual(Object.keys(method.input.properties), ["scope", "previous", "callId"])
+    },
+  ],
+
+  [
+    "the handler emits one progress frame per landing leg, correlated by callId",
+    async () => {
+      const { ctx, port } = fakeServerCtx()
+      const { fetch } = stubFetch()
+      await registerUsageRpc(ctx, async () => ({ key: "host_key", source: "host" }), {
+        fetchOptions: { baseURL: BASE, fetch, env: {} },
+      })
+      const outcome = await callUsage(port(), { callId: "call_1" })
+      assertEqual(outcome.result.state, "usage")
+      const frames = port().emitted
+      assertEqual(frames.length, 3, "credits, subscriptions and summary each publish")
+      for (const frame of frames) {
+        assertEqual(frame.name, "progress")
+        assertEqual(frame.data.callId, "call_1")
+        assertEqual((frame.data.result as { state: string }).state, "usage")
+        assertEqual(frame.data.provenance, { kind: "host" })
+      }
+      // The frames are merged-so-far views; the last one is the settled snapshot.
+      assertEqual(frames.at(-1)!.data.result, outcome.result)
+      // Without a callId there is nothing to correlate and nothing is emitted.
+      port().emitted.length = 0
+      await callUsage(port(), {})
+      assertEqual(port().emitted.length, 0, "no callId, no progress frames")
+    },
+  ],
+
+  [
+    "the handler merges the caller's previous snapshot over a failed leg",
+    async () => {
+      const { ctx, port } = fakeServerCtx()
+      const { fetch } = stubFetch({
+        [WHOAMI]: { success: true, org: null },
+        [CREDITS]: {
+          windowLimits: { limited: true, fiveHour: { used: 1, cap: 3, exceeded: false } },
+          credits: { monthlyCredits: 0.5 },
+        },
+      })
+      await registerUsageRpc(ctx, async () => ({ key: "host_key", source: "host" }), {
+        fetchOptions: { baseURL: BASE, fetch, env: {} },
+      })
+      const outcome = await callUsage(port(), {
+        previous: { purchasedCredits: 7, totals: { requests: 12 } },
+      })
+      assert(outcome.result.state === "usage")
+      assertEqual(
+        outcome.result.snapshot.fiveHour,
+        { used: 1, cap: 3, exceeded: false },
+        "the credits leg refreshed",
+      )
+      assertEqual(
+        outcome.result.snapshot.purchasedCredits,
+        7,
+        "the extra-credit row survives the dead sub-request",
+      )
+      assertEqual(
+        outcome.result.snapshot.totals,
+        { requests: 12 },
+        "the totals survive the summary miss",
+      )
     },
   ],
 
@@ -266,6 +344,80 @@ run([
       assertEqual(loaded.result, outcome.result)
       assertEqual(loaded.provenance, { kind: "host" })
       assertEqual(loaded.scope, outcome.scope)
+    },
+  ],
+
+  [
+    "the loader subscribes to progress, filters by callId, and unsubscribes on settle",
+    async () => {
+      const captured: { handler?: (event: unknown) => void; unsubscribed: boolean } = {
+        unsubscribed: false,
+      }
+      let input: Record<string, unknown> | undefined
+      let release: (() => void) | undefined
+      const gate = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      const outcome: UsageRpcOutcome = {
+        result: { state: "usage", snapshot: { limited: true } },
+      }
+      const client = {
+        rpc: () => ({
+          usage: async (value: unknown) => {
+            input = value as Record<string, unknown>
+            await gate
+            return outcome
+          },
+          events: {
+            on: (name: string, handler: (event: unknown) => void) => {
+              assertEqual(name, "progress", "the loader subscribes to the port's event")
+              captured.handler = handler
+              return () => {
+                captured.unsubscribed = true
+              }
+            },
+          },
+        }),
+      } as unknown as V2TuiClient
+      const partials: UsagePanelState[] = []
+      const pending = createUsageRpcLoader(client)({
+        ...request(),
+        previous: { totals: { requests: 1 } },
+        onPartial: (state) => partials.push(state),
+      })
+      await new Promise((resolve) => setImmediate(resolve))
+      assertEqual(input?.previous, { totals: { requests: 1 } }, "the merge base travels in")
+      const callId = input?.callId
+      assert(typeof callId === "string" && callId.length > 0, "a callId travels in")
+      // A foreign callId is ignored; the matching frame is parsed and forwarded.
+      captured.handler?.({
+        data: { callId: "someone-else", result: { state: "usage", snapshot: { limited: true } } },
+      })
+      captured.handler?.({
+        data: {
+          callId,
+          result: { state: "usage", snapshot: { limited: true, purchasedCredits: 4.82 } },
+          provenance: { kind: "environment" },
+        },
+      })
+      assertEqual(partials.length, 1)
+      assertEqual(partials[0]!.result, {
+        state: "usage",
+        snapshot: { limited: true, purchasedCredits: 4.82 },
+      })
+      assertEqual(partials[0]!.provenance, { kind: "environment" })
+      // A malformed frame is dropped, never thrown.
+      captured.handler?.({ data: { callId, result: 7 } })
+      assertEqual(partials.length, 1, "the mangled frame dropped")
+      release?.()
+      const loaded = await pending
+      assertEqual(loaded.result, outcome.result)
+      assertEqual(captured.unsubscribed, true, "the subscription is torn down on settle")
+      // Late frames after settle are ignored, never overwriting the outcome.
+      captured.handler?.({
+        data: { callId, result: { state: "usage", snapshot: { limited: false } } },
+      })
+      assertEqual(partials.length, 1, "a late frame cannot regress the panel")
     },
   ],
 

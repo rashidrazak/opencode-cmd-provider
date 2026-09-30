@@ -139,15 +139,27 @@ export interface V2TuiModel {
 /**
  * The client slice the TUI half consumes: the RPC subclient factory
  * (`OpenCodeClient.rpc`, present from `@opencode/client@2.0.3`). The usage
- * bridge calls `client.rpc(definition)` and receives the port's subclient;
- * the wire payloads are parsed structurally at the call site (ADR-0020), so
- * this mirror pins only the method shape.
+ * bridge calls `client.rpc(definition)` and receives the port's subclient —
+ * the `usage` method plus the `events` channel (`on`/`subscribe`, present on
+ * the same line, re-checked against 2.0.3 through 2.0.20) the bridge's
+ * `progress` frames arrive on (#251). The wire payloads are parsed
+ * structurally at the call site (ADR-0020), so this mirror pins only the
+ * method shapes.
  */
+export interface V2TuiRpcEvents {
+  readonly on: (
+    name: string,
+    handler: (event: unknown) => void,
+    options?: { readonly signal?: AbortSignal },
+  ) => () => void
+}
+
 export interface V2TuiRpcSubclient {
   readonly usage: (
     input: unknown,
     callOptions?: { readonly signal?: AbortSignal },
   ) => Promise<unknown>
+  readonly events: V2TuiRpcEvents
 }
 
 export interface V2TuiClient {

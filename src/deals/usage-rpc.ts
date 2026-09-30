@@ -9,18 +9,23 @@
 //   server half  `ctx.rpc.register` — a portable plugin-RPC port whose
 //                handler resolves the Host's active connection credential
 //                (host-credential getter passed by src/plugin/index.ts) and
-//                runs the four-leg billing fetch with it. Only display data
-//                leaves: the snapshot, the refreshed scope, the rung;
+//                runs the billing fetch with it. Only display data leaves: the
+//                snapshot, the refreshed scope, the rung — plus, since #251,
+//                one `progress` event per landing leg when the caller sends a
+//                `callId` to correlate them;
 //   TUI half     `ctx.client.rpc(definition)` — the same port, called with
-//                the panel's cached scope and abort signal. No credential
-//                resolution happens in the TUI process for v2, and no
-//                fallback exists: when the server half has no connected
+//                the panel's cached scope, last-good snapshot and abort
+//                signal, subscribed to `progress` while the call is in flight.
+//                No credential resolution happens in the TUI process for v2,
+//                and no fallback exists: when the server half has no connected
 //                credential the answer is the notice, never another account.
 //
 // The port is deliberately not a "resolve credential" call: returning the key
 // over the API would expose credentials to any local HTTP client. Fetching
 // server-side keeps the key where it already lives (ADR-0015 rule 4's hygiene,
-// one surface over).
+// one surface over). The `previous` snapshot travels *to* the server on each
+// call — display data only, parsed as defensively as any other wire input —
+// so the server half stays stateless (ADR-0020).
 //
 // Both payloads are parsed structurally — the wire shapes are this package's
 // own, but the host codec round-trips them, so the boundary applies the same
@@ -30,9 +35,14 @@
 import { normalizePlan } from "../catalog/plans.js"
 import { isRecord, numberValue, stringValue } from "../provider/converters.js"
 import type { HostCredential } from "../provider/auth-key.js"
-import type { V2RpcCallContext, V2SetupContext } from "../plugin/v2-types.js"
+import type { V2RpcCallContext, V2RpcRegistration, V2SetupContext } from "../plugin/v2-types.js"
 import type { V2TuiClient } from "../plugin/v2-tui-types.js"
-import type { UsageLoadOutcome, UsageLoader, UsageLoadRequest } from "./tui-usage.js"
+import type {
+  UsageLoadOutcome,
+  UsageLoader,
+  UsageLoadRequest,
+  UsagePanelState,
+} from "./tui-usage.js"
 import {
   fetchUsageSnapshot,
   type FetchUsageOptions,
@@ -52,11 +62,15 @@ const USAGE_RPC_ID = "commandcode"
 /** The single method of the port. */
 const USAGE_RPC_METHOD = "usage"
 
+/** The single progress event: one landing leg's merged view (#251). */
+const USAGE_RPC_PROGRESS = "progress"
+
 /**
  * The portable definition (`Rpc.PortableDefinition`, mirrored from
  * `@opencode/schema/rpc`): one method whose JSON Schemas are deliberately
  * coarse — the payload shapes are this package's own and are parsed
- * defensively by each side, so the schema pins object-ness, not fields.
+ * defensively by each side, so the schema pins object-ness, not fields — plus
+ * the `progress` event a caller can correlate with its `callId` (#251).
  */
 export const USAGE_RPC_DEFINITION = {
   id: USAGE_RPC_ID,
@@ -64,7 +78,11 @@ export const USAGE_RPC_DEFINITION = {
     [USAGE_RPC_METHOD]: {
       input: {
         type: "object",
-        properties: { scope: { type: "object" } },
+        properties: {
+          scope: { type: "object" },
+          previous: { type: "object" },
+          callId: { type: "string" },
+        },
         additionalProperties: false,
       },
       output: {
@@ -79,15 +97,33 @@ export const USAGE_RPC_DEFINITION = {
       },
     },
   },
-  events: {},
+  events: {
+    [USAGE_RPC_PROGRESS]: {
+      schema: {
+        type: "object",
+        properties: {
+          callId: { type: "string" },
+          result: { type: "object" },
+          provenance: { type: "object" },
+        },
+        required: ["callId", "result"],
+        additionalProperties: false,
+      },
+    },
+  },
 } as const
 
 /**
  * The `usage` method's input: the caller's cached scope (#245's client-side
- * subscription cache), round-tripped so the server half stays stateless.
+ * subscription cache), its last-good snapshot to merge over (#251), and — when
+ * the caller wants progressive updates — a `callId` correlating the
+ * `progress` events this call emits. All three round-trip so the server half
+ * stays stateless.
  */
 export interface UsageRpcInput {
   readonly scope?: UsageScope
+  readonly previous?: UsageSnapshot
+  readonly callId?: string
 }
 
 /**
@@ -103,60 +139,131 @@ export interface UsageRpcOutcome {
 
 /** Injection seams for the registration's tests (the transport is the host's). */
 export interface UsageRpcRegistrationOptions {
-  fetchOptions?: Omit<FetchUsageOptions, "apiKey" | "scope" | "onScope" | "signal" | "now">
+  fetchOptions?: Omit<
+    FetchUsageOptions,
+    "apiKey" | "scope" | "onScope" | "onPartial" | "previous" | "signal" | "now"
+  >
 }
 
 /**
  * Registers the usage port on the server half. The getter is the same
  * `hostCredentialFromV2(ctx)` the plan tool receives (ADR-0015): read per call,
- * stored credentials included, so a `/connect` mid-session is observed.
+ * stored credentials included, so a `/connect` mid-session is observed. The
+ * registration's event channel (#251) carries one `progress` event per landing
+ * leg for callers that sent a `callId`.
  */
 export async function registerUsageRpc(
   ctx: V2SetupContext,
   hostCredential: () => Promise<HostCredential | undefined>,
   options: UsageRpcRegistrationOptions = {},
 ): Promise<void> {
+  // The handler emits through the registration, which only exists after
+  // `register` resolves — and the handler can only run after that.
+  let registration: V2RpcRegistration | undefined
   const handler = async (input: unknown, context: V2RpcCallContext): Promise<UsageRpcOutcome> => {
     const credential = await hostCredential()
     if (credential === undefined) return { result: { state: "no-credential" } }
-    let scope = parseScope(isRecord(input) ? input.scope : undefined)
-    const result = await fetchUsageSnapshot({
-      ...options.fetchOptions,
-      apiKey: credential.key,
-      scope,
-      onScope: (updated) => {
-        scope = updated
-      },
-      signal: context.signal,
-    })
+    const request = isRecord(input) ? input : undefined
+    const callId = stringValue(request?.callId)
     // The Host service distinguishes its env method from its store; both are
     // the Host's own resolution and collapse into the panel's host rung, with
     // the env method keeping its named rung.
     const provenance: UsageCredentialSource =
       credential.source === "environment" ? { kind: "environment" } : { kind: "host" }
+    let scope = parseScope(request?.scope)
+    const result = await fetchUsageSnapshot({
+      ...options.fetchOptions,
+      apiKey: credential.key,
+      scope,
+      previous: parseSnapshot(request?.previous),
+      onScope: (updated) => {
+        scope = updated
+      },
+      onPartial: (partial) => {
+        if (callId === undefined) return
+        // Deliver the merged view as the leg lands; a progress event must
+        // never fail or delay the call itself.
+        void registration?.events
+          .emit(USAGE_RPC_PROGRESS, { callId, result: partial, provenance })
+          .catch(() => {})
+      },
+      signal: context.signal,
+    })
     return {
       result,
       ...(scope === undefined ? {} : { scope }),
       provenance,
     }
   }
-  await ctx.rpc.register(USAGE_RPC_DEFINITION, { [USAGE_RPC_METHOD]: handler })
+  registration = await ctx.rpc.register(USAGE_RPC_DEFINITION, { [USAGE_RPC_METHOD]: handler })
+}
+
+/** The id prefix of one loader's `callId`s; per process, so events never cross. */
+const CALL_ID_RUN = Math.random().toString(36).slice(2, 10)
+
+/** The loader's call counter: unique within the process. */
+let callSeq = 0
+
+function nextCallId(): string {
+  callSeq += 1
+  return `${CALL_ID_RUN}-${callSeq}`
 }
 
 /**
- * The TUI half's loader: one port call per chain, the request's cached scope
- * in, the refreshed scope out, the caller's abort signal joined to the RPC's
- * own cancellation. A host without the bridge, or a codec-mangled answer,
- * degrades to `unavailable` — never to a guessed account.
+ * The TUI half's loader: one port call per chain, the request's cached scope,
+ * last-good snapshot and `callId` in, the refreshed scope out, the caller's
+ * abort signal joined to the RPC's own cancellation. While the call is in
+ * flight a `progress` subscription (#251) forwards each landing leg's merged
+ * view to `request.onPartial`. A host without the bridge, or a codec-mangled
+ * answer, degrades to `unavailable` — never to a guessed account.
  */
 export function createUsageRpcLoader(client: V2TuiClient): UsageLoader {
   return async (request: UsageLoadRequest): Promise<UsageLoadOutcome> => {
-    const input: UsageRpcInput = request.scope === undefined ? {} : { scope: request.scope }
-    const output = await client.rpc(USAGE_RPC_DEFINITION).usage(input, {
-      signal: request.signal,
-    })
-    return parseUsageOutcome(output)
+    const port = client.rpc(USAGE_RPC_DEFINITION)
+    const callId = request.onPartial === undefined ? undefined : nextCallId()
+    /** Late progress must not overwrite the settled outcome. */
+    let settled = false
+    let unsubscribe: (() => void) | undefined
+    if (callId !== undefined && typeof port.events?.on === "function") {
+      unsubscribe = port.events.on(
+        USAGE_RPC_PROGRESS,
+        (event) => {
+          if (settled) return
+          const partial = parseProgressEvent(event, callId)
+          if (partial !== undefined) request.onPartial?.(partial)
+        },
+        { signal: request.signal },
+      )
+    }
+    try {
+      const input: UsageRpcInput = {
+        ...(request.scope === undefined ? {} : { scope: request.scope }),
+        ...(request.previous === undefined ? {} : { previous: request.previous }),
+        ...(callId === undefined ? {} : { callId }),
+      }
+      const output = await port.usage(input, { signal: request.signal })
+      settled = true
+      return parseUsageOutcome(output)
+    } finally {
+      settled = true
+      unsubscribe?.()
+    }
   }
+}
+
+/**
+ * One `progress` event as the panel consumes it: the event's `callId` must
+ * match the loader's own, and only a renderable usage state is forwarded.
+ * Malformed payloads drop silently — a lost progress frame is cosmetic.
+ */
+function parseProgressEvent(event: unknown, callId: string): UsagePanelState | undefined {
+  if (!isRecord(event) || !isRecord(event.data)) return undefined
+  const data = event.data
+  if (stringValue(data.callId) !== callId) return undefined
+  const result = parseUsageResult(data.result)
+  if (result.state !== "usage") return undefined
+  const provenance = parseProvenance(data.provenance)
+  return provenance === undefined ? { result } : { result, provenance }
 }
 
 /** The RPC result as a load outcome; any shape drift degrades, never throws. */

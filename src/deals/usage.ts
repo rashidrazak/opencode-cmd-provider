@@ -7,18 +7,25 @@
 //
 // Each leg fails on its own — a flaky whoami, credits or summary leg drops
 // only the rows that leg feeds, never the whole segment — and every request
-// carries only `Authorization: Bearer` with a 5-second abort budget, mirroring
-// the plan lookup (issue #159, ADR-0011). No credential resolved means zero
-// requests: `fetchUsageSnapshot` answers `no-credential` up front and the
-// renderer prints the one-line notice.
+// carries only `Authorization: Bearer` with a generous abort budget: the live
+// billing API routinely answers a leg in 8–18 seconds (five live probes,
+// 2026-09-30), so the old five-second budget dropped every slow leg and the
+// panel rendered a partial snapshot (issue #251). A chain reads its legs in
+// parallel rather than the CLI's sequential waves, so the chain's wall clock
+// is the slowest leg, not the sum; `previous` (the panel's last-good snapshot)
+// merges field-wise over whatever a chain could not refresh, so a failed leg
+// keeps its rows on screen. No credential resolved means zero requests:
+// `fetchUsageSnapshot` answers `no-credential` up front and the renderer prints
+// the one-line notice.
 //
-// Since #245 the fetch also carries the panel's cached scope: the first chain
-// reads whoami once and caches it with the subscription record; a later
-// refresh passes the scope back in and the chain collapses to the two live
-// legs — credits + summary — while the record is fresh (re-read only when its
-// period end has passed or it is over an hour old). The caller's abort signal
-// joins each request's timeout, so the panel's unmount cancels an in-flight
-// chain.
+// Since #245 the fetch also carries the panel's cached scope: a chain whose
+// whoami answered caches it with the subscription record; a later refresh
+// passes the scope back in and the chain collapses to the two live legs —
+// credits + summary — while the record is fresh (re-read only when its period
+// end has passed or it is over an hour old). A chain whose whoami failed
+// caches nothing, so the org read is retried instead of frozen (#251). The
+// caller's abort signal joins each request's timeout, so the panel's unmount
+// cancels an in-flight chain.
 //
 // Parsing never throws: upstream shape drift drops a row. `resetAt` is epoch
 // milliseconds (the CLI compares it straight to Date.now()), `0` means no
@@ -52,8 +59,10 @@ import { isRecord, numberValue, stringValue } from "../provider/converters.js"
 import { PLAN_CATALOG, type PlanInfo } from "./catalog.js"
 import type { DealsRow, DealsRowTone } from "./tui.js"
 
-/** Abort budget for each billing request, mirroring the plan lookup. */
-const REQUEST_TIMEOUT_MS = 5000
+/** Abort budget for each billing request. The live API answers a leg in
+ * 8–18 s, so a tighter budget drops data that was one or two seconds away;
+ * the legs run in parallel, so this bounds the chain too. */
+const REQUEST_TIMEOUT_MS = 25_000
 
 /** The official CLI's own usage endpoints (verified against command-code 1.69.0). */
 const WHOAMI_PATH = "/alpha/whoami?limits=1"
@@ -129,10 +138,13 @@ export interface UsageSubscriptionCache {
 }
 
 /**
- * The panel's cached billing context (issue #245). The first chain reads
- * whoami once and caches the org scope for the panel's lifetime; every later
- * chain reuses it and re-reads the subscription record only while it is
- * fresh, so a routine refresh is just the two live legs — credits + summary.
+ * The panel's cached billing context (issue #245). A chain whose whoami
+ * answered caches the org scope — org id or explicit no-org — for the panel's
+ * lifetime; every later chain reuses it and re-reads the subscription record
+ * only while it is fresh, so a routine refresh is just the two live legs —
+ * credits + summary. A chain whose whoami *failed* caches nothing, so the
+ * next chain retries the org read instead of freezing an unscoped cache
+ * (issue #251).
  */
 export interface UsageScope {
   /** Whoami's org id; absent when whoami said nothing (still cached). */
@@ -156,12 +168,25 @@ export interface FetchUsageOptions {
    * The cached scope from an earlier chain (#245). When present, whoami is not
    * re-read and a fresh subscription record collapses the chain to credits +
    * summary; a chain without one (the mount, or the first chain after a late
-   * credential) runs in full.
+   * credential) reads whoami and the subscription record itself.
    */
   scope?: UsageScope
-  /** Called with the scope to cache whenever the chain reads whoami/subscriptions. */
+  /** Called with the scope to cache when whoami settled and/or subscriptions were read. */
   onScope?: (scope: UsageScope) => void
-  /** The caller's abort signal, joined with each request's five-second budget. */
+  /**
+   * The panel's last-good snapshot (#251). Every field this chain cannot
+   * refresh — a failed leg, a sub-request that answered nothing — keeps its
+   * previous value instead of dropping rows. Absent on a cold panel.
+   */
+  previous?: UsageSnapshot
+  /**
+   * Progressive publication (#251): called with the merged snapshot whenever a
+   * leg lands, so the panel fills in as the fast legs (credits, ~1 s) answer
+   * long before the slow ones (subscriptions/summary, ~16 s). Only results
+   * carrying at least one renderable row are emitted.
+   */
+  onPartial?: (result: UsageResult) => void
+  /** The caller's abort signal, joined with each request's own budget. */
   signal?: AbortSignal
   /** Clock for the subscription-cache rule (defaults to Date.now()). */
   now?: number
@@ -300,12 +325,42 @@ function hasUsageData(snapshot: UsageSnapshot): boolean {
 }
 
 /**
- * The four-leg billing fetch behind the usage segment: whoami (org scope) →
- * org-scoped subscriptions → org-scoped credits → summary pinned with
- * `since=currentPeriodStart`. Each leg is independent — a miss drops only the
- * rows it feeds — and a lookup without a resolved credential makes no request
- * at all. A cached `scope` (#245) skips whoami for good and subscriptions
- * while the record is fresh, leaving credits + summary.
+ * One wave of billing legs: the credits and summary request, plus the
+ * subscription record when the cached one is stale enough to re-read.
+ */
+interface UsageLegSet {
+  credits: Promise<unknown>
+  /** Absent when the cached subscription record is still fresh (#245). */
+  subscriptions?: Promise<unknown>
+  summary: Promise<unknown>
+}
+
+/**
+ * The billing fetch behind the usage segment. The CLI's own /usage overlay
+ * reads the same four endpoints strictly sequentially (whoami → subscriptions
+ * ∥ credits → summary), which costs the sum of the leg latencies — ~42 s on
+ * the 2026-09-30 measurements when every leg answers, and the reason the old
+ * five-second budget "finished" in ~15 s with a permanently partial snapshot
+ * (issue #251).
+ *
+ * This chain runs the legs as one parallel wave instead: credits,
+ * subscriptions and the summary all start together, with the cached scope's
+ * `orgId`/`since` applied when known (the summary's unpinned output was
+ * measured byte-identical to the pin, so the period pin is a fidelity choice,
+ * not a correctness one — it is kept whenever the scope carries it). On a cold
+ * chain the wave is speculative until whoami answers: a whoami naming an org
+ * discards the unscoped legs and re-runs them scoped, while a whoami that
+ * answered "no org" — or failed: the CLI's own path there is unscoped too —
+ * keeps the wave. A failed whoami publishes no scope, so the next chain
+ * retries the org read instead of pinning an unscoped cache (the live
+ * `scope: {}` bug).
+ *
+ * Each landing leg publishes the merged view through `onPartial`, and the
+ * final snapshot merges field-wise over `previous`: a field an answered leg
+ * omits keeps its previous value, so a timed-out leg can no longer drop rows
+ * that were on screen. The chain still reports `unavailable` when no leg
+ * answered with a renderable value on this chain — the panel's backoff ladder
+ * reads that, not the merged view.
  */
 export async function fetchUsageSnapshot(options: FetchUsageOptions = {}): Promise<UsageResult> {
   const env = options.env ?? process.env
@@ -315,11 +370,12 @@ export async function fetchUsageSnapshot(options: FetchUsageOptions = {}): Promi
   const fetchImpl = options.fetch ?? fetch
   const catalog = options.catalog ?? PLAN_CATALOG
   const now = options.now ?? Date.now()
+  const previous = options.previous
 
   // One leg: offline, timeout, non-2xx and an unparseable body are all a miss
   // for this leg alone (ADR-0011). Only the Bearer header travels. Each leg
-  // arms its own five-second budget, joined with the caller's signal when the
-  // panel has one, so an unmount aborts an in-flight chain (#245).
+  // arms its own budget, joined with the caller's signal when the panel has
+  // one, so an unmount aborts an in-flight chain (#245).
   const getJson = async (path: string): Promise<unknown> => {
     const budget = AbortSignal.timeout(REQUEST_TIMEOUT_MS)
     const signal = options.signal === undefined ? budget : AbortSignal.any([options.signal, budget])
@@ -334,85 +390,194 @@ export async function fetchUsageSnapshot(options: FetchUsageOptions = {}): Promi
     }
   }
 
-  // The cached scope (#245): whoami is read on the first chain and cached for
-  // the panel's lifetime; the subscription record is re-read only when its
-  // period end has passed or it is over an hour old. A failed re-read keeps
-  // the old slice — its staleness re-triggers a read, and plan/since/periodEnd
-  // keep shaping this snapshot.
+  // The chain's accumulated leg state: the subscription slice plan/since/
+  // periodEnd ride on, the credits payload's two records, and the summary
+  // record. Each `apply` is called as its leg settles; the snapshot builder
+  // and the partial publisher read whatever has landed so far.
   let orgId = options.scope?.orgId
   let cached = options.scope?.subscription
-  let publishScope = options.scope === undefined
+  let windowLimits: Record<string, unknown> | undefined
+  let creditsRecord: Record<string, unknown> | undefined
+  let summaryRecord: Record<string, unknown> | undefined
+
+  /** The credits leg answered with one of its records; false is a missed leg. */
+  const applyCredits = (payload: unknown): boolean => {
+    if (!isRecord(payload) || payload.success === false) return false
+    const windows = isRecord(payload.windowLimits) ? payload.windowLimits : undefined
+    const credits = isRecord(payload.credits) ? payload.credits : undefined
+    if (windows === undefined && credits === undefined) return false
+    if (windows !== undefined) windowLimits = windows
+    if (credits !== undefined) creditsRecord = credits
+    return true
+  }
+
+  /** A failed read keeps the old slice; a read that answered replaces it. */
+  const applySubscriptions = (payload: unknown): boolean => {
+    const slice = readSubscription(payload, now)
+    if (slice === undefined) return false
+    cached = slice
+    return true
+  }
+
+  /** The summary leg answered with its own (totals-shaped) record. */
+  const applySummary = (payload: unknown): boolean => {
+    if (!isRecord(payload) || payload.success === false) return false
+    summaryRecord = payload
+    return true
+  }
+
+  /**
+   * The snapshot as far as the landed legs and `base` can build it: every
+   * field an answered leg carries wins, every field it could not refresh keeps
+   * `base`'s value. `plan`/`periodEnd` are the exception — they follow the
+   * subscription slice, so a canceled subscription clears the plan instead of
+   * resurrecting it from `base` (ADR-0011: never a stale plan presented as
+   * current).
+   */
+  const buildSnapshot = (base: UsageSnapshot | undefined): UsageSnapshot => {
+    const bundle = cached?.plan === undefined ? undefined : catalog[cached.plan]
+    const snapshot: UsageSnapshot = {}
+    const plan = cached === undefined ? base?.plan : cached.plan
+    if (plan !== undefined) snapshot.plan = plan
+    const limited =
+      windowLimits !== undefined && typeof windowLimits.limited === "boolean"
+        ? windowLimits.limited
+        : base?.limited
+    if (limited !== undefined) snapshot.limited = limited
+    const fiveHour =
+      (windowLimits === undefined
+        ? undefined
+        : parseWindow(windowLimits.fiveHour, bundle?.window5h)) ?? base?.fiveHour
+    if (fiveHour !== undefined) snapshot.fiveHour = fiveHour
+    const weekly =
+      (windowLimits === undefined
+        ? undefined
+        : parseWindow(windowLimits.weekly, bundle?.windowWeek)) ?? base?.weekly
+    if (weekly !== undefined) snapshot.weekly = weekly
+    const monthly =
+      deriveMonthly(
+        creditsRecord === undefined ? undefined : numberValue(creditsRecord.monthlyCredits),
+        summaryRecord === undefined ? undefined : numberValue(summaryRecord.totalMonthlyCredits),
+        bundle?.credits,
+      ) ?? base?.monthly
+    if (monthly !== undefined) snapshot.monthly = monthly
+    // The extra-credit balance is the CLI's `Extra Credits` figure (its
+    // `purchasedCredits`); negative values are unreadable and clamp to zero.
+    const purchasedCredits =
+      (creditsRecord === undefined ? undefined : numberValue(creditsRecord.purchasedCredits)) ??
+      base?.purchasedCredits
+    if (purchasedCredits !== undefined) snapshot.purchasedCredits = Math.max(0, purchasedCredits)
+    const totals =
+      (summaryRecord === undefined ? undefined : parseTotals(summaryRecord)) ?? base?.totals
+    if (totals !== undefined) snapshot.totals = totals
+    const periodEnd = cached === undefined ? base?.periodEnd : cached.periodEnd
+    if (periodEnd !== undefined) snapshot.periodEnd = periodEnd
+    const periodBasis =
+      (summaryRecord === undefined ? undefined : stringValue(summaryRecord.periodBasis)) ??
+      base?.periodBasis
+    if (periodBasis !== undefined && periodBasis !== "") snapshot.periodBasis = periodBasis
+    return snapshot
+  }
+
+  /** The merged view, as far as the landed legs can build it. */
+  const currentResult = (): UsageResult => {
+    const snapshot = buildSnapshot(previous)
+    return hasUsageData(snapshot) ? { state: "usage", snapshot } : { state: "unavailable" }
+  }
+
+  /** Publishes each landing leg's merged view; degraded states stay private. */
+  const publishProgress = (): void => {
+    const result = currentResult()
+    if (result.state !== "usage") return
+    // A progress consumer must never break the chain; a partial is cosmetic.
+    try {
+      options.onPartial?.(result)
+    } catch {
+      // swallowed deliberately
+    }
+  }
+
+  /** Starts one wave; the subscription leg is skipped while its cache is fresh. */
+  const startWave = (scope: {
+    orgId?: string
+    since?: string
+    subscriptions: boolean
+  }): UsageLegSet => {
+    const subscriptions = scope.subscriptions
+      ? getJson(`${SUBSCRIPTIONS_PATH}${scopeQuery(scope.orgId)}`)
+      : undefined
+    const credits = getJson(`${CREDITS_PATH}${scopeQuery(scope.orgId)}`)
+    const summaryParams = new URLSearchParams()
+    if (scope.orgId !== undefined) summaryParams.set("orgId", scope.orgId)
+    if (scope.since !== undefined) summaryParams.set("since", scope.since)
+    const summaryQuery = summaryParams.toString()
+    const summary = getJson(`${SUMMARY_PATH}${summaryQuery === "" ? "" : `?${summaryQuery}`}`)
+    return {
+      credits,
+      ...(subscriptions === undefined ? {} : { subscriptions }),
+      summary,
+    }
+  }
+
+  /** Applies each leg as it lands and publishes the merged view it produced. */
+  const wire = (legs: UsageLegSet): void => {
+    void legs.credits.then((payload) => {
+      if (applyCredits(payload)) publishProgress()
+    })
+    void legs.subscriptions?.then((payload) => {
+      if (applySubscriptions(payload)) publishProgress()
+    })
+    void legs.summary.then((payload) => {
+      if (applySummary(payload)) publishProgress()
+    })
+  }
+
+  // A cold chain (no cached scope) starts the wave speculatively beside
+  // whoami; nothing is published until the decision, so a team account never
+  // shows the unscoped context's numbers. A whoami that names an org discards
+  // the speculative wave and re-runs it scoped. A chain that only reuses the
+  // cached scope publishes nothing back.
+  let legs: UsageLegSet
+  let publishScope = false
   if (options.scope === undefined) {
-    const whoami = await getJson(WHOAMI_PATH)
-    orgId = isRecord(whoami) && isRecord(whoami.org) ? stringValue(whoami.org.id) : undefined
+    const whoamiPromise = getJson(WHOAMI_PATH)
+    const speculative = startWave({ subscriptions: true })
+    const whoami = await whoamiPromise
+    const whoamiOk = isRecord(whoami) && whoami.success !== false
+    publishScope = whoamiOk
+    if (whoamiOk) orgId = isRecord(whoami.org) ? stringValue(whoami.org.id) : undefined
+    legs = whoamiOk && orgId !== undefined ? startWave({ orgId, subscriptions: true }) : speculative
+  } else {
+    const subscriptions = !subscriptionsFresh(cached, now)
+    publishScope = subscriptions
+    legs = startWave({
+      ...(orgId === undefined ? {} : { orgId }),
+      ...(cached?.since === undefined ? {} : { since: cached.since }),
+      subscriptions,
+    })
   }
-  if (!subscriptionsFresh(cached, now)) {
-    const subscriptions = await getJson(`${SUBSCRIPTIONS_PATH}${scopeQuery(orgId)}`)
-    cached = readSubscription(subscriptions, now) ?? cached
-    publishScope = true
-  }
+  wire(legs)
+  await Promise.allSettled([legs.credits, legs.subscriptions, legs.summary])
+
+  // The scope cache: whoami settled (or was settled on an earlier chain) and
+  // the subscription slice rides along. A chain whose whoami failed publishes
+  // nothing, so the next chain retries the org read instead of freezing an
+  // unscoped cache.
   if (publishScope) {
     options.onScope?.({
       ...(orgId === undefined ? {} : { orgId }),
       ...(cached === undefined ? {} : { subscription: cached }),
     })
   }
-  // Plan identity rides the subscription cache through Core's vocabulary,
-  // gated on the statuses that still identify a plan (ADR-0011): a canceled or
-  // unpaid subscription must not keep feeding the bundled cap fallbacks below,
-  // and an unknown id is unknown — never a default.
-  const plan = cached?.plan
-  const since = cached?.since
-  const periodEnd = cached?.periodEnd
 
-  const creditsPayload = await getJson(`${CREDITS_PATH}${scopeQuery(orgId)}`)
-  const credits =
-    isRecord(creditsPayload) && isRecord(creditsPayload.credits)
-      ? creditsPayload.credits
-      : undefined
-  const windowLimits =
-    isRecord(creditsPayload) && isRecord(creditsPayload.windowLimits)
-      ? creditsPayload.windowLimits
-      : undefined
-
-  const summaryParams = new URLSearchParams()
-  if (orgId !== undefined) summaryParams.set("orgId", orgId)
-  if (since !== undefined) summaryParams.set("since", since)
-  const summaryQuery = summaryParams.toString()
-  const summary = await getJson(`${SUMMARY_PATH}${summaryQuery === "" ? "" : `?${summaryQuery}`}`)
-  const summaryRecord = isRecord(summary) ? summary : undefined
-
-  const bundle = plan === undefined ? undefined : catalog[plan]
-  const limited =
-    windowLimits !== undefined && typeof windowLimits.limited === "boolean"
-      ? windowLimits.limited
-      : undefined
-  const fiveHour = parseWindow(windowLimits?.fiveHour, bundle?.window5h)
-  const weekly = parseWindow(windowLimits?.weekly, bundle?.windowWeek)
-  const monthly = deriveMonthly(
-    credits === undefined ? undefined : numberValue(credits.monthlyCredits),
-    summaryRecord === undefined ? undefined : numberValue(summaryRecord.totalMonthlyCredits),
-    bundle?.credits,
-  )
-  // The extra-credit balance is the CLI's `Extra Credits` figure (its
-  // `purchasedCredits`); negative values are unreadable and clamp to zero.
-  const purchasedCredits = credits === undefined ? undefined : numberValue(credits.purchasedCredits)
-
-  const snapshot: UsageSnapshot = {}
-  if (plan !== undefined) snapshot.plan = plan
-  if (limited !== undefined) snapshot.limited = limited
-  if (fiveHour !== undefined) snapshot.fiveHour = fiveHour
-  if (weekly !== undefined) snapshot.weekly = weekly
-  if (monthly !== undefined) snapshot.monthly = monthly
-  if (purchasedCredits !== undefined) snapshot.purchasedCredits = Math.max(0, purchasedCredits)
-  const totals = parseTotals(summaryRecord)
-  if (totals !== undefined) snapshot.totals = totals
-  if (periodEnd !== undefined) snapshot.periodEnd = periodEnd
-  const periodBasis =
-    summaryRecord === undefined ? undefined : stringValue(summaryRecord.periodBasis)
-  if (periodBasis !== undefined && periodBasis !== "") snapshot.periodBasis = periodBasis
-
-  return hasUsageData(snapshot) ? { state: "usage", snapshot } : { state: "unavailable" }
+  const merged = buildSnapshot(previous)
+  // The chain's own success rule — the panel's backoff ladder reads it: at
+  // least one renderable row must have come from this chain, never from
+  // `previous` alone. A failed chain is `unavailable`; the panel keeps the
+  // last-good numbers on screen.
+  const fresh = buildSnapshot(undefined)
+  if (!hasUsageData(fresh) || !hasUsageData(merged)) return { state: "unavailable" }
+  return { state: "usage", snapshot: merged }
 }
 
 /** The segment heading, and its degradation lines. */

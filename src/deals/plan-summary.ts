@@ -46,8 +46,11 @@ const PLAN_DISPLAY: Record<PlanId, string> = {
   provider: "Provider",
 }
 
-/** Abort budget for each billing lookup request. */
-const LOOKUP_TIMEOUT_MS = 5000
+/** Abort budget for each billing lookup request. Like the usage chain's
+ * requests, these legs routinely take 8–18 s against the live API; the old
+ * five-second budget made every look-up miss its slow sources and rely on the
+ * credits fallback. */
+const LOOKUP_TIMEOUT_MS = 25_000
 
 export interface ResolvePlanOptions {
   /** Resolved API key for the billing lookup (defaults to the
