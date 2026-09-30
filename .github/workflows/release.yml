@@ -60,8 +60,8 @@ jobs:
             echo "::error::catalog snapshot or capability facts are stale. Run 'npm run refresh:snapshot' locally, commit src/catalog/snapshot.ts and src/catalog/facts.ts, land them on main, then re-tag ${GITHUB_REF_NAME}."
             exit 1
           fi
-          if ! git diff -I 'DEAL_LAST_REFRESHED' -I 'DEAL_PACKAGE_VERSION' --exit-code -- src/deals/catalog.ts; then
-            echo "::warning::deals catalog is stale — scraping may be mitigated and refresh fell back to fixtures/empty. Not blocking release. To update, run 'npm run refresh:deals -- --fixtures' locally (fails loudly if the snapshot has models the docs fixtures lack), commit src/deals/catalog.ts, and re-tag if desired."
+          if ! git diff -I 'DEAL_LAST_REFRESHED' -I 'DEAL_PACKAGE_VERSION' --exit-code -- src/rates-usage/catalog.ts; then
+            echo "::warning::deals catalog is stale — scraping may be mitigated and refresh fell back to fixtures/empty. Not blocking release. To update, run 'npm run refresh:deals -- --fixtures' locally (fails loudly if the snapshot has models the docs fixtures lack), commit src/rates-usage/catalog.ts, and re-tag if desired."
           else
             echo "deals catalog is fresh"
           fi
@@ -74,7 +74,7 @@ jobs:
           # Only a version-shaped heading (`## X.Y.Z - date`) terminates the
           # section. The catalog-refresh sections legitimately embed `##`
           # H2 headings from diff-catalog.mjs output ("## Model catalog",
-          # "## Deals intelligence"); treating any `##` as a terminator
+          # "## Deals catalog"); treating any `##` as a terminator
           # truncated the v1.6.3 and v1.6.4 GitHub Release notes to the
           # first heading, dropping the change tables the notes exist to
           # carry. This awk fragment is locked by tests/auto-release.test.ts.

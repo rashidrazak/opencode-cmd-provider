@@ -1,4 +1,4 @@
-// src/deals/segments.ts — the sidebar panel's segment vocabulary and the
+// src/rates-usage/segments.ts — the sidebar panel's segment vocabulary and the
 // user's layout over it (issue #253): which of the five segments render, in
 // which order, as persisted by the segment-settings dialog.
 //
@@ -17,12 +17,12 @@
 // The panel composes the visible segments with one blank separator between
 // them; `segmentKeyIntent` is the dialog's pure key map so the component
 // shell stays free of branching.
-export const DEALS_SEGMENT_IDS = ["status", "allowance", "rates", "info", "usage"] as const
+export const RATES_USAGE_SEGMENT_IDS = ["status", "allowance", "rates", "info", "usage"] as const
 
-export type DealsSegmentId = (typeof DEALS_SEGMENT_IDS)[number]
+export type RatesUsageSegmentId = (typeof RATES_USAGE_SEGMENT_IDS)[number]
 
 /** The dialog labels, matching the README's segment names. */
-export const DEALS_SEGMENT_LABELS: Readonly<Record<DealsSegmentId, string>> = {
+export const RATES_USAGE_SEGMENT_LABELS: Readonly<Record<RatesUsageSegmentId, string>> = {
   status: "Tier and status",
   allowance: "Allowance",
   rates: "Rates",
@@ -35,25 +35,25 @@ export const DEALS_SEGMENT_LABELS: Readonly<Record<DealsSegmentId, string>> = {
  * shared by every plugin, so the key carries the plugin and the panel; the v2
  * storage namespace adds the plugin id on top.
  */
-export const DEALS_LAYOUT_KEY = "commandcode.deals.segments"
+export const RATES_USAGE_LAYOUT_KEY = "commandcode.rates-usage.segments"
 
 /**
  * A normalized layout: the render order over all five ids, and the ids the
  * panel must not render. Both arrays are plain JSON, ready for host
  * persistence.
  */
-export interface DealsLayout {
-  order: DealsSegmentId[]
-  hidden: DealsSegmentId[]
+export interface RatesUsageLayout {
+  order: RatesUsageSegmentId[]
+  hidden: RatesUsageSegmentId[]
 }
 
 /** The out-of-the-box layout: every segment, in the panel's historic order. */
-export function defaultLayout(): DealsLayout {
-  return { order: [...DEALS_SEGMENT_IDS], hidden: [] }
+export function defaultLayout(): RatesUsageLayout {
+  return { order: [...RATES_USAGE_SEGMENT_IDS], hidden: [] }
 }
 
-function isSegmentId(value: unknown): value is DealsSegmentId {
-  return typeof value === "string" && (DEALS_SEGMENT_IDS as readonly string[]).includes(value)
+function isSegmentId(value: unknown): value is RatesUsageSegmentId {
+  return typeof value === "string" && (RATES_USAGE_SEGMENT_IDS as readonly string[]).includes(value)
 }
 
 /**
@@ -62,19 +62,19 @@ function isSegmentId(value: unknown): value is DealsSegmentId {
  * appear, not vanish), and `hidden` keeps only known ids. Anything that is not
  * the expected object shape reads as the default layout.
  */
-export function normalizeLayout(value: unknown): DealsLayout {
+export function normalizeLayout(value: unknown): RatesUsageLayout {
   const record =
     typeof value === "object" && value !== null ? (value as Record<string, unknown>) : undefined
-  const order: DealsSegmentId[] = []
+  const order: RatesUsageSegmentId[] = []
   if (Array.isArray(record?.["order"])) {
     for (const id of record["order"]) {
       if (isSegmentId(id) && !order.includes(id)) order.push(id)
     }
   }
-  for (const id of DEALS_SEGMENT_IDS) {
+  for (const id of RATES_USAGE_SEGMENT_IDS) {
     if (!order.includes(id)) order.push(id)
   }
-  const hidden: DealsSegmentId[] = []
+  const hidden: RatesUsageSegmentId[] = []
   if (Array.isArray(record?.["hidden"])) {
     for (const id of record["hidden"]) {
       if (isSegmentId(id) && !hidden.includes(id)) hidden.push(id)
@@ -84,12 +84,12 @@ export function normalizeLayout(value: unknown): DealsLayout {
 }
 
 /** The ids the layout renders, in order. */
-export function visibleSegments(layout: DealsLayout): DealsSegmentId[] {
+export function visibleSegments(layout: RatesUsageLayout): RatesUsageSegmentId[] {
   return layout.order.filter((id) => !layout.hidden.includes(id))
 }
 
 /** Flips one segment's visibility, keeping its position. */
-export function toggleSegment(layout: DealsLayout, id: DealsSegmentId): DealsLayout {
+export function toggleSegment(layout: RatesUsageLayout, id: RatesUsageSegmentId): RatesUsageLayout {
   const hidden = layout.hidden.includes(id)
     ? layout.hidden.filter((candidate) => candidate !== id)
     : [...layout.hidden, id]
@@ -97,7 +97,7 @@ export function toggleSegment(layout: DealsLayout, id: DealsSegmentId): DealsLay
 }
 
 /** Restores the out-of-the-box layout. */
-export function resetLayout(): DealsLayout {
+export function resetLayout(): RatesUsageLayout {
   return defaultLayout()
 }
 
@@ -106,7 +106,11 @@ export function resetLayout(): DealsLayout {
  * dialog reorders every segment, so unhiding one later restores the position
  * the user chose. An unknown id or a boundary move is a copy.
  */
-export function moveSegment(layout: DealsLayout, id: DealsSegmentId, delta: -1 | 1): DealsLayout {
+export function moveSegment(
+  layout: RatesUsageLayout,
+  id: RatesUsageSegmentId,
+  delta: -1 | 1,
+): RatesUsageLayout {
   const order = [...layout.order]
   const index = order.indexOf(id)
   const target = index + delta

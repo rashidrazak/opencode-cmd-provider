@@ -17,10 +17,10 @@ this skill is the manual, local, commit-ready version of the same work.
 | -------------------------------------- | -------------------------------------------------------------------------------- | ------------------------------ |
 | `src/catalog/snapshot.ts`              | npm `command-code` package models.md (membership authority) + enrichment ladders | `scripts/refresh-snapshot.mjs` |
 | `src/catalog/facts.ts`                 | npm `command-code` bundle (efforts, rates, modalities)                           | `scripts/refresh-snapshot.mjs` |
-| `src/deals/catalog.ts`                 | docs pages / `tests/fixtures/*.html`                                             | `scripts/refresh-deals.mjs`    |
+| `src/rates-usage/catalog.ts`           | docs pages / `tests/fixtures/*.html`                                             | `scripts/refresh-deals.mjs`    |
 | `tests/fixtures/goat.html`, `pro.html` | live docs capture (deals source)                                                 | manual `fetch`                 |
 
-`src/catalog/*.ts`, `src/deals/catalog.ts` — **generated, never hand-edit**
+`src/catalog/*.ts`, `src/rates-usage/catalog.ts` — **generated, never hand-edit**
 (AGENTS.md).
 
 ## Quick start
@@ -100,7 +100,7 @@ benchmarks) are stale, re-capture the fixtures (B), re-run
 
 ## Reference
 
-- `CONTEXT.md` (vocabulary), ADR-0002/0003 (release gates), ADR-0004 (Deals
-  slice), AGENTS.md ("Generated files — do not hand-edit").
+- `CONTEXT.md` (vocabulary), ADR-0002/0003 (release gates), ADR-0004 (Rates &
+  usage slice), AGENTS.md ("Generated files — do not hand-edit").
 - Mechanics: `scripts/refresh-deals.mjs`, `scripts/refresh-snapshot.mjs`,
   `scripts/check-deals-coverage.mjs`, `tests/deals-coverage.test.ts`.

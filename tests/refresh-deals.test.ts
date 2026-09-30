@@ -1,4 +1,4 @@
-// tests/refresh-deals.test.ts — seam: record → ModelDeals + RSC → deals.ts
+// tests/refresh-deals.test.ts — seam: record → ModelDeals + RSC → catalog.ts
 //
 // The modelDealEntry tests below use **synthetic** RSC records (hand-built
 // objects with the same shape the live docs page emits). This keeps the

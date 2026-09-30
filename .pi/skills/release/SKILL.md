@@ -43,7 +43,7 @@ pre-tag ritual and post-push verification.
 6. **Tag**: `git tag vX.Y.Z && git push origin vX.Y.Z` — the tag push triggers
    `release.yml`. Push the tag only; main is already up to date.
 
-Catalog freshness (`snapshot.ts` / `facts.ts` / `deals.ts`) is a **gate, not an auto-fix**:
+Catalog freshness (`src/catalog/snapshot.ts` / `facts.ts` / `classification.ts` / `src/rates-usage/catalog.ts`) is a **gate, not an auto-fix**:
 the pipeline regenerates each catalog and fails loudly if any drifted — it never
 moves the tag or pushes to `main` itself (see ADR 0003). Date-stamp lines are
 ignored (`-I 'FACTS_LAST_REFRESHED'` / `-I 'DEAL_LAST_REFRESHED'`), so a
@@ -79,7 +79,8 @@ public.
 - **A stale catalog fails the run** — nothing shipped. Refresh locally
   (`npm run refresh` for both, or `npm run refresh:snapshot` /
   `npm run refresh:deals -- --fixtures`), commit the changed
-  `src/catalog/{snapshot,facts,deals}.ts` (and `tests/fixtures/*.html` if you
+  `src/catalog/{snapshot,facts,classification}.ts` and `src/rates-usage/catalog.ts`
+  (and `tests/fixtures/*.html` if you
   re-captured docs pages), land on main via PR, then re-tag.
 - **The refresh cannot generate facts** ("could not parse ... cli.mjs" or an
   unshippable-row failure) — nothing shipped. Unlike a stale

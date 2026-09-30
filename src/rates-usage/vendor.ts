@@ -1,4 +1,4 @@
-// src/deals/vendor.ts — model id → vendor family mapping for the config hook.
+// src/rates-usage/vendor.ts — model id → vendor family mapping for the config hook.
 // The value derives from the model id namespace, never from scraped data, so a
 // mapped row cannot drift with the docs; the prefix table itself is written by
 // hand, so an upstream namespace added or renamed under us — z-ai/ for the

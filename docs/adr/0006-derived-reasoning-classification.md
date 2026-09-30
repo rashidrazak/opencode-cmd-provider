@@ -111,9 +111,9 @@ a diverging copy of the fallback semantics.
   (shape), never "needs data".
 - The plugin's advertised reasoning matches upstream's published data by
   default instead of matching a transcription of it.
-- Deleting the Deals slice leaves classification (Core provider behavior)
+- Deleting the Rates & usage slice leaves classification (Core provider behavior)
   untouched: the generated module lives in the catalog layer, never in
-  `src/deals/` (ADR-0004).
+  `src/rates-usage/` (ADR-0004).
 - A future auto-merge policy can key off the diff tool's
   classification-changed signal without new plumbing; any workflow that
   pushes to main remains an ADR-level decision (see ADR-0002 and the

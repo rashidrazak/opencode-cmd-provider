@@ -8,9 +8,9 @@ Use your [Command Code](https://commandcode.ai) plan inside
 
 This plugin connects OpenCode to Command Code and adds every Command Code model
 to the model picker, so you can use your Go, GOAT, Pro, Max 10×, Max 20×,
-Provider, Team, or Enterprise plan from OpenCode. It also adds a **Command
-Code** section to the session sidebar with your plan's allowances, benchmarks,
-current deals, and live usage.
+Provider, Team, or Enterprise plan from OpenCode. It also adds the **Rates &
+usage** panel — a **Command Code** section in the session sidebar — with your
+plan's allowances, benchmarks, current deals, and live usage.
 
 > **Disclaimer:** This is an unofficial, community-maintained integration. It is
 > not affiliated with, endorsed by, or supported by Command Code. You need your
@@ -115,10 +115,10 @@ opencode run --model commandcode/claude-sonnet-5 "hello"
 
 ## What you get
 
-### The Command Code sidebar
+### The Rates & usage panel
 
-While a session uses a `[CMD]` model, the sidebar shows a **Command Code**
-section for that model, split into segments:
+While a session uses a `[CMD]` model, the sidebar shows the **Rates & usage**
+panel (titled **Command Code**) for that model, split into segments:
 
 - tier and status
 - an **Allowance** section listing the Go, GOAT, Pro, Max 10×, Max 20× and
@@ -137,7 +137,7 @@ section for that model, split into segments:
 Every row is always shown: when a model has nothing for a row, its value reads
 `N/A` instead of the row disappearing.
 
-Don't need every segment? Type `/cmd-deals` in the prompt — or run **Show,
+Don't need every segment? Type `/cmd-rates-usage` in the prompt — or run **Show,
 hide and reorder sidebar content** from the command palette (`ctrl+p`) —
 then: press space to show or hide the selected segment, shift+↑/↓ to move it,
 `r` to restore the default layout. Your choices are remembered per machine.
@@ -243,7 +243,7 @@ nothing else to clean up.
   - [Installation mechanics and caching](docs/TECHNICAL.md#installation-mechanics-and-caching) — where an install lands, how updates work, and why nothing updates by itself
   - [Model discovery and offline behaviour](docs/TECHNICAL.md#model-discovery-and-offline-behaviour) — bundled model lists, the `[CMD]` name prefix, and mixing in your own model entries
   - [Generated catalogs](docs/TECHNICAL.md#generated-catalogs) — the model, capability, and deals data files and how they are refreshed
-  - [Deals intelligence](docs/TECHNICAL.md#deals-intelligence) — where allowances, benchmarks, and deals come from, and what happens when they are unavailable
+  - [Rates & usage](docs/TECHNICAL.md#rates--usage) — the sidebar panel: where allowances, benchmarks, rates, and deals come from, and what happens when they are unavailable
   - [Reasoning support](docs/TECHNICAL.md#reasoning-support) — how thinking-effort levels reach the model
   - [Image input](docs/TECHNICAL.md#image-input) — which models accept images
   - [Claude prompt caching](docs/TECHNICAL.md#claude-prompt-caching) — how repeated Claude turns reuse a cached prefix instead of re-billing it

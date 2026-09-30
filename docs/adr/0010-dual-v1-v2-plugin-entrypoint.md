@@ -15,7 +15,7 @@ export default { id: "commandcode", server, setup }
 `server()` is the v1 hook map (unchanged since ADR-0001) and `setup(context)`
 registers the same three capabilities as v2 transforms. The two halves are
 independent implementations — v2 does not translate v1 hooks, and nothing is
-shared but the Snapshot, the runtime provider factory, and the Deals slice.
+shared but the Snapshot, the runtime provider factory, and the Rates & usage slice.
 
 ## Why one default export is safe in both hosts
 
@@ -63,12 +63,12 @@ SDK". `ctx.aisdk.hook("sdk", …, { providerID: "commandcode" })` is that seam.
 
 ### The TUI half: one `./tui` export, two contracts
 
-The Deals sidebar is a _TUI_ plugin, loaded from `exports["./tui"]`
+The Rates & usage panel is a _TUI_ plugin, loaded from `exports["./tui"]`
 (`dist/tui.js`) by a different host process than the server halves above — and
 that host has its own v1/v2 split. One default export carries both:
 
 ```ts
-export default { id: "commandcode.deals", tui, setup }
+export default { id: "commandcode.rates-usage", tui, setup }
 ```
 
 - **v1** (`packages/opencode/src/cli/cmd/tui/…` at v1.18.30) reads the default
@@ -91,7 +91,7 @@ Shipping only the v1 half was the missing-v2-sidebar bug: v2 still loaded `dist/
 (its TUI host takes a registered package's `tui` entrypoint), rejected the
 module, and the `Command Code` sidebar silently disappeared — no v1 symptom, no
 server-side symptom, and no test noticing. Both contracts are now pinned by
-`tests/contract.test.ts` (the built bundle) and `tests/tui-deals-panel.test.ts`
+`tests/contract.test.ts` (the built bundle) and `tests/tui-rates-usage-panel.test.ts`
 (registration and data path), and `src/plugin/v2-tui-types.ts` mirrors the v2
 TUI context exactly as `src/plugin/v2-types.ts` mirrors the catalog,
 integration, and tool context.
@@ -118,7 +118,7 @@ entry's own imports.
 - **First-run default.** v1 lands on `commandcode/gpt-5.6-terra` through
   OpenCode's hardcoded provider-priority list; v2 has no such list, so the
   transform sets that default explicitly — and only when no default exists yet.
-- **Deals intelligence.** The v1 config hook's enrichment and the v1 tool are
+- **Rates & usage.** The v1 config hook's enrichment and the v1 tool are
   re-expressed as a catalog extension and a tool definition, both passed in from
   `src/plugin/index.ts`, so the slice stays excisable (ADR-0004).
 
@@ -140,7 +140,7 @@ entry's own imports.
   default depth. Effort-bearing rows are unaffected — their variants carry
   `reasoningEffort` into the model's provider options.
 - **The cost tier replaces `context_over_200k`.** v2's cost entries are
-  context-tiered arrays, so the Deals slice's over-context rate becomes an
+  context-tiered arrays, so the Rates & usage slice's over-context rate becomes an
   entry with `tier: { type: "context", size: 200_000 }`.
 
 ## Evidence
@@ -219,7 +219,7 @@ plugins=N` — with the v1-only bundle our package loaded
   vocabulary (the `"sidebar.content"` path, the `ui.slot` claim shape, and the
   `settings` bag) is mirrored in `src/plugin/v2-tui-types.ts`; renaming any of
   it upstream would silently empty the sidebar again rather than fail a build,
-  so the mirror and `tests/tui-deals-panel.test.ts` must be re-derived from
+  so the mirror and `tests/tui-rates-usage-panel.test.ts` must be re-derived from
   `@opencode/plugin@<line>/dist/tui/context.d.ts` whenever the supported v2 line
   moves. The theme slice is the first rename that actually happened:
   `@opencode/theme@2.0.8` replaced `text.default`/`text.subdued` with

@@ -1,6 +1,6 @@
 // tests/plan-summary.test.ts — plan resolution (billing subscription, issue
 // #159) + summary rendering. Plan identity lives in Core
-// (src/catalog/plans.ts); the lookup and rendering live in the Deals slice.
+// (src/catalog/plans.ts); the lookup and rendering live in the Rates & usage slice.
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -12,9 +12,9 @@ import {
   PLAN_SUMMARY_DESCRIPTION,
   PLAN_SUMMARY_ARG_DESCRIPTION,
   type PlanSummaryOptions,
-} from "../src/deals/plan-summary.js"
+} from "../src/rates-usage/plan-summary.js"
 import { normalizePlan } from "../src/catalog/plans.js"
-import { MODEL_DEALS, PLAN_CATALOG, type ModelDeals } from "../src/deals/catalog.js"
+import { MODEL_DEALS, PLAN_CATALOG, type ModelDeals } from "../src/rates-usage/catalog.js"
 import { assert, assertEqual, run } from "./harness.js"
 
 const OFFLINE_ENV: NodeJS.ProcessEnv = {} // no key → no network attempt

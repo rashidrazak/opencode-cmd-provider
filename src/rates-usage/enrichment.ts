@@ -1,4 +1,4 @@
-// src/deals/enrichment.ts — docs-derived model enrichment for the config hook
+// src/rates-usage/enrichment.ts — docs-derived model enrichment for the config hook
 // (v1) and the provider transform (v2). Purely additive: every field is
 // gap-filled only when the user left it unset. When the Deals catalog is empty
 // the mitigated state is visible: `cmd.unavailable` is injected instead of

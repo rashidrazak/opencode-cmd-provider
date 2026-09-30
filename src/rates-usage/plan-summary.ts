@@ -1,4 +1,4 @@
-// src/deals/plan-summary.ts — cmd_plan_summary tool: plan-aware allowance
+// src/rates-usage/plan-summary.ts — cmd_plan_summary tool: plan-aware allowance
 // breakdown. Plan resolution: tool arg → COMMANDCODE_PLAN → the account's
 // billing subscription (issue #159). There is deliberately no fallback plan —
 // "detected Go" and "could not tell" stay distinguishable, and an unresolved

@@ -1,4 +1,4 @@
-// src/deals/host-credential.ts — the v1 Host's resolved credential, read
+// src/rates-usage/host-credential.ts — the v1 Host's resolved credential, read
 // through the plugin's SDK client (issue #203, ADR-0015).
 //
 // A v1 Host resolves the provider credential itself: the auth store outranks

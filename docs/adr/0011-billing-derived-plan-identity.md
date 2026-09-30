@@ -14,7 +14,7 @@ Two decisions, taken together because the first made the second observable.
 
 — no `planId`, no `plan`, with or without `?limits=1`. `resolvePlan()` read
 `body.planId ?? body.plan?.id`, so every lookup resolved nothing and every
-caller fell through to its default. Because the Deals default was `"go"`,
+caller fell through to its default. Because the tool's default was `"go"`,
 `cmd_plan_summary` rendered Go's credits, windows and deal table on every
 account regardless of the plan purchased (issue #159).
 
@@ -62,9 +62,9 @@ Two consequences worth stating:
 - **No request is made to route.** A model instance needs neither a credential
   nor the billing endpoints to pick a transport, so an unreachable or
   unauthorized billing API cannot change where inference goes.
-- **Core no longer imports the Deals slice.** Plan identity moved to
+- **Core no longer imports the Rates & usage slice.** Plan identity moved to
   `src/catalog/plans.ts`, restoring the ADR-0004 invariant that deleting
-  `src/deals/` (plus its two registration lines in `src/plugin/index.ts`)
+  `src/rates-usage/` (plus its two registration lines in `src/plugin/index.ts`)
   leaves Core intact. `tests/contract.test.ts` now enforces it.
 
 ## The legacy metadata on the Go path, pinned

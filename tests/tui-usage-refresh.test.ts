@@ -12,9 +12,9 @@ import {
   type UsageLoadOutcome,
   type UsagePanel,
   type UsagePanelState,
-} from "../src/deals/tui-usage.js"
-import { renderUsageRows } from "../src/deals/usage.js"
-import { subscribeV1Idle } from "../src/deals/tui.js"
+} from "../src/rates-usage/tui-usage.js"
+import { renderUsageRows } from "../src/rates-usage/usage.js"
+import { subscribeV1Idle } from "../src/rates-usage/tui.js"
 import { createFakeClock, type FakeClock } from "./helpers/fake-clock.js"
 import { assert, assertEqual, run } from "./harness.js"
 import type { TuiPluginApi } from "@opencode-ai/plugin/tui"

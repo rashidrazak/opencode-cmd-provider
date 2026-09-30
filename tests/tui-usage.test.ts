@@ -7,7 +7,7 @@
 // *policy* — throttle, coalescing, countdown, backoff, unmount — lives in
 // tests/tui-usage-refresh.test.ts under the fake clock. A recording mock fetch
 // — never the network — and no TUI runtime: the controller is host-agnostic
-// and each half feeds it one loader through `src/deals/tui-usage.ts`.
+// and each half feeds it one loader through `src/rates-usage/tui-usage.ts`.
 import { readFileSync } from "node:fs"
 import {
   createUsagePanel,
@@ -15,11 +15,11 @@ import {
   type UsageLoadOutcome,
   type UsageLoadRequest,
   type UsagePanelState,
-} from "../src/deals/tui-usage.js"
-import { renderUsageRows, type UsageResult, type UsageSnapshot } from "../src/deals/usage.js"
-import { createUsageCache } from "../src/deals/usage-cache.js"
-import type { TuiCredentialV1Input } from "../src/deals/tui-credential.js"
-import type { V1ProviderListClient } from "../src/deals/host-credential.js"
+} from "../src/rates-usage/tui-usage.js"
+import { renderUsageRows, type UsageResult, type UsageSnapshot } from "../src/rates-usage/usage.js"
+import { createUsageCache } from "../src/rates-usage/usage-cache.js"
+import type { TuiCredentialV1Input } from "../src/rates-usage/tui-credential.js"
+import type { V1ProviderListClient } from "../src/rates-usage/host-credential.js"
 import { assert, assertEqual, run } from "./harness.js"
 
 const BASE = "http://mock"
@@ -544,7 +544,7 @@ run([
     "the controller module is host-agnostic: no TUI runtime, no host-package imports",
     () => {
       const source = readFileSync(
-        new URL("../src/deals/tui-usage.ts", import.meta.url).pathname,
+        new URL("../src/rates-usage/tui-usage.ts", import.meta.url).pathname,
         "utf-8",
       )
       assert(!/from\s+["']solid-js["']/.test(source), "no solid-js import")

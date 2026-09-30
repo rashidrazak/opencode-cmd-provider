@@ -1,12 +1,12 @@
-// tests/tui-deals-panel.test.ts — deals sidebar panel data extraction and the
-// two host contracts (v1 `tui(api)` slot map, v2 `setup(context)` slot claim),
-// plus the appended live `Usage` segment's wiring (issue #244) and the
+// tests/tui-rates-usage-panel.test.ts — Rates & usage panel data extraction and
+// the two host contracts (v1 `tui(api)` slot map, v2 `setup(context)` slot
+// claim), plus the appended live `Usage` segment's wiring (issue #244) and the
 // completed-turn adapters each half subscribes through (issue #245).
 import plugin, {
-  dealSegments,
-  dealSegmentsV2,
-  dealsRows,
-  dealsRowsV2,
+  ratesUsageSegments,
+  ratesUsageSegmentsV2,
+  ratesUsageRows,
+  ratesUsageRowsV2,
   manageUsagePanel,
   panelRows,
   subscribeV1Idle,
@@ -15,11 +15,15 @@ import plugin, {
   v1UsageInput,
   v2ModelFor,
   v2ThemeColors,
-} from "../src/deals/tui.js"
-import type { DealsRow } from "../src/deals/tui.js"
-import { defaultLayout } from "../src/deals/segments.js"
-import { createUsagePanel, type UsagePanel, type UsagePanelState } from "../src/deals/tui-usage.js"
-import { createUsageRpcLoader } from "../src/deals/usage-rpc.js"
+} from "../src/rates-usage/tui.js"
+import type { RatesUsageRow } from "../src/rates-usage/tui.js"
+import { defaultLayout } from "../src/rates-usage/segments.js"
+import {
+  createUsagePanel,
+  type UsagePanel,
+  type UsagePanelState,
+} from "../src/rates-usage/tui-usage.js"
+import { createUsageRpcLoader } from "../src/rates-usage/usage-rpc.js"
 import { createRoot } from "solid-js"
 import type { Provider } from "@opencode-ai/sdk/v2"
 import type { TuiPluginApi } from "@opencode-ai/plugin/tui"
@@ -71,7 +75,7 @@ const COLUMNS = "in | out | cache r | w"
  * The placeholder under `Rates` for a model with no published band and no host
  * cost (the synthetic models in this suite): the column line, then `N/A`.
  */
-const NO_RATES: DealsRow[] = [
+const NO_RATES: RatesUsageRow[] = [
   [COLUMNS, "", "value"],
   [NA, "", "value"],
 ]
@@ -83,8 +87,11 @@ const NO_RATES: DealsRow[] = [
  * then the `Other Information` heading over the deal/benchmark rows — every
  * value from `values` (or `N/A`).
  */
-function fixedRows(values: Record<string, string>, rates: DealsRow[] = NO_RATES): DealsRow[] {
-  const valueRow = (label: string): DealsRow => [label, values[label] ?? NA]
+function fixedRows(
+  values: Record<string, string>,
+  rates: RatesUsageRow[] = NO_RATES,
+): RatesUsageRow[] {
+  const valueRow = (label: string): RatesUsageRow => [label, values[label] ?? NA]
   return [
     valueRow("Tier"),
     valueRow("Status"),
@@ -105,16 +112,16 @@ function fixedRows(values: Record<string, string>, rates: DealsRow[] = NO_RATES)
  * unavailable — so every label appears exactly once, in segment order.
  */
 function assertFixedRows(
-  rows: DealsRow[],
+  rows: RatesUsageRow[],
   values: Record<string, string>,
-  options: { banner?: string; rates?: DealsRow[] } = {},
+  options: { banner?: string; rates?: RatesUsageRow[] } = {},
 ): void {
   const expected = fixedRows(values, options.rates)
   if (options.banner !== undefined) expected.unshift([options.banner, ""])
   assertEqual(rows, expected)
 }
 
-const row = (rows: DealsRow[], label: string): DealsRow | undefined =>
+const row = (rows: RatesUsageRow[], label: string): RatesUsageRow | undefined =>
   rows.find(([key]) => key === label)
 
 /** A 33-cell meter bar: `full` whole cells, one half cell, dots, then the cap. */
@@ -123,7 +130,7 @@ function bar(full: number, half = 0): string {
 }
 
 /** The meter detail row under `label`'s label row (label, bar, detail). */
-function meterDetail(rows: DealsRow[], label: string): DealsRow | undefined {
+function meterDetail(rows: RatesUsageRow[], label: string): RatesUsageRow | undefined {
   const index = rows.findIndex(([name]) => name === label)
   return index === -1 ? undefined : rows[index + 2]
 }
@@ -132,7 +139,7 @@ run([
   [
     "renders the full fixed row set for a model with full deals data",
     () => {
-      const rows = dealsRows(
+      const rows = ratesUsageRows(
         {
           options: {
             cmd: {
@@ -165,7 +172,7 @@ run([
   [
     "segments the panel: Tier/Status, blank, Allowance heading + plans, blank, Rates, blank, Other Information",
     () => {
-      const rows = dealsRows({
+      const rows = ratesUsageRows({
         options: { cmd: { allowance: { goat: 20 }, free: false } },
       })
       assertEqual(rows.slice(0, 4), [
@@ -203,24 +210,24 @@ run([
     () => {
       // A Command Code model the catalog has no deals entry for: the panel
       // stays visible, every row reads N/A.
-      assertFixedRows(dealsRows({ options: {} }), {})
-      assertFixedRows(dealsRows({ options: { cmd: {} } }), {})
+      assertFixedRows(ratesUsageRows({ options: {} }), {})
+      assertFixedRows(ratesUsageRows({ options: { cmd: {} } }), {})
       // `free: false` is data, not absence: the Status row reads Paid.
-      assertFixedRows(dealsRows({ options: { cmd: { free: false } } }), { Status: "Paid" })
+      assertFixedRows(ratesUsageRows({ options: { cmd: { free: false } } }), { Status: "Paid" })
       // No model at all (no selected model to speak of) is the panel's gate.
-      assertEqual(dealsRows(undefined), [])
+      assertEqual(ratesUsageRows(undefined), [])
     },
   ],
 
   [
     "Status reads FREE for free models, Unknown renders N/A",
     () => {
-      assertEqual(row(dealsRows({ options: { cmd: { free: true } } }), "Status"), [
+      assertEqual(row(ratesUsageRows({ options: { cmd: { free: true } } }), "Status"), [
         "Status",
         "FREE",
       ])
       // A missing/unknown free flag has nothing to report.
-      assertEqual(row(dealsRows({ options: { cmd: {} } }), "Status"), ["Status", NA])
+      assertEqual(row(ratesUsageRows({ options: { cmd: {} } }), "Status"), ["Status", NA])
     },
   ],
 
@@ -230,7 +237,7 @@ run([
       // Upstream computes discounted rates in JS (`6 × 0.6`), so the captured
       // RSC rates carry residue like `output: 3.5999999999999996` (the
       // grok-4.7 40% deal). The panel renders what is paid, not the raw float.
-      const rows = dealsRows(
+      const rows = ratesUsageRows(
         {
           options: {
             cmd: {
@@ -263,16 +270,16 @@ run([
         now: { input: 3, output: 9 },
         free: false,
       }
-      const dealRow = (today: string) => row(dealsRows({ options: { cmd } }, today), "Deal")
+      const dealRow = (today: string) => row(ratesUsageRows({ options: { cmd } }, today), "Deal")
       assertEqual(dealRow("2026-04-30"), ["Deal", "25% off until 2026-05-01"])
       // The named day is still a live deal: upstream expires at 23:59:59Z of it.
       assertEqual(dealRow("2026-05-01"), ["Deal", "25% off until 2026-05-01"])
       assertEqual(dealRow("2026-05-02"), ["Deal", "25% off (ended 2026-05-01)"])
-      assertEqual(row(dealsRows({ options: { cmd } }, "2026-05-02"), "Was"), [
+      assertEqual(row(ratesUsageRows({ options: { cmd } }, "2026-05-02"), "Was"), [
         "Was",
         "$4/$12 in/out",
       ])
-      assertEqual(row(dealsRows({ options: { cmd } }, "2026-05-02"), "Now"), [
+      assertEqual(row(ratesUsageRows({ options: { cmd } }, "2026-05-02"), "Now"), [
         "Now",
         "$3/$9 in/out",
       ])
@@ -280,7 +287,7 @@ run([
       // the formatter's).
       assertEqual(
         row(
-          dealsRowsV2(
+          ratesUsageRowsV2(
             { settings: { cmd: { discount: { pct: 25, endsAt: "2026-05-01" }, free: false } } },
             "2026-05-02",
           ),
@@ -293,7 +300,7 @@ run([
       // `discount` object at all), so this pins the pass-through only.
       assertEqual(
         row(
-          dealsRows(
+          ratesUsageRows(
             {
               options: {
                 cmd: { discount: { pct: 50, endsAt: "while capacity lasts" }, free: false },
@@ -311,7 +318,7 @@ run([
   [
     "renders already-clean deal rates unchanged",
     () => {
-      const rows = dealsRows({
+      const rows = ratesUsageRows({
         options: {
           cmd: {
             was: { input: 0.435, output: 0.87 },
@@ -328,7 +335,7 @@ run([
   [
     "displays open source tier name",
     () => {
-      const rows = dealsRows({
+      const rows = ratesUsageRows({
         options: { cmd: { tier: "opensource", free: false } },
       })
       assertEqual(row(rows, "Tier"), ["Tier", "Open Source"])
@@ -338,7 +345,7 @@ run([
   [
     "handles free models and peak/off-peak windows",
     () => {
-      const rows = dealsRows({
+      const rows = ratesUsageRows({
         options: {
           cmd: {
             free: true,
@@ -365,7 +372,7 @@ run([
     "renders the peak/off-peak bands with all four rates and the windows",
     () => {
       assertFixedRows(
-        dealsRows({
+        ratesUsageRows({
           options: {
             cmd: {
               free: false,
@@ -398,7 +405,7 @@ run([
     "renders every context-window band under Rates",
     () => {
       assertFixedRows(
-        dealsRows({
+        ratesUsageRows({
           options: {
             cmd: {
               free: false,
@@ -435,7 +442,7 @@ run([
     "Rates merges both band types; malformed rows read N/A and labelless bands are skipped",
     () => {
       assertFixedRows(
-        dealsRows({
+        ratesUsageRows({
           options: {
             cmd: {
               free: false,
@@ -471,7 +478,7 @@ run([
     "renders the full row set for every commandcode model — tier and benchmark are enough",
     () => {
       assertFixedRows(
-        dealsRows({
+        ratesUsageRows({
           options: {
             cmd: {
               tier: "premium",
@@ -493,7 +500,7 @@ run([
   [
     "a half-filled benchmark renders the missing metric as N/A",
     () => {
-      const rows = dealsRows({ options: { cmd: { benchmark: { intelligence: 24.1 } } } })
+      const rows = ratesUsageRows({ options: { cmd: { benchmark: { intelligence: 24.1 } } } })
       assertEqual(row(rows, "Intelligence"), ["Intelligence", "24.1"])
       assertEqual(row(rows, "Tok/s"), ["Tok/s", NA])
     },
@@ -502,7 +509,7 @@ run([
   [
     "handles discount without endsAt",
     () => {
-      const rows = dealsRows({
+      const rows = ratesUsageRows({
         options: {
           cmd: {
             discount: { pct: 50 },
@@ -519,7 +526,7 @@ run([
   [
     "renders the truncated plan set under Allowance; unknown keys and hidden plans are not rows",
     () => {
-      const rows = dealsRows({
+      const rows = ratesUsageRows({
         options: {
           cmd: {
             allowance: { goat: 40, teampro: 40 },
@@ -536,14 +543,16 @@ run([
       // data — the plan-summary tool and the transport still read them — but
       // they are never rendered: an allowance keyed to them changes nothing.
       assertFixedRows(
-        dealsRows({
+        ratesUsageRows({
           options: { cmd: { allowance: { prolegacy: 15, provider: 15 }, free: false } },
         }),
         { Status: "Paid" },
       )
       // The row set is the catalog's displayed plan vocabulary — unknown keys
       // are not rows either.
-      const unknown = dealsRows({ options: { cmd: { allowance: { custom: 5 }, free: false } } })
+      const unknown = ratesUsageRows({
+        options: { cmd: { allowance: { custom: 5 }, free: false } },
+      })
       assertFixedRows(unknown, { Status: "Paid" })
     },
   ],
@@ -555,24 +564,24 @@ run([
       // one record per model, v2 an array whose untiered entry is the base
       // price. With no band in the payload the cost fills the Rates block.
       const cost = { input: 0.15, output: 0.6, cache: { read: 0.003, write: 0 } }
-      const rates: DealsRow[] = [
+      const rates: RatesUsageRow[] = [
         [COLUMNS, "", "value"],
         ["$0.15 | $0.6 | $0.003 | $0", "", "value"],
       ]
       assertFixedRows(
-        dealsRows({ options: { cmd: { free: false } }, cost }),
+        ratesUsageRows({ options: { cmd: { free: false } }, cost }),
         { Status: "Paid" },
         { rates },
       )
       assertFixedRows(
-        dealsRowsV2({ settings: { cmd: { free: false } }, cost: [cost] }),
+        ratesUsageRowsV2({ settings: { cmd: { free: false } }, cost: [cost] }),
         { Status: "Paid" },
         { rates },
       )
       // A published band wins over the base price: the fallback never
       // double-prints.
       assertFixedRows(
-        dealsRows({
+        ratesUsageRows({
           options: {
             cmd: {
               free: false,
@@ -602,7 +611,7 @@ run([
       // A record with only tiered entries has no base price: N/A, never a
       // tier's rate read as the base.
       assertFixedRows(
-        dealsRowsV2({
+        ratesUsageRowsV2({
           settings: { cmd: { free: false } },
           cost: [{ tier: { type: "context", size: 200000 }, ...cost }],
         }),
@@ -615,7 +624,7 @@ run([
     "shows the unavailable banner with the full N/A row set when catalog is empty",
     () => {
       assertFixedRows(
-        dealsRows({ options: { cmd: { unavailable: true } } }),
+        ratesUsageRows({ options: { cmd: { unavailable: true } } }),
         {},
         {
           banner: unavailable(),
@@ -628,7 +637,7 @@ run([
     "unavailable takes precedence over normal deal data",
     () => {
       assertFixedRows(
-        dealsRows({
+        ratesUsageRows({
           options: {
             cmd: {
               unavailable: true,
@@ -661,7 +670,7 @@ run([
         benchmark: { intelligence: 56, tokPerSec: 339 },
         free: false,
       }
-      assertFixedRows(dealsRowsV2({ settings: { cmd } }), {
+      assertFixedRows(ratesUsageRowsV2({ settings: { cmd } }), {
         Tier: "Premium",
         Status: "Paid",
         Pro: "$60/mo",
@@ -669,11 +678,11 @@ run([
         "Tok/s": "339",
       })
       // v1's bag is not v2's bag: an `options.cmd` payload must not render.
-      const v1Bag = dealsRowsV2({ settings: { options: { cmd } } })
+      const v1Bag = ratesUsageRowsV2({ settings: { options: { cmd } } })
       assertFixedRows(v1Bag, {})
       // A v2 model without a payload still renders the full N/A row set.
-      assertFixedRows(dealsRowsV2({}), {})
-      assertEqual(dealsRowsV2(undefined), [])
+      assertFixedRows(ratesUsageRowsV2({}), {})
+      assertEqual(ratesUsageRowsV2(undefined), [])
     },
   ],
   [
@@ -707,7 +716,7 @@ run([
       // N/A row set rather than disappearing.
       const missing = v2ModelFor(data({ id: "new-model", providerID: "commandcode" }), "ses_1")
       assertEqual(missing, {})
-      assertFixedRows(dealsRowsV2(missing), {})
+      assertFixedRows(ratesUsageRowsV2(missing), {})
       // An unknown session renders nothing.
       assertEqual(
         v2ModelFor(
@@ -787,7 +796,7 @@ run([
       // full N/A row set rather than disappearing.
       const missing = v1ModelFor(providers, { id: "new-model", providerID: "commandcode" })
       assertEqual(missing, {})
-      assertFixedRows(dealsRows(missing), {})
+      assertFixedRows(ratesUsageRows(missing), {})
     },
   ],
   // ---------------------------------------------------------------------------
@@ -801,8 +810,8 @@ run([
     "the panel appends the Usage segment below the fixed rows",
     () => {
       const model = { options: { cmd: { free: false } } }
-      const deals = dealsRows(model)
-      const rows = panelRows(dealSegments(model)!, defaultLayout(), usageState(), NOW)
+      const deals = ratesUsageRows(model)
+      const rows = panelRows(ratesUsageSegments(model)!, defaultLayout(), usageState(), NOW)
       // The fixed rows are untouched and in front...
       assertEqual(rows.slice(0, deals.length), deals)
       // ...and the segment follows the last fixed row.
@@ -837,8 +846,8 @@ run([
       // An undefined state is "the mount chain is still in flight", not the
       // resolver's miss: no notice may flash while the fetch is pending.
       const model = { options: { cmd: {} } }
-      const deals = dealsRows(model)
-      assertEqual(panelRows(dealSegments(model)!, defaultLayout(), undefined, NOW), deals)
+      const deals = ratesUsageRows(model)
+      assertEqual(panelRows(ratesUsageSegments(model)!, defaultLayout(), undefined, NOW), deals)
     },
   ],
 
@@ -846,7 +855,7 @@ run([
     "each Usage degradation renders its line below the fixed rows",
     () => {
       const model = { options: { cmd: {} } }
-      const deals = dealsRows(model)
+      const deals = ratesUsageRows(model)
       const cases: Array<[UsagePanelState, string]> = [
         [
           { result: { state: "no-credential" } },
@@ -858,7 +867,7 @@ run([
         ],
       ]
       for (const [state, line] of cases) {
-        const rows = panelRows(dealSegments(model)!, defaultLayout(), state, NOW)
+        const rows = panelRows(ratesUsageSegments(model)!, defaultLayout(), state, NOW)
         assertEqual(rows.slice(0, deals.length), deals)
         assertEqual(rows[deals.length + 1], ["Usage", "", "heading"])
         assertEqual(rows[deals.length + 2], [line, "", "value"])
@@ -870,7 +879,7 @@ run([
     "the panel stays hidden for non-Command Code models, with or without usage",
     () => {
       for (const state of [undefined, usageState()]) {
-        assertEqual(panelRows(dealSegments(undefined), defaultLayout(), state, NOW), [])
+        assertEqual(panelRows(ratesUsageSegments(undefined), defaultLayout(), state, NOW), [])
         assertEqual(panelRows(undefined, defaultLayout(), state, NOW), [])
       }
     },
@@ -1011,7 +1020,7 @@ run([
       const panel = createUsagePanel(async () => usageState())
       await panel.mount()
       const model = v1ModelFor(providers, { id: "claude-sonnet-5", providerID: "commandcode" })
-      const rows = panelRows(dealSegments(model), defaultLayout(), panel.state(), NOW)
+      const rows = panelRows(ratesUsageSegments(model), defaultLayout(), panel.state(), NOW)
       assertEqual(row(rows, "Status"), ["Status", "Paid"])
       assertEqual(meterDetail(rows, "5-hour"), ["$0.50 / $3.00", "", "value"])
       // The unmount cancels the panel's countdown clock — a live timer that
@@ -1066,7 +1075,7 @@ run([
       await panel.mount()
       assertEqual(portCalls, 1, "one bridge call per mount chain")
       const model = v2ModelFor(data, "ses_1")
-      const rows = panelRows(dealSegmentsV2(model), defaultLayout(), panel.state(), NOW)
+      const rows = panelRows(ratesUsageSegmentsV2(model), defaultLayout(), panel.state(), NOW)
       assertEqual(row(rows, "Status"), ["Status", "Paid"])
       assertEqual(meterDetail(rows, "5-hour"), ["$0.50 / $3.00", "", "value"])
       panel.unmount()
@@ -1081,7 +1090,7 @@ run([
         slots: {
           register: (registration: { order?: number; slots: Record<string, unknown> }) => {
             registrations.push(registration)
-            return "commandcode.deals:0"
+            return "commandcode.rates-usage:0"
           },
         },
       }
@@ -1124,7 +1133,7 @@ run([
     () => {
       // v1's reader requires a default export with `tui()` and rejects one that
       // also carries `server()`; v2's loader requires `id` + `setup()`.
-      assertEqual(plugin.id, "commandcode.deals")
+      assertEqual(plugin.id, "commandcode.rates-usage")
       assert(typeof plugin.tui === "function", "v1 needs tui(api)")
       assert(typeof plugin.setup === "function", "v2 needs setup(context)")
       assertEqual((plugin as { server?: unknown }).server, undefined)

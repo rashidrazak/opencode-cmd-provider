@@ -19,7 +19,7 @@
 //     contextTiers/benchmark/tier/free). We surface added/removed models
 //     and the per-field changes (allowance, discount.pct, discount.endsAt,
 //     tier, free, plus the numeric rate fields). The DEAL_LAST_REFRESHED
-//     date is also surfaced (top-level field on `src/deals/catalog.ts`).
+//     date is also surfaced (top-level field on `src/rates-usage/catalog.ts`).
 //
 // The output is stable, deterministic Markdown. Same inputs always
 // produce the same bytes (keys are sorted before iteration), so a test
@@ -70,7 +70,7 @@ import { readFile } from "node:fs/promises"
 
 /**
  * @typedef {Object} DiffInput
- * @property {string} [label]              Optional section title (e.g. "Model catalog", "Deals intelligence"). Defaults are derived from `kind`.
+ * @property {string} [label]              Optional section title (e.g. "Model catalog", "Deals catalog"). Defaults are derived from `kind`.
  * @property {unknown} before              The "before" catalog (parsed module object, or its array/record portion).
  * @property {unknown} after               The "after" catalog.
  * @property {string} [beforeDate]         Last-refreshed date from the "before" side (e.g. FACTS_LAST_REFRESHED). Optional.
@@ -109,7 +109,7 @@ import { readFile } from "node:fs/promises"
 
 const DEFAULT_LABELS = {
   snapshot: "Model catalog",
-  deals: "Deals intelligence",
+  deals: "Deals catalog",
   classification: "Reasoning classification",
 }
 

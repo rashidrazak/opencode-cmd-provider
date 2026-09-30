@@ -25,7 +25,7 @@ import { MODEL_SNAPSHOT } from "../src/catalog/snapshot.js"
 import { MODEL_INPUT_MODALITIES, inputModalitiesForModel } from "../src/provider/modalities.js"
 import { MODEL_EFFORTS, REASONING_MODELS, isReasoningModel } from "../src/provider/reasoning.js"
 import { MODEL_COSTS } from "../src/provider/pricing.js"
-import { MODEL_DEALS } from "../src/deals/catalog.js"
+import { MODEL_DEALS } from "../src/rates-usage/catalog.js"
 import { assert, assertEqual, run } from "./harness.js"
 
 // The free-variant set is **derived from the generated Deals catalog's

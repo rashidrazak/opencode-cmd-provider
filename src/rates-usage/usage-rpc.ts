@@ -1,4 +1,4 @@
-// src/deals/usage-rpc.ts — the usage bridge between the plugin's own two v2
+// src/rates-usage/usage-rpc.ts — the usage bridge between the plugin's own two v2
 // halves (ADR-0020, issue #243 amendment). The v2 Host keeps the connected
 // account's credential in its own store: the provider payload no longer
 // carries it and the TUI context has no connection service, so the TUI half

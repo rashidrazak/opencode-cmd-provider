@@ -1,8 +1,8 @@
-// src/deals/tui-usage.ts — the sidebar panel's usage controller (issues #244,
+// src/rates-usage/tui-usage.ts — the sidebar panel's usage controller (issues #244,
 // #245): the mount chain that turns the TUI host's live state into the `Usage`
 // segment — one host *loader* per half (v1: resolve the credential locally,
 // then fetch; v2: ask the plugin's own server half over the RPC bridge,
-// src/deals/usage-rpc.ts) — plus the event-driven refresh policy that keeps it
+// src/rates-usage/usage-rpc.ts) — plus the event-driven refresh policy that keeps it
 // live without polling.
 //
 // No polling: after mount, the only network triggers are a completed turn in
@@ -23,7 +23,7 @@
 //     chain through the fetch's abort signal.
 //
 // The chain itself shortens with use: the load's scope cache (the `UsageScope`
-// in src/deals/usage.ts) survives between loads — round-tripped for v2 — so a
+// in src/rates-usage/usage.ts) survives between loads — round-tripped for v2 — so a
 // routine refresh is credits + summary only.
 //
 // Since #251 the controller also carries the last-good state across panels: a

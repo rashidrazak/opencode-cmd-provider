@@ -15,7 +15,7 @@ TUI asks its own package's server half over the Host's plugin-RPC bridge.
 ## The decision
 
 **v2 registers one plugin-RPC port from the server half — `registerUsageRpc` in
-`src/deals/usage-rpc.ts`, id `commandcode`, method `usage` — whose handler
+`src/rates-usage/usage-rpc.ts`, id `commandcode`, method `usage` — whose handler
 resolves the Host's active connection credential through the same ADR-0015
 seam the plan tool uses, runs the billing fetch itself, and returns only
 display data: the snapshot, the refreshed scope, and the rung. The TUI half
@@ -110,8 +110,8 @@ Three rules travel with the seam:
   rendering the env account labelled) is gone: both now render the connected
   account's real usage.
 - The bridge is the package's first server↔TUI channel. `setupCommandCode`
-  grew an `rpc` extension seam; deleting the Deals slice removes the port with
-  it, and `src/deals/usage-rpc.ts` stays free of runtime host imports so both
+  grew an `rpc` extension seam; deleting the Rates & usage slice removes the port with
+  it, and `src/rates-usage/usage-rpc.ts` stays free of runtime host imports so both
   bundles can load it.
 - `src/plugin/v2-tui-types.ts` no longer mirrors provider/integration payloads;
   it mirrors the client's RPC slice instead. The re-derivation obligation
