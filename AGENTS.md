@@ -1,8 +1,8 @@
 # opencode-cmd-provider
 
 opencode plugin + provider: `provider.commandcode` auto-registration, `[CMD]`
-models, `COMMANDCODE_API_KEY` auth, `provider/*` streaming, plus a Deals
-intelligence slice. Domain vocabulary lives in `CONTEXT.md`; architectural
+models, `COMMANDCODE_API_KEY` auth, `provider/*` streaming, plus a Rates &
+usage slice. Domain vocabulary lives in `CONTEXT.md`; architectural
 decisions in `docs/adr/`.
 
 ## Commands
@@ -43,7 +43,7 @@ models` for this — v2 activates plugins asynchronously and the one-shot CLI
 ## Generated files — do not hand-edit
 
 `src/catalog/snapshot.ts`, `src/catalog/facts.ts`,
-`src/catalog/classification.ts`, and `src/deals/catalog.ts` are generated
+`src/catalog/classification.ts`, and `src/rates-usage/catalog.ts` are generated
 (`scripts/refresh-snapshot.mjs`, `scripts/refresh-classification.mjs`,
 `scripts/refresh-deals.mjs`). Regenerate with `npm run refresh` — the
 snapshot comes from the npm package's bundled models.md table (the sole
@@ -86,7 +86,7 @@ fixtures (see `scripts/check-deals-coverage.mjs` and
 - **Three hosts, two config files.** The server host reads `opencode.json`
   (`src/plugin/index.ts`, package export `"."`) and has two flavours — OpenCode
   v1 calls the default export's `server()`, v2 calls its `setup(context)`; the
-  TUI host reads `tui.json` (`src/deals/tui.tsx`, package export `"./tui"` →
+  TUI host reads `tui.json` (`src/rates-usage/tui.tsx`, package export `"./tui"` →
   `dist/tui.js`). The TUI host never reads `opencode.json` (verified, ADR-0004).
   The v1/v2 server halves are separate implementations of the same three
   capabilities — v2 does not translate v1 hooks (ADR-0010). The TUI host splits
@@ -96,18 +96,18 @@ fixtures (see `scripts/check-deals-coverage.mjs` and
   `"sidebar.content"` path off `settings.cmd`. A v1-only TUI module is rejected
   by v2 ("Invalid V2 TUI plugin module") and the sidebar silently disappears —
   `src/plugin/v2-tui-types.ts` mirrors the v2 TUI context, and
-  `tests/tui-deals-panel.test.ts` plus `tests/contract.test.ts` pin both halves.
-- **`src/deals/` is the excisable Deals slice.** Deleting it plus the
+  `tests/tui-rates-usage-panel.test.ts` plus `tests/contract.test.ts` pin both halves.
+- **`src/rates-usage/` is the excisable Rates & usage slice.** Deleting it plus the
   registration lines in `src/plugin/index.ts` (`enrichProvider`, `tools` and
   `rpc` in the v2 `setup`, `enrichCommandCodeModels` and `planSummaryTool` in
-  the v1 `server`) leaves Core green. Keep the server barrel `src/deals/index.ts`
+  the v1 `server`) leaves Core green. Keep the server barrel `src/rates-usage/index.ts`
   free of the TUI re-exports — exporting `tui.tsx` from it pulls
   `solid-js`/`@opentui` into the server bundle. Plan identity (`PlanId`,
   `normalizePlan`) is Core — `src/catalog/plans.ts` — because transport
   selection reads an explicit plan pin; Core never imports the slice
   (ADR-0011), enforced by `tests/contract.test.ts`. The v2 usage bridge
   (`registerUsageRpc` → the `rpc` extension in `src/plugin/v2.ts`) is the one
-  server↔TUI channel of the slice: `src/deals/usage-rpc.ts` must stay free of
+  server↔TUI channel of the slice: `src/rates-usage/usage-rpc.ts` must stay free of
   runtime host imports so both bundles can load it (ADR-0020).
 - **Never runtime-import `@opencode-ai/*` or `@opencode/*`.** `@opencode-ai/plugin`/`@opencode-ai/sdk`
   are optional peer deps: `opencode plugin <pkg>` installs them in `.opencode/`,
@@ -125,7 +125,7 @@ fixtures (see `scripts/check-deals-coverage.mjs` and
 
 - Angular Conventional Commits; types/scopes in `CONTRIBUTING.md`.
 - Use `CONTEXT.md` vocabulary (Model catalog, Snapshot, Auto-registration, Deals
-  catalog, Deals intelligence, Core, Display name); don't drift to the "avoid"
+  catalog, Rates & usage, Core, Display name); don't drift to the "avoid"
   synonyms listed there.
 - **Docs split:** `README.md` is for users — install, connect, use, update,
   troubleshoot — and stays free of internals (no ADRs, no `src/…` paths, no

@@ -115,15 +115,15 @@ run([
     },
   ],
   [
-    "bare opencode TUI sidebar renders Deals intelligence without manual tui.json (zero-step)",
+    "bare opencode TUI sidebar renders Rates & usage without manual tui.json (zero-step)",
     async () => {
       // Server plugin enriches the selected model with options.cmd via snapshot+deals;
-      // TUI plugin's dealsRows then renders Tier/allowance etc. without any hand-written tui.json.
+      // TUI plugin's ratesUsageRows then renders Tier/allowance etc. without any hand-written tui.json.
       const { MODEL_SNAPSHOT } = await import("../src/catalog/snapshot.js")
       const { autoRegister } = await import("../src/plugin/models.js")
       const { resolveProviderNpm } = await import("../src/plugin/version.js")
-      const { enrichCommandCodeModels } = await import("../src/deals/index.js")
-      const { dealsRows } = await import("../src/deals/tui.js")
+      const { enrichCommandCodeModels } = await import("../src/rates-usage/index.js")
+      const { ratesUsageRows } = await import("../src/rates-usage/tui.js")
       // Simulate the config hook's auto-registration + enrichment pipeline,
       // provider specifier included, so the simulation cannot drift from the
       // entry (issue #152).
@@ -138,12 +138,12 @@ run([
       const model = config.provider?.commandcode?.models?.["claude-sonnet-5"]
       assert(model, "enriched config must contain claude-sonnet-5")
       assert(model.options?.cmd, "model.options.cmd must be injected by enrichment")
-      const rows = dealsRows(model)
-      assert(rows.length > 0, "dealsRows must return visible rows without manual tui.json")
+      const rows = ratesUsageRows(model)
+      assert(rows.length > 0, "ratesUsageRows must return visible rows without manual tui.json")
       const labels = rows.map(([k]) => k)
-      assert(labels.includes("Tier"), "dealsRows must include Tier when TUI is auto-delivered")
+      assert(labels.includes("Tier"), "ratesUsageRows must include Tier when TUI is auto-delivered")
       // When catalog is unavailable the banner still makes the panel visible
-      const emptyRows = dealsRows({ options: { cmd: { unavailable: true } } } as any)
+      const emptyRows = ratesUsageRows({ options: { cmd: { unavailable: true } } } as any)
       assert(
         emptyRows.some(([k]) => k.startsWith("Deals unavailable")),
         "unavailable banner must keep panel visible",

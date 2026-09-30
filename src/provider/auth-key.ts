@@ -77,7 +77,7 @@ export type HostCredentialSource = "host" | "environment" | "config"
 /**
  * A credential a Host resolved for the provider, as opposed to one this package
  * read from the environment or a legacy auth file. Both Host halves hand it to
- * the Deals tool as an async getter (ADR-0015): a v2 Host keeps its credential
+ * the `cmd_plan_summary` tool as an async getter (ADR-0015): a v2 Host keeps its credential
  * in its own store and injects it into the provider SDK only, and a v1 Host
  * exposes its resolved credential through the plugin's SDK client.
  */

@@ -10,9 +10,9 @@ import {
   type UsageScope,
   type UsageSnapshot,
   type UsageTotals,
-} from "../src/deals/usage.js"
-import { PLAN_CATALOG } from "../src/deals/catalog.js"
-import type { DealsRow } from "../src/deals/tui.js"
+} from "../src/rates-usage/usage.js"
+import { PLAN_CATALOG } from "../src/rates-usage/catalog.js"
+import type { RatesUsageRow } from "../src/rates-usage/tui.js"
 import { assert, assertEqual, run } from "./harness.js"
 
 const BASE = "http://mock"
@@ -146,23 +146,23 @@ function previousSnapshot(): UsageSnapshot {
 }
 
 /** A row by label. */
-function label(rows: DealsRow[], key: string): DealsRow | undefined {
+function label(rows: RatesUsageRow[], key: string): RatesUsageRow | undefined {
   return rows.find(([name]) => name === key)
 }
 
 /** The rendered segment for a snapshot at the pinned clock instant. */
-function usageRows(snapshot: UsageSnapshot): DealsRow[] {
+function usageRows(snapshot: UsageSnapshot): RatesUsageRow[] {
   return renderUsageRows({ state: "usage", snapshot }, { now: NOW })
 }
 
 /** The meter sub-section rows for `label`: its label, bar and detail rows. */
-function meter(rows: DealsRow[], key: string): DealsRow[] {
+function meter(rows: RatesUsageRow[], key: string): RatesUsageRow[] {
   const index = rows.findIndex(([name]) => name === key)
   return index === -1 ? [] : rows.slice(index, index + 3)
 }
 
 /** The meter bar row for `label`, if the meter rendered one. */
-function barRow(rows: DealsRow[], key: string): DealsRow | undefined {
+function barRow(rows: RatesUsageRow[], key: string): RatesUsageRow | undefined {
   return meter(rows, key)[1]
 }
 
@@ -1155,7 +1155,7 @@ run([
   [
     "no credential renders the one-line notice (undefined is the resolver's miss)",
     () => {
-      const expected: DealsRow[] = [
+      const expected: RatesUsageRow[] = [
         ["", ""],
         ["Usage", "", "heading"],
         ["Usage needs COMMANDCODE_API_KEY — set it to see live limits", "", "value"],
@@ -1168,7 +1168,7 @@ run([
   [
     "unavailable renders its line for a failed fetch and a data-less snapshot",
     () => {
-      const expected: DealsRow[] = [
+      const expected: RatesUsageRow[] = [
         ["", ""],
         ["Usage", "", "heading"],
         ["Usage unavailable — could not read the Command Code billing API", "", "value"],
@@ -1360,7 +1360,7 @@ run([
       // #242's purity seams: the renderer runs in the panel but the module is
       // host-agnostic — solid-js and @opencode-ai/* may not appear at all.
       const source = readFileSync(
-        new URL("../src/deals/usage.ts", import.meta.url).pathname,
+        new URL("../src/rates-usage/usage.ts", import.meta.url).pathname,
         "utf-8",
       )
       assert(!/from\s+["']solid-js["']/.test(source), "no solid-js import")

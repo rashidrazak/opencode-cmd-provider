@@ -67,12 +67,12 @@ run([
     },
   ],
   [
-    "dist/tui.js exists and re-exports Deals TUI plugin",
+    "dist/tui.js exists and re-exports the Rates & usage TUI plugin",
     async () => {
       const mod = await loadTui()
       const def = mod.default as { id?: unknown; tui?: unknown }
       assert(typeof def === "object" && def !== null)
-      assertEqual(def.id, "commandcode.deals")
+      assertEqual(def.id, "commandcode.rates-usage")
       assert(typeof def.tui === "function")
     },
   ],
@@ -96,7 +96,7 @@ run([
         setup?: unknown
         server?: unknown
       }
-      assertEqual(def.id, "commandcode.deals")
+      assertEqual(def.id, "commandcode.rates-usage")
       assert(typeof def.tui === "function", "v1 needs tui(api)")
       assert(typeof def.setup === "function", "v2 needs setup(context)")
       assertEqual(def.server, undefined, "v1 rejects a module with both server() and tui()")
@@ -169,13 +169,13 @@ run([
     },
   ],
   [
-    "Core never imports the excisable Deals slice (ADR-0004, ADR-0011)",
+    "Core never imports the excisable Rates & usage slice (ADR-0004, ADR-0011)",
     () => {
-      // Deleting src/deals/ plus the registration lines in
+      // Deleting src/rates-usage/ plus the registration lines in
       // src/plugin/index.ts must leave Core (provider, catalog, env, the rest
       // of the plugin) intact. Plan identity lives in src/catalog/plans.ts
       // precisely so transport selection can read an explicit plan pin without
-      // reaching into the slice — a Core → Deals import is what this pins out.
+      // reaching into the slice — a Core → Rates & usage import is what this pins out.
       const dist = new URL("../dist", import.meta.url).pathname
       const coreFiles = [
         ...listJsFiles(join(dist, "src/provider")),
@@ -194,7 +194,10 @@ run([
       const offenders = coreFiles.filter((file) =>
         /from\s+["'][^"']*\bdeals\//.test(readFileSync(file, "utf-8")),
       )
-      assert(offenders.length === 0, `Core imports the Deals slice: ${offenders.join(", ")}`)
+      assert(
+        offenders.length === 0,
+        `Core imports the Rates & usage slice: ${offenders.join(", ")}`,
+      )
     },
   ],
 ])

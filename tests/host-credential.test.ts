@@ -1,8 +1,11 @@
 // tests/host-credential.test.ts — the v1 Host's resolved credential, read from
 // the plugin's SDK client (issue #203, ADR-0015). Pure fake-client tests: no
 // HTTP, no live credential store.
-import { hostCredentialFromV1, type V1ProviderListClient } from "../src/deals/host-credential.js"
-import { planSummaryTool } from "../src/deals/plan-summary.js"
+import {
+  hostCredentialFromV1,
+  type V1ProviderListClient,
+} from "../src/rates-usage/host-credential.js"
+import { planSummaryTool } from "../src/rates-usage/plan-summary.js"
 import { assert, assertEqual, run } from "./harness.js"
 
 /** The shape `GET /provider` resolves to through the hey-api client. */

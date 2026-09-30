@@ -1,4 +1,4 @@
-// src/deals/usage.ts — the live usage snapshot behind the sidebar `Usage`
+// src/rates-usage/usage.ts — the live usage snapshot behind the sidebar `Usage`
 // segment (issue #242): one host-agnostic fetch of the four billing requests
 // the official CLI's /usage overlay makes (whoami → org-scoped subscriptions →
 // org-scoped credits → summary pinned with `since=currentPeriodStart`), its
@@ -57,7 +57,7 @@ import { normalizePlan, PLAN_BEARING_SUBSCRIPTION_STATUSES, type PlanId } from "
 import { getApiBase } from "../env.js"
 import { isRecord, numberValue, stringValue } from "../provider/converters.js"
 import { PLAN_CATALOG, type PlanInfo } from "./catalog.js"
-import type { DealsRow, DealsRowTone } from "./tui.js"
+import type { RatesUsageRow, RatesUsageRowTone } from "./tui.js"
 
 /** Abort budget for each billing request. The live API answers a leg in
  * 8–18 s, so a tighter budget drops data that was one or two seconds away;
@@ -615,8 +615,8 @@ export type UsageCredentialSource =
 export function renderUsageRows(
   result: UsageResult | undefined,
   options: RenderUsageOptions = {},
-): DealsRow[] {
-  const rows: DealsRow[] = [
+): RatesUsageRow[] {
+  const rows: RatesUsageRow[] = [
     ["", ""],
     [USAGE_HEADING, "", "heading"],
   ]
@@ -637,7 +637,7 @@ export function renderUsageRows(
     return rows
   }
   const now = options.now ?? Date.now()
-  const sections: DealsRow[][] = []
+  const sections: RatesUsageRow[][] = []
   if (snapshot.limited === false) {
     // `limited: false` is the pay-as-you-go shape (extra credits bypass the
     // windows), so the rolling meters are explained away, not rendered.
@@ -697,7 +697,7 @@ function percentText(percent: number): string {
 }
 
 /** The bar's colour token by progress: green ≤ 40, yellow ≤ 80, red above. */
-function usageTone(percent: number): DealsRowTone {
+function usageTone(percent: number): RatesUsageRowTone {
   if (percent > 80) return "error"
   if (percent > 40) return "warning"
   return "success"
@@ -712,8 +712,8 @@ function meterSection(
   label: string,
   meter: { used: number; cap?: number },
   suffix: string,
-): DealsRow[] {
-  const rows: DealsRow[] = [[label, "", "value"]]
+): RatesUsageRow[] {
+  const rows: RatesUsageRow[] = [[label, "", "value"]]
   if (meter.cap !== undefined) {
     const percent = percentOf(meter.used, meter.cap)
     rows.push([usageBar(percent), percentText(percent), "bar", usageTone(percent)])
@@ -766,8 +766,8 @@ function formatDuration(ms: number): string {
  * when the split is absent), requests, spend, and the purchased extra-credit
  * balance. Whatever the summary leg said nothing about renders no row.
  */
-function summarySection(snapshot: UsageSnapshot): DealsRow[] {
-  const rows: DealsRow[] = []
+function summarySection(snapshot: UsageSnapshot): RatesUsageRow[] {
+  const rows: RatesUsageRow[] = []
   const totals = snapshot.totals
   if (totals?.tokensIn !== undefined) rows.push(["Token In", compact(totals.tokensIn)])
   if (totals?.tokensOut !== undefined) rows.push(["Token Out", compact(totals.tokensOut)])

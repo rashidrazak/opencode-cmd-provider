@@ -8,7 +8,10 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { readFileSync } from "node:fs"
-import { resolveTuiCredential, type TuiCredentialOptions } from "../src/deals/tui-credential.js"
+import {
+  resolveTuiCredential,
+  type TuiCredentialOptions,
+} from "../src/rates-usage/tui-credential.js"
 import { assert, assertEqual, run } from "./harness.js"
 
 /** No ambient credential: tests only see what they inject. */
@@ -268,7 +271,7 @@ run([
       }
       // The module never writes to a console at all.
       const source = readFileSync(
-        new URL("../src/deals/tui-credential.ts", import.meta.url).pathname,
+        new URL("../src/rates-usage/tui-credential.ts", import.meta.url).pathname,
         "utf-8",
       )
       assert(!/console\./.test(source), "the resolver must not log")

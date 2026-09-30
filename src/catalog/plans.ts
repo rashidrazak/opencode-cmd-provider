@@ -5,8 +5,8 @@
 // `individual-pro-v1`, `teams-pro`, …) onto it. Core owns
 // this module because transport selection must recognise an explicit
 // `plan=go` pin to pick the legacy transport, and Core never imports the
-// excisable Deals slice (ADR-0004): the plan lookup that feeds
-// `cmd_plan_summary` lives in `src/deals/plan-summary.ts` and reads
+// excisable Rates & usage slice (ADR-0004): the plan lookup that feeds
+// `cmd_plan_summary` lives in `src/rates-usage/plan-summary.ts` and reads
 // `PlanId`/`normalizePlan` from here.
 export type PlanId =
   | "go"

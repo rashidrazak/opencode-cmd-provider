@@ -31,13 +31,13 @@ import {
   setupCommandCode,
 } from "../src/plugin/v2.js"
 import { resolveProviderNpm } from "../src/plugin/version.js"
-import { MODEL_DEALS } from "../src/deals/catalog.js"
-import { enrichCommandCodeModelsV2 } from "../src/deals/enrichment.js"
+import { MODEL_DEALS } from "../src/rates-usage/catalog.js"
+import { enrichCommandCodeModelsV2 } from "../src/rates-usage/enrichment.js"
 import {
   planSummaryTool,
   planSummaryV2Tool,
   PLAN_SUMMARY_ARG_DESCRIPTION,
-} from "../src/deals/plan-summary.js"
+} from "../src/rates-usage/plan-summary.js"
 import { assert, assertEqual, run, withEnvVars } from "./harness.js"
 import type {
   V2ProviderEditor,
@@ -363,7 +363,7 @@ function toolEditor(draft: Map<string, V2ToolDefinition<never>>): ToolEditor {
   }
 }
 
-/** The plugin as the v2 host installs it, Deals seams included. */
+/** The plugin as the v2 host installs it, Rates & usage seams included. */
 async function installed(): Promise<FakeHost> {
   const host = fakeHost()
   await setupCommandCode(host.ctx, {
@@ -375,7 +375,7 @@ async function installed(): Promise<FakeHost> {
 
 /**
  * The package entrypoint's v2 half — the real `setup`, not a rehearsal — so the
- * Deals tool is exercised with the credential wiring the Host actually gets
+ * plan-summary tool is exercised with the credential wiring the Host actually gets
  * (ADR-0015).
  */
 async function installedFromEntrypoint(): Promise<FakeHost> {
@@ -468,7 +468,7 @@ run([
     },
   ],
   [
-    "replaying the transforms is stable — the Deals tier is never duplicated",
+    "replaying the transforms is stable — the context tier is never duplicated",
     async () => {
       const host = await installed()
       const first = host.replay()
@@ -560,7 +560,7 @@ run([
     "cmd_plan_summary registers once with the shared description and a JSON Schema argument",
     async () => {
       const tool = (await installed()).tools().get("cmd_plan_summary")
-      assert(tool, "the Deals tool must be registered")
+      assert(tool, "the plan-summary tool must be registered")
       assertEqual(tool.description, planSummaryTool().description)
       assertEqual(tool.input, {
         type: "object",
@@ -619,7 +619,7 @@ run([
       )
       const tool = host.tools().get("cmd_plan_summary") as
         V2ToolDefinition<{ plan?: string }> | undefined
-      assert(tool, "the Deals tool must be registered")
+      assert(tool, "the plan-summary tool must be registered")
       const headers: Array<Record<string, string>> = []
       const stub = (async (url: string, init: RequestInit) => {
         headers.push((init.headers ?? {}) as Record<string, string>)
@@ -703,7 +703,7 @@ run([
     },
   ],
   [
-    "the Deals enrichment carries over to v2 without overwriting declared values",
+    "the Rates & usage enrichment carries over to v2 without overwriting declared values",
     () => {
       const draft = new Map<string, ProviderRecord>()
       const editor = providerEditor(draft)
@@ -737,7 +737,7 @@ run([
     },
   ],
   [
-    "the package default export wires the v2 setup, Deals seams included",
+    "the package default export wires the v2 setup, Rates & usage seams included",
     async () => {
       const entry = (await import("../src/plugin/index.js")) as {
         default: { id: string; setup: (ctx: V2SetupContext) => Promise<void> }
@@ -748,7 +748,7 @@ run([
       await entry.default.setup(host.ctx)
       const provider = host.replay().get(PROVIDER_ID)?.provider
       assertEqual(provider?.package, `${AISDK_PREFIX}${resolveProviderNpm()}`)
-      assert(host.tools().has("cmd_plan_summary"), "the Deals tool must be registered")
+      assert(host.tools().has("cmd_plan_summary"), "the plan-summary tool must be registered")
       assertEqual(host.replayIntegrations().get(PROVIDER_ID)?.name, PROVIDER_NAME)
       // The usage bridge's port is registered too: the TUI half's only path to
       // the Host's connected credential (ADR-0020).

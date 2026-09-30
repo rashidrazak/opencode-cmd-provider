@@ -46,15 +46,15 @@ export const AISDK_PREFIX = "aisdk:"
  */
 export const FIRST_RUN_DEFAULT_MODEL_ID = "gpt-5.6-terra"
 
-/** Deals-intelligence seams; Core never imports the slice (ADR-0004). */
+/** Rates & usage seams; Core never imports the slice (ADR-0004). */
 export interface V2SetupExtensions {
   /** Extra provider pass, replayed after Auto-registration. */
   enrichProvider?: (editor: V2ProviderEditor) => void
   /** Extra tools registered alongside the core set. */
   tools?: readonly V2ToolDefinition[]
   /**
-   * Extra plugin-RPC ports, registered after everything else. The Deals usage
-   * bridge (ADR-0020) is the one consumer: the server half publishes the port
+   * Extra plugin-RPC ports, registered after everything else. The usage bridge
+   * (ADR-0020) is the one consumer: the server half publishes the port
    * the TUI half calls through its own `client.rpc`.
    */
   rpc?: (ctx: V2SetupContext) => Promise<void>

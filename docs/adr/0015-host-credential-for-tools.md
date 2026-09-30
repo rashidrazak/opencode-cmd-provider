@@ -39,13 +39,13 @@ planSummaryTool({ hostCredential }) // v1 — `hostCredentialFromV1(input.client
 planSummaryV2Tool({ hostCredential }) // v2 — `hostCredentialFromV2(ctx)`
 ```
 
-The seam is `PlanSummaryOptions.hostCredential` in the Deals slice; the type it
+The seam is `PlanSummaryOptions.hostCredential` in the Rates & usage slice; the type it
 returns, `HostCredential { key, source }`, lives in Core
 (`src/provider/auth-key.ts`) so that Core can produce it without importing the
 slice (ADR-0004). The v2 producer is `hostCredentialFromV2` in
 `src/plugin/v2.ts`: `connection.active(PROVIDER_ID)` → `connection.resolve()`,
 per call rather than at registration, so a `/connect` mid-session is picked up.
-The v1 producer is `hostCredentialFromV1` in `src/deals/host-credential.ts`: it
+The v1 producer is `hostCredentialFromV1` in `src/rates-usage/host-credential.ts`: it
 reads `client.provider.list()` and takes `options.apiKey ?? key`, the same order
 the v1 Host applies at model init.
 

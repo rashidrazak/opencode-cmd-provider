@@ -29,7 +29,7 @@ from the live Command Code catalog and `src/catalog/facts.ts` from the CLI
 package's `models.md` plus `dist/cli.mjs` input-modality fields, then
 re-captures the RSC fixtures (`tests/fixtures/rsc-*.txt`) from the live docs
 pages and regenerates `src/catalog/classification.ts` (ADR-0006) and
-`src/deals/catalog.ts` from them (see ADR-0005). The
+`src/rates-usage/catalog.ts` from them (see ADR-0005). The
 release therefore ships the current model list, reasoning/cost facts, vision
 metadata, derived reasoning classification, and deal/allowance/benchmark
 intelligence; commit the updated

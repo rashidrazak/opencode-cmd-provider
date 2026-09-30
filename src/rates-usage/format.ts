@@ -1,7 +1,7 @@
-// src/deals/format.ts — shared number formatting for the Deals slice's
+// src/rates-usage/format.ts — shared number formatting for the Rates & usage slice's
 // user-visible surfaces (the TUI sidebar panel and the cmd_plan_summary tool).
 // Formatting lives here, never in the generated catalog or the refresh
-// pipeline: src/deals/catalog.ts stays a verbatim projection of the captured
+// pipeline: src/rates-usage/catalog.ts stays a verbatim projection of the captured
 // RSC (issue #222).
 //
 // The TUI imports this directly; the server barrel does not re-export it, so

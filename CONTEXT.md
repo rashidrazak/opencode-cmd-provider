@@ -37,7 +37,7 @@ halves are independent implementations of the same capabilities rather than one
 translating the other. The **TUI Host** is neither — it loads the `./tui` export
 — and it splits the same way: v1 reads `{ id, tui(api) }` and renders the
 snake_case `sidebar_content` slot, v2 reads `{ id, setup(context) }` and claims
-the dot-separated `"sidebar.content"` path, reading the Deals payload from
+the dot-separated `"sidebar.content"` path, reading the `cmd` payload from
 `settings.cmd` rather than `options.cmd`. See ADR-0010.
 _Avoid_: version, runtime, platform, shim
 
@@ -50,7 +50,7 @@ Updating the snapshot to match the Model catalog's membership (the models.md tab
 _Avoid_: model sync, catalog update, live refresh
 
 **Core**:
-`provider.commandcode` auto-registration (v1: snapshot → `provider.commandcode.models`; v2: the same Snapshot → catalog `Model.Info` records), configurable display-name prefix (default `[CMD]`), `COMMANDCODE_API_KEY` auth, and `provider/*` streaming. Deals intelligence is not part of core.
+`provider.commandcode` auto-registration (v1: snapshot → `provider.commandcode.models`; v2: the same Snapshot → catalog `Model.Info` records), configurable display-name prefix (default `[CMD]`), `COMMANDCODE_API_KEY` auth, and `provider/*` streaming. Rates & usage is not part of core.
 _Avoid_: base provider, essential plugin
 
 **Deals catalog**:
@@ -59,7 +59,7 @@ Server Components (RSC) stream (`pricing-limits`, `plans/goat`, `plans/pro`
 pages with an `rsc: 1` header): tier (`Open Source`/`Premium`),
 benchmarks (intelligence, tok/s), deal discounts (`was`/`now` rates), peak/off-peak
 rates, context-window rate bands, and GOAT/Pro monthly allowances. Bundled in
-`src/deals/catalog.ts`
+`src/rates-usage/catalog.ts`
 and regenerated via `npm run refresh:deals` (live, with 5xx/network fallback
 to the committed `tests/fixtures/rsc-*.txt` fixtures and loud 4xx failure;
 offline via `-- --fixtures`).
@@ -74,13 +74,17 @@ are explicit pins, and a plan the table adds or drops is a `plan table
 pending —` report, never a silent row drop (issue #229).
 _Avoid_: pricing table, deal feed
 
-**Deals intelligence**:
-The deals catalog plus its enrichment (v1: `model.options.cmd`, `context_over_200k` cost; v2: `settings.cmd`, a 200k context cost tier) and its surfaces: the TUI sidebar panel and the `cmd_plan_summary` tool. A single excisable slice — removing it leaves core byte-identical.
-_Avoid_: deals feature, pricing UI
+**Rates & usage**:
+The Deals catalog plus its enrichment (v1: `model.options.cmd`, `context_over_200k` cost; v2: `settings.cmd`, a 200k context cost tier), the live usage snapshot, and their surfaces: the TUI sidebar panel and the `cmd_plan_summary` tool. A single excisable slice — removing it leaves core byte-identical.
+_Avoid_: deals intelligence, deals feature, pricing UI
+
+**Rates & usage panel**:
+The Command Code section of the session sidebar: the selected model's bundled rates, allowances, deals and benchmarks plus the account's live usage, in five user-orderable segments; configured from the `/cmd-rates-usage` dialog. See ADR-0022.
+_Avoid_: deals panel, deals sidebar, sidebar deals
 
 **Sidebar layout**:
-The per-machine user choice of which sidebar segments render and in which order, set from the `/cmd-deals` dialog (`Show, hide and reorder sidebar content`) and persisted host-side (v1 `api.kv`, v2 `ctx.storage.store`) — never part of `opencode.json` or `tui.json` configuration. Normalized on every read, so a value written by another release cannot crash the panel or hide a segment. See issue #253 and ADR-0022.
-_Avoid_: panel config, segment settings, deals preferences
+The per-machine user choice of which sidebar segments render and in which order, set from the `/cmd-rates-usage` dialog (`Show, hide and reorder sidebar content`) and persisted host-side (v1 `api.kv`, v2 `ctx.storage.store`) — never part of `opencode.json` or `tui.json` configuration. Normalized on every read, so a value written by another release cannot crash the panel or hide a segment. See issue #253 and ADR-0022.
+_Avoid_: panel config, segment settings, panel preferences
 
 **Plan identity**:
 The Command Code plan an account holds (Go, GOAT, Pro, Pro (legacy), Max 10×,

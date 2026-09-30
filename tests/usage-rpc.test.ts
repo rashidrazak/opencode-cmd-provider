@@ -10,8 +10,8 @@ import {
   createUsageRpcLoader,
   registerUsageRpc,
   type UsageRpcOutcome,
-} from "../src/deals/usage-rpc.js"
-import type { UsageLoadRequest, UsagePanelState } from "../src/deals/tui-usage.js"
+} from "../src/rates-usage/usage-rpc.js"
+import type { UsageLoadRequest, UsagePanelState } from "../src/rates-usage/tui-usage.js"
 import type { HostCredential } from "../src/provider/auth-key.js"
 import type { V2RpcCallContext, V2SetupContext } from "../src/plugin/v2-types.js"
 import type { V2TuiClient } from "../src/plugin/v2-tui-types.js"
@@ -468,7 +468,7 @@ run([
     "the bridge module never logs, renders keys, or imports host packages",
     () => {
       const source = readFileSync(
-        new URL("../src/deals/usage-rpc.ts", import.meta.url).pathname,
+        new URL("../src/rates-usage/usage-rpc.ts", import.meta.url).pathname,
         "utf-8",
       )
       assert(!/console\./.test(source), "the bridge must not log")

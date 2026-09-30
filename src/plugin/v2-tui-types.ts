@@ -5,8 +5,8 @@
 // snake_case slots like `sidebar_content`) with `{ id, setup(context) }` and a
 // dot-separated slot tree (`"sidebar.content"`). The host validates the shape
 // before activating a plugin — a module without a `setup` function is rejected
-// as an "Invalid V2 TUI plugin module", which is exactly how the Deals sidebar
-// stopped appearing on v2.
+// as an "Invalid V2 TUI plugin module", which is exactly how the Rates & usage
+// panel stopped appearing on v2.
 //
 // As with `v2-types.ts` we do not depend on `@opencode/plugin`: the host
 // injects the context, so nothing resolves that module at runtime. Only the
@@ -27,7 +27,7 @@
 // 2.0.3 and 2.0.20, `Keymap`/`KeymapCommand`), `storage.store` (durable,
 // plugin-namespaced state, same range), and `ui.dialog.show`/`clear`.
 // Bumping the supported v2 line means re-deriving these from the published
-// packages — tests/tui-deals-panel and tests/tui-credential pin the parts we
+// packages — tests/tui-rates-usage-panel and tests/tui-credential pin the parts we
 // depend on.
 import type { RGBA } from "@opentui/core"
 import type { Store } from "solid-js/store"
@@ -48,7 +48,7 @@ export type V2TuiSlotPath =
   | "sidebar.content"
   | "sidebar.footer"
 
-/** Input published by `sidebar.content` — the slot the Deals panel claims. */
+/** Input published by `sidebar.content` — the slot the Rates & usage panel claims. */
 export interface V2TuiSidebarInput {
   readonly sessionID: string
 }
@@ -117,7 +117,7 @@ export interface V2TuiSession {
 /**
  * One `ModelInfo.cost` entry: `{ tier?, input, output, cache: { read, write } }`.
  * v2's cost shape is an array of context tiers — the untiered entry is the
- * model's base price, which the Deals panel reads for its `Rates` fallback
+ * model's base price, which the Rates & usage panel reads for its `Rates` fallback
  * when the payload publishes no band.
  */
 export interface V2TuiModelCost {
@@ -129,7 +129,7 @@ export interface V2TuiModelCost {
 
 /**
  * `ModelInfo` slice. v2 renamed the model's free-form provider-option bag from
- * v1's `options` to `settings` (ADR-0010), which is where the Deals
+ * v1's `options` to `settings` (ADR-0010), which is where the Rates & usage
  * enrichment writes `cmd`; `cost` is the host's own price table.
  */
 export interface V2TuiModel {
@@ -193,8 +193,8 @@ export interface V2TuiKeymapCommand {
  * registers. `layer` takes a thunk so the host re-evaluates the layer
  * reactively and owns its teardown with the plugin scope. It is a Solid
  * context owned by the calling component — calling it outside a component
- * (from `setup`) throws `Keymap.Provider is missing` — which is why the Deals
- * layer mounts through a headless `app`-slot component, with `mode: "global"`
+ * (from `setup`) throws `Keymap.Provider is missing` — which is why the panel's
+ * command layer mounts through a headless `app`-slot component, with `mode: "global"`
  * because the palette lists only reachable commands while its dialog is open
  * and layers default to `base`.
  */

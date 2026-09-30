@@ -13,8 +13,9 @@
 // byte-identical from 2.0.0 through 2.0.8. The `rpc` port surface
 // (`dist/promise/{plugin,rpc}.d.ts` + `@opencode/schema/rpc`'s
 // `PortableDefinition`) was re-derived against 2.0.19 and is present in every
-// 2.0.x release checked (2.0.3 through 2.0.20) — it carries the Deals usage
-// bridge (ADR-0020). Bumping the supported v2 line means re-deriving these
+// 2.0.x release checked (2.0.3 through 2.0.20) — it carries the usage bridge
+// of the Rates & usage slice (ADR-0020). Bumping the supported v2 line means
+// re-deriving these
 // from the published package — tests/plugin-v2.test.ts pins the parts we
 // depend on.
 
@@ -263,8 +264,8 @@ export interface V2SetupContext {
   }
   /**
    * The cross-plugin RPC surface (`RpcDomain`): `register` publishes a
-   * portable port the host serves and other plugins — the Deals TUI half
-   * included, through its own `client.rpc` — can call (ADR-0020's usage
+   * portable port the host serves and other plugins — the Rates & usage TUI
+   * half included, through its own `client.rpc` — can call (ADR-0020's usage
    * bridge). The resolved registration carries the port's event channel,
    * which the usage bridge emits progress frames through (#251).
    */

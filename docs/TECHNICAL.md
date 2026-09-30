@@ -15,7 +15,7 @@ One package serves both OpenCode lines; three host processes load it.
 
 | Host               | Configured in                                   | Default export                       | Registrations                                                                                                                |
 | ------------------ | ----------------------------------------------- | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
-| OpenCode v1 server | `opencode.json` → `plugin`                      | `dist/index.js` → `{ id, server }`   | `config` hook (auto-registration + Deals enrichment), `auth` (OAuth browser flow + API-key method), `tool` map               |
+| OpenCode v1 server | `opencode.json` → `plugin`                      | `dist/index.js` → `{ id, server }`   | `config` hook (auto-registration + Rates & usage enrichment), `auth` (OAuth browser flow + API-key method), `tool` map       |
 | OpenCode v2 server | `opencode.json` → `plugins`                     | `dist/index.js` → `{ id, setup }`    | `ctx.provider.transform` + `ctx.model.transform`, `ctx.integration.transform`, `ctx.tool.transform`, `ctx.aisdk.hook("sdk")` |
 | TUI (both lines)   | v1: `tui.json`; v2: the package's `./tui` entry | `dist/tui.js` → `{ id, tui, setup }` | v1: `api.slots.register` on `sidebar_content`; v2: `ctx.ui.slot({ append: "sidebar.content" })`                              |
 
@@ -29,10 +29,10 @@ One package serves both OpenCode lines; three host processes load it.
   their own module instances, which is why `dist/tui.js` is built as a single
   file with those specifiers external.
 - `npm run build` needs [bun](https://bun.sh) on `PATH`: `tsc` emits the server
-  halves, then `scripts/build-tui.ts` compiles `src/deals/tui.tsx` with
+  halves, then `scripts/build-tui.ts` compiles `src/rates-usage/tui.tsx` with
   `@opentui/solid`'s solid transform so the panel's JSX props stay reactive.
 - See [ADR-0001](adr/0001-auto-registration-snapshot.md) (auto-registration),
-  [ADR-0004](adr/0004-deals-intelligence-slice.md) (the excisable Deals slice),
+  [ADR-0004](adr/0004-rates-usage-slice.md) (the excisable Rates & usage slice),
   [ADR-0009](adr/0009-version-pinned-provider-specifier.md) (runtime-provider
   specifier), and [ADR-0010](adr/0010-dual-v1-v2-plugin-entrypoint.md) (the dual
   v1/v2 entrypoint, including the TUI half).
@@ -119,7 +119,7 @@ hand-edited:
 | `src/catalog/snapshot.ts`       | Model ids, names, context lengths — the membership authority (the `models.md` table shipped by the CLI package)                          | `npm run refresh:snapshot`       |
 | `src/catalog/facts.ts`          | Reasoning efforts, per-1M-token rates, input modalities, model families                                                                  | `npm run refresh:snapshot`       |
 | `src/catalog/classification.ts` | Per-model reasoning capability, derived any-true-wins from the models.md efforts entry, the docs' RSC flag, and the models page Caps bit | `npm run refresh:classification` |
-| `src/deals/catalog.ts`          | Tier, benchmark, deal discounts, `was`/`now` rates, peak/off-peak windows, GOAT/Pro allowances                                           | `npm run refresh:deals`          |
+| `src/rates-usage/catalog.ts`    | Tier, benchmark, deal discounts, `was`/`now` rates, peak/off-peak windows, GOAT/Pro allowances                                           | `npm run refresh:deals`          |
 
 `npm run refresh` runs the whole pipeline: snapshot + facts from the live
 catalog, the RSC fixtures re-captured from the live docs pages
@@ -141,14 +141,14 @@ model with no enrichment ships core-only with a visible `pending` report — nev
 a failed refresh. The shape gate stays loud: a parser change in any source, or an
 unshippable ship-bar row after the full ladder, fails the refresh.
 
-## Deals intelligence
+## Rates & usage
 
-Deals data is extracted from the Command Code docs' React Server Components
+The Deals catalog is extracted from the Command Code docs' React Server Components
 (RSC) stream — the `pricing-limits`, `plans/goat`, and `plans/pro` pages fetched
 with an `rsc: 1` header ([ADR-0005](adr/0005-rsc-primary-deals-cron.md)). It
 surfaces in two places:
 
-- **Sidebar panel** (`src/deals/tui.tsx`): the server half writes the payload to
+- **Rates & usage panel** (`src/rates-usage/tui.tsx`): the server half writes the payload to
   the model's provider options — v1 `options.cmd`, v2 `settings.cmd` — and the
   panel renders in segmented rows for the session's selected model: tier/status,
   an `Allowance` heading over one row per displayed plan (Pro (legacy) and
@@ -228,7 +228,7 @@ credits meters render (~1 s) long before the slow subscriptions/summary legs
 (~16 s) answer. The last-good snapshot also survives panel remounts — the TUI
 host remounts the sidebar on session and model switches and, in the plugin's
 dev loop, on every hot reload of the TUI module — through an in-memory store
-keyed by session (`src/deals/usage-cache.ts`: 30-minute TTL, `globalThis`-backed
+keyed by session (`src/rates-usage/usage-cache.ts`: 30-minute TTL, `globalThis`-backed
 because a hot reload re-evaluates the module). It is in-memory only: a disk
 cache would outlive the credential it was read with. A chain that answers with
 no renderable row at all still reports `unavailable`, so the failed-refresh
@@ -244,7 +244,7 @@ The credential those reads use is resolved per TUI half (issue #243,
   keeping the file label as provenance. That ladder mirrors the transport's
   own last resort, so it only answers what would actually stream.
 - **v2 TUI:** the plugin's own server half, over the plugin-RPC bridge
-  (`src/deals/usage-rpc.ts`): the server registers the `commandcode` port at
+  (`src/rates-usage/usage-rpc.ts`): the server registers the `commandcode` port at
   setup, resolves the Host's active connection per call — stored credentials
   included, the read the TUI process cannot make — and runs the billing fetch
   itself, returning the snapshot, the refreshed scope and the rung. The
@@ -288,18 +288,18 @@ The panel's rows are five segments — Tier/Status, Allowance, Rates, Other
 Information and the Usage block above. Which of them render, and in which
 order, is a per-machine user choice (issue #253,
 [ADR-0022](adr/0022-sidebar-segment-layout.md)): the **Show, hide and reorder
-sidebar content** command — `/cmd-deals` in the prompt — opens a dialog where
+sidebar content** command — `/cmd-rates-usage` in the prompt — opens a dialog where
 up/down moves the cursor, space/enter toggles the selected segment,
 shift+up/down reorders it, `r` restores the default layout and escape closes.
 Changes apply live.
 
 The layout is a JSON record `{ order, hidden }`; `order` carries all five ids
 including hidden ones (unhiding restores a position) and `hidden` names what
-not to render. `src/deals/segments.ts` owns the vocabulary, the key map and
+not to render. `src/rates-usage/segments.ts` owns the vocabulary, the key map and
 `normalizeLayout`, which drops unknown/duplicate ids and appends ids a store
 is missing — so a release that adds or removes a segment can never make it
 vanish or crash the panel, and no migration exists. Persistence is each TUI
-host's own durable store: v1 `api.kv` under `commandcode.deals.segments`
+host's own durable store: v1 `api.kv` under `commandcode.rates-usage.segments`
 (the shared `state/kv.json`, read reactively), v2 `ctx.storage.store(...)`
 (disk-persisted, live-synced across TUI instances, host-namespaced by plugin
 id).
@@ -330,7 +330,7 @@ a base-mode entry silently disappears. Both measured on opencode 2.0.20.
 `SegmentsDialog` is one shared component mounted through
 `api.ui.dialog.replace` / `ctx.ui.dialog.show`; its key handling is the pure
 `segmentKeyIntent`. The v1 keymap slice is mirrored inside
-`src/deals/tui.tsx` (`@opentui/keymap` is host-provided and not installed);
+`src/rates-usage/tui.tsx` (`@opentui/keymap` is host-provided and not installed);
 the v2 `keymap`/`storage`/`ui.dialog` slices extend
 `src/plugin/v2-tui-types.ts` and are re-checked across 2.0.3–2.0.20.
 
@@ -693,7 +693,7 @@ Both e2e scripts are excluded from `npm test`.
 | [0001](adr/0001-auto-registration-snapshot.md)                 | Auto-registration from a bundled snapshot, config-hook mutation                                    |
 | [0002](adr/0002-tag-driven-releases.md)                        | Tag-driven releases via GitHub Actions                                                             |
 | [0003](adr/0003-release-gates.md)                              | Release gates and non-blocking catalog checks                                                      |
-| [0004](adr/0004-deals-intelligence-slice.md)                   | Deals intelligence as an excisable slice with visible degradation                                  |
+| [0004](adr/0004-rates-usage-slice.md)                          | Rates & usage as an excisable slice with visible degradation                                       |
 | [0005](adr/0005-rsc-primary-deals-cron.md)                     | RSC stream as the primary deals source, refreshed by cron                                          |
 | [0006](adr/0006-derived-reasoning-classification.md)           | Reasoning capability derived from generated classification                                         |
 | [0007](adr/0007-auto-release.md)                               | Auto-release on merged catalog-refresh PRs                                                         |

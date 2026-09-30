@@ -16,9 +16,9 @@ import {
   enrichCommandCodeModelsV2,
   planSummaryTool,
   registerUsageRpc,
-} from "../deals/index.js"
-import { planSummaryV2Tool } from "../deals/plan-summary.js"
-import { hostCredentialFromV1 } from "../deals/host-credential.js"
+} from "../rates-usage/index.js"
+import { planSummaryV2Tool } from "../rates-usage/plan-summary.js"
+import { hostCredentialFromV1 } from "../rates-usage/host-credential.js"
 import { runAuthFlow } from "./auth.js"
 import { hostCredentialFromV2, setupCommandCode } from "./v2.js"
 import type { Plugin } from "@opencode-ai/plugin"
@@ -75,9 +75,9 @@ const server: Plugin = async (input) => {
 }
 
 /**
- * v2 host: the same three capabilities through the transform API. The Deals
- * intelligence seams — the provider enrichment pass, the `cmd_plan_summary`
- * tool and the usage RPC bridge — are supplied here, so deleting `src/deals/`
+ * v2 host: the same three capabilities through the transform API. The Rates &
+ * usage seams — the provider enrichment pass, the `cmd_plan_summary`
+ * tool and the usage RPC bridge — are supplied here, so deleting `src/rates-usage/`
  * plus these registrations still leaves Core green (ADR-0004). The tool and
  * the bridge are handed the credential getter for the Host's active
  * connection, which is the only credential the session streams with (ADR-0015).

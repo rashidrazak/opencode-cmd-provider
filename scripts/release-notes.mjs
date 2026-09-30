@@ -5,7 +5,7 @@
 // the merged PR body to this module, which renders the release's
 // `## X.Y.Z - date` CHANGELOG section from the PR body's **semantic**
 // sections (Model catalog / Reasoning classification / Deals
-// intelligence). The `Changed files` stat block and the bot footer are
+// catalog). The `Changed files` stat block and the bot footer are
 // not semantic and are dropped.
 //
 // Trust model: the merged PR body is untrusted upstream-derived input.

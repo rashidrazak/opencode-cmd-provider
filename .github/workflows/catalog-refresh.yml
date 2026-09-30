@@ -130,7 +130,7 @@ jobs:
               src/catalog/snapshot.ts \
               src/catalog/facts.ts \
               src/catalog/classification.ts \
-              src/deals/catalog.ts; then
+              src/rates-usage/catalog.ts; then
             echo "drift=false" >> "$GITHUB_OUTPUT"
             echo "No meaningful catalog drift detected against main — exiting without opening a PR."
           else
@@ -144,7 +144,7 @@ jobs:
               src/catalog/snapshot.ts \
               src/catalog/facts.ts \
               src/catalog/classification.ts \
-              src/deals/catalog.ts
+              src/rates-usage/catalog.ts
           fi
 
       # Commit the regenerated files. Authored by the GitHub Actions
@@ -155,7 +155,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add src/catalog/snapshot.ts src/catalog/facts.ts src/catalog/classification.ts \
-              src/deals/catalog.ts \
+              src/rates-usage/catalog.ts \
               tests/fixtures/rsc-pricing-limits.txt tests/fixtures/rsc-goat.txt \
               tests/fixtures/rsc-pro.txt tests/fixtures/models-page.html
           date="$(date -u +%Y-%m-%d)"
@@ -259,13 +259,13 @@ jobs:
           # 1) Capture the "before" state from origin/main
           #    (read-only checkout via `git show`). Output names are
           #    role-based (snapshot / facts / classification / deals),
-          #    NOT basenames — src/deals/catalog.ts and
+          #    NOT basenames — src/rates-usage/catalog.ts and
           #    src/catalog/snapshot.ts would otherwise collide on
           #    `catalog`, and the deals section would silently degrade
           #    to "unavailable" (the deals extraction landed in
           #    catalog.json while the PR body read deals.json).
           mkdir -p /tmp/before
-          for pair in "snapshot:src/catalog/snapshot.ts" "facts:src/catalog/facts.ts" "classification:src/catalog/classification.ts" "deals:src/deals/catalog.ts"; do
+          for pair in "snapshot:src/catalog/snapshot.ts" "facts:src/catalog/facts.ts" "classification:src/catalog/classification.ts" "deals:src/rates-usage/catalog.ts"; do
             name="${pair%%:*}"
             f="${pair#*:}"
             if git show "origin/main:${f}" > "/tmp/before/${name}.ts" 2>/dev/null; then
@@ -278,7 +278,7 @@ jobs:
           # 2) Capture the "after" state from the working tree
           #    (post-refresh, post-commit).
           mkdir -p /tmp/after
-          for pair in "snapshot:src/catalog/snapshot.ts" "facts:src/catalog/facts.ts" "classification:src/catalog/classification.ts" "deals:src/deals/catalog.ts"; do
+          for pair in "snapshot:src/catalog/snapshot.ts" "facts:src/catalog/facts.ts" "classification:src/catalog/classification.ts" "deals:src/rates-usage/catalog.ts"; do
             name="${pair%%:*}"
             f="${pair#*:}"
             extract "${f}" "/tmp/after/${name}.json"
@@ -313,7 +313,7 @@ jobs:
             echo "### Changed files"
             echo ""
             echo '```'
-            git diff --stat origin/main -- src/catalog/snapshot.ts src/catalog/facts.ts src/catalog/classification.ts src/deals/catalog.ts
+            git diff --stat origin/main -- src/catalog/snapshot.ts src/catalog/facts.ts src/catalog/classification.ts src/rates-usage/catalog.ts
             echo '```'
             echo ""
             echo "### Model catalog"
@@ -343,7 +343,7 @@ jobs:
               --before-date "${before_date}" --after-date "${after_date}" \
               || echo "_classification diff unavailable_"
             echo ""
-            echo "### Deals intelligence"
+            echo "### Deals catalog"
             echo ""
             before_date="$(node -p "JSON.parse(require('fs').readFileSync('/tmp/before/deals.json','utf-8')).DEAL_LAST_REFRESHED ?? ''" 2>/dev/null || true)"
             after_date="$(node -p "JSON.parse(require('fs').readFileSync('/tmp/after/deals.json','utf-8')).DEAL_LAST_REFRESHED ?? ''" 2>/dev/null || true)"

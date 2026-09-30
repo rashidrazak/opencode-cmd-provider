@@ -1,30 +1,30 @@
-// tests/tui-deals-segments.test.ts — the sidebar's segment layout (issue
-// #253): the vocabulary and normalizer (src/deals/segments.ts), the panel
-// composer's visibility/order/separator rules, both hosts' persistence
-// adapters, and the command-palette entry that opens the settings dialog. The
-// dialog component itself only shells out to the intents and the pure layout
-// ops pinned here.
+// tests/tui-rates-usage-segments.test.ts — the Rates & usage panel's segment
+// layout (issue #253): the vocabulary and normalizer
+// (src/rates-usage/segments.ts), the panel composer's visibility/order/separator
+// rules, both hosts' persistence adapters, and the command-palette entry that
+// opens the settings dialog. The dialog component itself only shells out to the
+// intents and the pure layout ops pinned here.
 import plugin, {
   bindV1DialogKeys,
   createV2LayoutStore,
-  dealSegments,
-  dealSegmentsV2,
-  dealsRows,
+  ratesUsageSegments,
+  ratesUsageSegmentsV2,
+  ratesUsageRows,
   panelRows,
   saveV1Layout,
   v1Layout,
-} from "../src/deals/tui.js"
+} from "../src/rates-usage/tui.js"
 import {
-  DEALS_LAYOUT_KEY,
+  RATES_USAGE_LAYOUT_KEY,
   defaultLayout,
   moveSegment,
   normalizeLayout,
   segmentKeyIntent,
   toggleSegment,
   visibleSegments,
-  type DealsLayout,
-} from "../src/deals/segments.js"
-import type { UsagePanelState } from "../src/deals/tui-usage.js"
+  type RatesUsageLayout,
+} from "../src/rates-usage/segments.js"
+import type { UsagePanelState } from "../src/rates-usage/tui-usage.js"
 import type { TuiPluginApi } from "@opencode-ai/plugin/tui"
 import type { V2TuiContext, V2TuiSlotClaim } from "../src/plugin/v2-tui-types.js"
 import { assertEqual, assert, run } from "./harness.js"
@@ -41,7 +41,7 @@ const NO_CREDENTIAL: UsagePanelState = { result: { state: "no-credential" } }
 const USAGE_LINE = "Usage needs COMMANDCODE_API_KEY — set it to see live limits"
 
 /** A normalized layout over the given order/hidden ids (missing ids append). */
-function layout(order: readonly string[], hidden: readonly string[] = []): DealsLayout {
+function layout(order: readonly string[], hidden: readonly string[] = []): RatesUsageLayout {
   return normalizeLayout({ order, hidden })
 }
 
@@ -131,13 +131,13 @@ run([
   [
     "the segment builders gate non-Command Code models and leave Usage to the composer",
     () => {
-      assertEqual(dealSegments(undefined), undefined)
-      assertEqual(dealSegmentsV2(undefined), undefined)
-      const v1 = dealSegments(MODEL)!
+      assertEqual(ratesUsageSegments(undefined), undefined)
+      assertEqual(ratesUsageSegmentsV2(undefined), undefined)
+      const v1 = ratesUsageSegments(MODEL)!
       assertEqual(Object.keys(v1.segments).sort(), [...ALL].sort())
       assertEqual(v1.segments.usage, [])
       assertEqual(v1.banner, [])
-      const v2 = dealSegmentsV2({ settings: { cmd: {} } })!
+      const v2 = ratesUsageSegmentsV2({ settings: { cmd: {} } })!
       assertEqual(v2.segments.usage, [])
     },
   ],
@@ -152,8 +152,8 @@ run([
         { options: { cmd: { unavailable: true } } },
       ]) {
         assertEqual(
-          panelRows(dealSegments(model)!, defaultLayout(), undefined, NOW),
-          dealsRows(model),
+          panelRows(ratesUsageSegments(model)!, defaultLayout(), undefined, NOW),
+          ratesUsageRows(model),
         )
       }
     },
@@ -162,7 +162,7 @@ run([
   [
     "one blank line separates visible segments; hidden ones vanish",
     () => {
-      const segments = dealSegments(MODEL)!
+      const segments = ratesUsageSegments(MODEL)!
       const rows = panelRows(
         segments,
         layout(["rates", "info"], ["status", "allowance", "usage"]),
@@ -176,7 +176,7 @@ run([
   [
     "the Usage segment renders where the order puts it, without doubling separators",
     () => {
-      const segments = dealSegments(MODEL)!
+      const segments = ratesUsageSegments(MODEL)!
       // The usage renderer ships its own leading blank; the composer trims it
       // and inserts the one separator the composition owns.
       const rows = panelRows(
@@ -197,19 +197,19 @@ run([
   [
     "while the usage load is in flight the composer leaves no gap",
     () => {
-      const segments = dealSegments(MODEL)!
+      const segments = ratesUsageSegments(MODEL)!
       const usageOnly = layout(["usage"], ["status", "allowance", "rates", "info"])
       // Nothing rendered for the only visible segment: the panel hides rather
       // than showing a lone blank line.
       assertEqual(panelRows(segments, usageOnly, undefined, NOW), [])
-      assertEqual(panelRows(segments, defaultLayout(), undefined, NOW), dealsRows(MODEL))
+      assertEqual(panelRows(segments, defaultLayout(), undefined, NOW), ratesUsageRows(MODEL))
     },
   ],
 
   [
     "every segment hidden hides the panel, banner included",
     () => {
-      const segments = dealSegments({ options: { cmd: { unavailable: true } } })!
+      const segments = ratesUsageSegments({ options: { cmd: { unavailable: true } } })!
       const allHidden = layout([...ALL], [...ALL])
       assertEqual(panelRows(segments, allHidden, undefined, NOW), [])
       assertEqual(panelRows(segments, allHidden, NO_CREDENTIAL, NOW), [])
@@ -219,7 +219,7 @@ run([
   [
     "the unavailable banner stays pinned above the first visible segment",
     () => {
-      const segments = dealSegments({ options: { cmd: { unavailable: true } } })!
+      const segments = ratesUsageSegments({ options: { cmd: { unavailable: true } } })!
       const rows = panelRows(
         segments,
         layout(["info", "status"], ["allowance", "rates", "usage"]),
@@ -238,7 +238,7 @@ run([
   [
     "a Usage-only layout carries no catalog banner",
     () => {
-      const segments = dealSegments({ options: { cmd: { unavailable: true } } })!
+      const segments = ratesUsageSegments({ options: { cmd: { unavailable: true } } })!
       const rows = panelRows(
         segments,
         layout(["usage"], ["status", "allowance", "rates", "info"]),
@@ -267,9 +267,9 @@ run([
       assertEqual(v1Layout(api), defaultLayout())
       const next = layout(["usage", "status"], ["info"])
       saveV1Layout(api, next)
-      assertEqual(store.get(DEALS_LAYOUT_KEY), next)
+      assertEqual(store.get(RATES_USAGE_LAYOUT_KEY), next)
       assertEqual(v1Layout(api), next)
-      store.set(DEALS_LAYOUT_KEY, { order: ["bogus"], hidden: ["bogus"] })
+      store.set(RATES_USAGE_LAYOUT_KEY, { order: ["bogus"], hidden: ["bogus"] })
       assertEqual(v1Layout(api), defaultLayout())
     },
   ],
@@ -296,10 +296,10 @@ run([
       assertEqual(store.layout(), defaultLayout())
       const next = layout(["usage", "status"], ["rates"])
       store.save(next)
-      assertEqual(states.get(DEALS_LAYOUT_KEY), next)
+      assertEqual(states.get(RATES_USAGE_LAYOUT_KEY), next)
       assertEqual(store.layout(), next)
       // A store opened over a value another release wrote normalizes on read.
-      states.set(DEALS_LAYOUT_KEY, { order: ["usage", 7], hidden: "nope" })
+      states.set(RATES_USAGE_LAYOUT_KEY, { order: ["usage", 7], hidden: "nope" })
       assertEqual(createV2LayoutStore(ctx).layout(), {
         order: ["usage", "status", "allowance", "rates", "info"],
         hidden: [],
@@ -329,14 +329,14 @@ run([
       const dispose = bindV1DialogKeys(keymap as never, (intent) => intents.push(intent))
       assertEqual(registered?.priority, 1, "the prompt's managed textarea layer is priority 0")
       assertEqual(registered?.bindings, [
-        { key: "up", cmd: "commandcode.deals.segments.up" },
-        { key: "down", cmd: "commandcode.deals.segments.down" },
-        { key: "shift+up", cmd: "commandcode.deals.segments.move-up" },
-        { key: "shift+down", cmd: "commandcode.deals.segments.move-down" },
-        { key: "space", cmd: "commandcode.deals.segments.toggle" },
-        { key: "return", cmd: "commandcode.deals.segments.toggle" },
-        { key: "r", cmd: "commandcode.deals.segments.reset" },
-        { key: "escape", cmd: "commandcode.deals.segments.close" },
+        { key: "up", cmd: "commandcode.rates-usage.segments.up" },
+        { key: "down", cmd: "commandcode.rates-usage.segments.down" },
+        { key: "shift+up", cmd: "commandcode.rates-usage.segments.move-up" },
+        { key: "shift+down", cmd: "commandcode.rates-usage.segments.move-down" },
+        { key: "space", cmd: "commandcode.rates-usage.segments.toggle" },
+        { key: "return", cmd: "commandcode.rates-usage.segments.toggle" },
+        { key: "r", cmd: "commandcode.rates-usage.segments.reset" },
+        { key: "escape", cmd: "commandcode.rates-usage.segments.close" },
       ])
       // Every binding resolves to a registered command, and each command
       // delivers exactly its intent.
@@ -390,15 +390,15 @@ run([
           },
         },
         theme: { current: { text: {}, textMuted: {}, primary: {} } },
-        slots: { register: () => "commandcode.deals:0" },
+        slots: { register: () => "commandcode.rates-usage:0" },
       } as unknown as TuiPluginApi
       await plugin.tui(api, undefined as never, undefined as never)
       assertEqual(commands.length, 1)
       assertEqual(commands[0]?.namespace, "palette")
-      assertEqual(commands[0]?.name, "commandcode.deals.segments")
+      assertEqual(commands[0]?.name, "commandcode.rates-usage.segments")
       assertEqual(commands[0]?.title, "Show, hide and reorder sidebar content")
       assertEqual(commands[0]?.desc, undefined, "the palette row carries no inline description")
-      assertEqual(commands[0]?.slash, { name: "cmd-deals" })
+      assertEqual(commands[0]?.slash, { name: "cmd-rates-usage" })
       commands[0]!.run()
       assertEqual(replaces, 1, "the run opens one dialog")
       assert(typeof render === "function")
@@ -465,10 +465,10 @@ run([
       assertEqual(layerCalls, 1, "the app-slot component creates the layer")
       assertEqual(layers[0]?.mode, "global", "a base-mode layer is unreachable in the palette")
       assertEqual(commands.length, 1)
-      assertEqual(commands[0]?.id, "commandcode.deals.segments")
+      assertEqual(commands[0]?.id, "commandcode.rates-usage.segments")
       assertEqual(commands[0]?.title, "Show, hide and reorder sidebar content")
       assertEqual(commands[0]?.description, undefined, "no inline description to truncate")
-      assertEqual(commands[0]?.slash, { name: "cmd-deals" })
+      assertEqual(commands[0]?.slash, { name: "cmd-rates-usage" })
       assertEqual(commands[0]?.palette, true)
       commands[0]!.run?.()
       assertEqual(shows, 1, "the run opens one dialog")

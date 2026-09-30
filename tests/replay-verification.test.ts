@@ -32,7 +32,7 @@ import { renderedTableRsc } from "./helpers/flight-table.js"
 import { PLAN_TABLE_HEADER } from "../scripts/parse-rsc.mjs"
 import { PLAN_LABEL_TO_ID } from "../scripts/refresh-deals.mjs"
 import { snapshotIndex } from "../scripts/snapshot-index.mjs"
-import { PLAN_CATALOG } from "../src/deals/catalog.js"
+import { PLAN_CATALOG } from "../src/rates-usage/catalog.js"
 import { deriveReasoningWithoutEfforts } from "../src/provider/reasoning.js"
 import { assert, assertEqual, run } from "./harness.js"
 
@@ -287,7 +287,7 @@ async function runLadder(world: WorldOptions, ws: string): Promise<void> {
         "--fixtures-dir",
         join(ws, "fixtures"),
         "--out",
-        join(ws, "src/deals/catalog.ts"),
+        join(ws, "src/rates-usage/catalog.ts"),
       ],
       env,
     )
@@ -330,7 +330,7 @@ const DRIFT_FRAGMENT = `
       src/catalog/snapshot.ts \\
       src/catalog/facts.ts \\
       src/catalog/classification.ts \\
-      src/deals/catalog.ts; then
+      src/rates-usage/catalog.ts; then
     echo "drift=false"
   else
     echo "drift=true"
@@ -455,10 +455,14 @@ run([
           MODEL_DEALS: Record<string, { free?: boolean; discount?: { pct: number } }>
         }
         const beforeDeals = (
-          (await import(pathToFileURL(join(before, "src/deals/catalog.ts")).href)) as DealsModule
+          (await import(
+            pathToFileURL(join(before, "src/rates-usage/catalog.ts")).href
+          )) as DealsModule
         ).MODEL_DEALS
         const afterDeals = (
-          (await import(pathToFileURL(join(after, "src/deals/catalog.ts")).href)) as DealsModule
+          (await import(
+            pathToFileURL(join(after, "src/rates-usage/catalog.ts")).href
+          )) as DealsModule
         ).MODEL_DEALS
         assertEqual(beforeDeals[GEMINI_ID].discount?.pct, 50, "before: the Gemini deal is active")
         assertEqual(afterDeals[GEMINI_ID].discount, undefined, "after: the Gemini deal ended")
@@ -569,7 +573,7 @@ run([
           "src/catalog/snapshot.ts",
           "src/catalog/facts.ts",
           "src/catalog/classification.ts",
-          "src/deals/catalog.ts",
+          "src/rates-usage/catalog.ts",
         ]) {
           await cp(join(ws, f), join(work, f))
         }
@@ -591,7 +595,7 @@ run([
         for (const f of [
           "src/catalog/facts.ts",
           "src/catalog/classification.ts",
-          "src/deals/catalog.ts",
+          "src/rates-usage/catalog.ts",
         ]) {
           const text = await readFile(join(work, f), "utf-8")
           await writeFile(join(work, f), bumpDate(text), "utf-8")
@@ -612,13 +616,13 @@ run([
           `the date-only replay must open no PR, got: ${stdout}`,
         )
 
-        const dealsText = await readFile(join(work, "src/deals/catalog.ts"), "utf-8")
+        const dealsText = await readFile(join(work, "src/rates-usage/catalog.ts"), "utf-8")
         assert(
           dealsText.includes('"claude-sonnet-5": { tier: "opensource"'),
           `the synthetic deals module must carry the sonnet entry, got: ${dealsText.slice(0, 400)}`,
         )
         await writeFile(
-          join(work, "src/deals/catalog.ts"),
+          join(work, "src/rates-usage/catalog.ts"),
           dealsText.replace(
             '"claude-sonnet-5": { tier: "opensource"',
             '"claude-sonnet-5": { tier: "premium"',
@@ -686,7 +690,7 @@ run([
             "| ------------------- | -------------- | ------------------------- | ------------------------------- |",
             "| `moonshotai/Kimi-K3` | classification | reasoning-without-efforts | efforts model (low, medium, high) |",
             "",
-            "### Deals intelligence",
+            "### Deals catalog",
             "",
             "- **DEAL_LAST_REFRESHED**: `2026-09-01` → `2026-09-02`",
             "",

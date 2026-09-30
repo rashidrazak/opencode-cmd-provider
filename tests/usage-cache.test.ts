@@ -3,8 +3,8 @@
 // cap, and the process-global default that survives the TUI host's module
 // re-evaluation on hot reload. Plain in-memory tests; no network, no TUI
 // runtime.
-import { createUsageCache, globalUsageCache } from "../src/deals/usage-cache.js"
-import type { UsagePanelState } from "../src/deals/tui-usage.js"
+import { createUsageCache, globalUsageCache } from "../src/rates-usage/usage-cache.js"
+import type { UsagePanelState } from "../src/rates-usage/tui-usage.js"
 import { assert, assertEqual, run } from "./harness.js"
 
 const NOW = Date.parse("2026-10-01T12:00:00.000Z")

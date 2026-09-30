@@ -1,8 +1,8 @@
 /** @jsxImportSource @opentui/solid */
-// src/deals/tui.tsx — TUI plugin: "Command Code" deals section in the session
-// sidebar. Renders deal details from the picked model's enriched `cmd`
-// (produced by the server plugin's config hook on v1 and its provider transform
-// on v2), plus the live `Usage` segment (issues #244/#245, src/deals/tui-usage.ts):
+// src/rates-usage/tui.tsx — TUI plugin: the "Command Code" Rates & usage panel
+// in the session sidebar. Renders its segments from the picked model's enriched
+// `cmd` (produced by the server plugin's config hook on v1 and its provider
+// transform on v2), plus the live `Usage` segment (issues #244/#245, src/rates-usage/tui-usage.ts):
 // fetched once per panel mount, then refreshed on completed turns and window
 // rolls — never polled — with a local 30-second countdown clock. Every Command
 // Code model gets the full fixed row set — a row the model has no data for
@@ -11,14 +11,14 @@
 //
 // The panel's rows are five segments — Tier/Status, Allowance, Rates, Other
 // Information and the live Usage block (issue #253). Users choose which
-// segments show and in what order from the palette command `/cmd-deals`
+// segments show and in what order from the palette command `/cmd-rates-usage`
 // (`Show, hide and reorder sidebar content`): exactly one blank line separates
 // any two visible segments, a segment with no rows (Usage before its first
 // load) leaves no gap, and with every segment hidden the panel hides
 // entirely. The layout persists per machine (v1 `api.kv`,
 // v2 `ctx.storage.store`) and is normalized on every read, so a value from
 // another release can never crash or hide a segment by accident
-// (src/deals/segments.ts).
+// (src/rates-usage/segments.ts).
 //
 // Two hosts, two TUI contracts (ADR-0010), one default export:
 //   v1  `{ id, tui(api) }`        — `api.slots.register({ slots: { sidebar_content } })`
@@ -38,8 +38,8 @@ import type { TuiPlugin, TuiPluginApi, TuiPluginModule } from "@opencode-ai/plug
 import { DEAL_SOURCE_URL, PLAN_CATALOG } from "./catalog.js"
 import { discountLabel, formatRate, todayIso } from "./format.js"
 import {
-  DEALS_LAYOUT_KEY,
-  DEALS_SEGMENT_LABELS,
+  RATES_USAGE_LAYOUT_KEY,
+  RATES_USAGE_SEGMENT_LABELS,
   defaultLayout,
   moveSegment,
   normalizeLayout,
@@ -47,8 +47,8 @@ import {
   segmentKeyIntent,
   toggleSegment,
   visibleSegments,
-  type DealsLayout,
-  type DealsSegmentId,
+  type RatesUsageLayout,
+  type RatesUsageSegmentId,
   type SegmentsKeyIntent,
 } from "./segments.js"
 import { renderUsageRows } from "./usage.js"
@@ -118,7 +118,7 @@ type V2PanelModel = {
  * host theme's tone colours (`success`/`warning`/`error` on v1; the v2
  * theme's `text.feedback` pair, see `v2ThemeColors`).
  */
-export type DealsRowTone = "success" | "warning" | "error"
+export type RatesUsageRowTone = "success" | "warning" | "error"
 
 /**
  * One rendered sidebar line. `[label, value]` renders as `label: value`; an
@@ -129,11 +129,11 @@ export type DealsRowTone = "success" | "warning" | "error"
  * tone]` renders a usage meter bar in `tone` followed by the muted percentage
  * field; `["", ""]` is the blank line between segments.
  */
-export type DealsRow = [
+export type RatesUsageRow = [
   label: string,
   value: string,
   kind?: "heading" | "value" | "bar",
-  tone?: DealsRowTone,
+  tone?: RatesUsageRowTone,
 ]
 
 /** Value of a row the model has nothing to say about. */
@@ -209,8 +209,8 @@ const RATE_COLUMNS = "in | out | cache r | w"
  * model record carries) in the same two-line shape. Blank lines separate the
  * blocks.
  */
-function ratesRows(c: Cmd, base: CmdRates | undefined): DealsRow[] {
-  const rows: DealsRow[] = []
+function ratesRows(c: Cmd, base: CmdRates | undefined): RatesUsageRow[] {
+  const rows: RatesUsageRow[] = []
   const band = (name: string, rates: CmdRates | undefined) => {
     if (rows.length > 0) rows.push(["", ""])
     rows.push([name, RATE_COLUMNS])
@@ -248,16 +248,16 @@ function ratesRows(c: Cmd, base: CmdRates | undefined): DealsRow[] {
 /**
  * One rendered segment block; the composer joins them. The Usage block is not
  * built from the payload — the panel fills it from the live usage state at
- * compose time — so `dealSegments` leaves it empty.
+ * compose time — so `ratesUsageSegments` leaves it empty.
  */
-export interface DealsSegments {
+export interface RatesUsageSegments {
   /** The `Deals unavailable` banner rows, pinned above the visible segments. */
-  banner: DealsRow[]
-  segments: Record<DealsSegmentId, DealsRow[]>
+  banner: RatesUsageRow[]
+  segments: Record<RatesUsageSegmentId, RatesUsageRow[]>
 }
 
 /** The Tier/Status block: the model's tier and free/paid state. */
-function statusRows(c: Cmd): DealsRow[] {
+function statusRows(c: Cmd): RatesUsageRow[] {
   return [
     ["Tier", typeof c.tier === "string" ? tierDisplay(c.tier) : NA],
     ["Status", c.free === true ? "FREE" : c.free === false ? "Paid" : NA],
@@ -265,8 +265,8 @@ function statusRows(c: Cmd): DealsRow[] {
 }
 
 /** The `Allowance` block: the heading over one row per rendered plan. */
-function allowanceRows(c: Cmd): DealsRow[] {
-  const rows: DealsRow[] = [["Allowance", "", "heading"]]
+function allowanceRows(c: Cmd): RatesUsageRow[] {
+  const rows: RatesUsageRow[] = [["Allowance", "", "heading"]]
   for (const plan of PLAN_IDS) {
     const value = c.allowance?.[plan]
     rows.push([planDisplay(plan), typeof value === "number" ? `$${value}/mo` : NA])
@@ -275,12 +275,12 @@ function allowanceRows(c: Cmd): DealsRow[] {
 }
 
 /** The `Rates` block: the heading over the published bands (or the base price). */
-function ratesSegmentRows(c: Cmd, base: CmdRates | undefined): DealsRow[] {
+function ratesSegmentRows(c: Cmd, base: CmdRates | undefined): RatesUsageRow[] {
   return [["Rates", "", "heading"], ...ratesRows(c, base)]
 }
 
 /** The `Other Information` block: the deal and benchmark rows. */
-function infoRows(c: Cmd, today: string): DealsRow[] {
+function infoRows(c: Cmd, today: string): RatesUsageRow[] {
   return [
     ["Other Information", "", "heading"],
     [
@@ -308,7 +308,7 @@ function infoRows(c: Cmd, today: string): DealsRow[] {
  * behind it. `usage` starts empty and is filled by the composer from the live
  * state; the banner is pinned by the composer while a catalog segment shows.
  */
-function dealSegmentsFrom(cmd: Cmd | undefined, base: CmdRates | undefined, today: string): DealsSegments {
+function ratesUsageSegmentsFrom(cmd: Cmd | undefined, base: CmdRates | undefined, today: string): RatesUsageSegments {
   const unavailable = cmd?.unavailable === true
   const c: Cmd = unavailable ? {} : (cmd ?? {})
   return {
@@ -363,22 +363,22 @@ export function v1ModelFor(
  * of) yields no segments — the panel's visibility gate; a resolvable model
  * with no `cmd` payload yields the full all-N/A segment set.
  */
-export function dealSegments(
+export function ratesUsageSegments(
   model: V1Model | undefined,
   today: string = todayIso(),
-): DealsSegments | undefined {
+): RatesUsageSegments | undefined {
   if (!model) return undefined
-  return dealSegmentsFrom(model.options?.cmd as Cmd | undefined, baseRates(model.cost), today)
+  return ratesUsageSegmentsFrom(model.options?.cmd as Cmd | undefined, baseRates(model.cost), today)
 }
 
 /**
- * The v1 default row set: `dealSegments` composed under the out-of-the-box
+ * The v1 default row set: `ratesUsageSegments` composed under the out-of-the-box
  * layout (every segment, historic order) with no usage state — the shape the
  * panel rendered before layouts existed. The panel itself composes the live
  * usage state and the user's layout through `panelRows`.
  */
-export function dealsRows(model: V1Model | undefined, today: string = todayIso()): DealsRow[] {
-  return panelRows(dealSegments(model, today), defaultLayout(), undefined)
+export function ratesUsageRows(model: V1Model | undefined, today: string = todayIso()): RatesUsageRow[] {
+  return panelRows(ratesUsageSegments(model, today), defaultLayout(), undefined)
 }
 
 /**
@@ -410,28 +410,28 @@ export function v2ModelFor(
  * (ADR-0010), which is where `enrichCommandCodeModelsV2` writes `cmd`. The
  * model-cost array's untiered entry is the base price behind the `Rates`
  * fallback (tiered entries are the over-context bands the payload already
- * publishes). Gates identically to `dealSegments`: undefined model → no
+ * publishes). Gates identically to `ratesUsageSegments`: undefined model → no
  * segments, no payload → all-N/A.
  */
-export function dealSegmentsV2(
+export function ratesUsageSegmentsV2(
   model: V2PanelModel | undefined,
   today: string = todayIso(),
-): DealsSegments | undefined {
+): RatesUsageSegments | undefined {
   if (!model) return undefined
   const base = model.cost?.find((entry) => entry.tier === undefined)
-  return dealSegmentsFrom(model.settings?.["cmd"] as Cmd | undefined, baseRates(base), today)
+  return ratesUsageSegmentsFrom(model.settings?.["cmd"] as Cmd | undefined, baseRates(base), today)
 }
 
-/** The v2 default row set — `dealsRows`' rule through the v2 model slice. */
-export function dealsRowsV2(
+/** The v2 default row set — `ratesUsageRows`' rule through the v2 model slice. */
+export function ratesUsageRowsV2(
   model: V2PanelModel | undefined,
   today: string = todayIso(),
-): DealsRow[] {
-  return panelRows(dealSegmentsV2(model, today), defaultLayout(), undefined)
+): RatesUsageRow[] {
+  return panelRows(ratesUsageSegmentsV2(model, today), defaultLayout(), undefined)
 }
 
 /** True for the blank separator row the composer inserts between segments. */
-function isBlankRow(row: DealsRow): boolean {
+function isBlankRow(row: RatesUsageRow): boolean {
   return row[0] === "" && row[1] === ""
 }
 
@@ -440,7 +440,7 @@ function isBlankRow(row: DealsRow): boolean {
  * that ships its own edge blanks (the usage renderer carries a leading one)
  * composes without doubling them.
  */
-function trimBlankEdges(rows: readonly DealsRow[]): DealsRow[] {
+function trimBlankEdges(rows: readonly RatesUsageRow[]): RatesUsageRow[] {
   let start = 0
   let end = rows.length
   while (start < end) {
@@ -469,11 +469,11 @@ function trimBlankEdges(rows: readonly DealsRow[]): DealsRow[] {
  * countdown clock the panel body hands in from its 30-second tick (#245).
  */
 export function panelRows(
-  segments: DealsSegments | undefined,
-  layout: DealsLayout,
+  segments: RatesUsageSegments | undefined,
+  layout: RatesUsageLayout,
   usage: UsagePanelState | undefined,
   now?: number,
-): DealsRow[] {
+): RatesUsageRow[] {
   if (segments === undefined) return []
   const visible = visibleSegments(layout)
   const usageRows = usage === undefined ? [] : renderUsageRows(usage.result, { now })
@@ -481,7 +481,7 @@ export function panelRows(
     .map((segment) => trimBlankEdges(segment === "usage" ? usageRows : segments.segments[segment]))
     .filter((rows) => rows.length > 0)
   const banner = visible.some((segment) => segment !== "usage") ? segments.banner : []
-  const rows: DealsRow[] = [...banner]
+  const rows: RatesUsageRow[] = [...banner]
   for (const [index, block] of blocks.entries()) {
     if (index > 0) rows.push(["", ""])
     rows.push(...block)
@@ -489,14 +489,14 @@ export function panelRows(
   return rows
 }
 
-const id = "commandcode.deals"
+const id = "commandcode.rates-usage"
 
 /** The panel itself, shared by both hosts: rows in, theme colours in. */
-function DealsPanel(props: {
-  rows: () => DealsRow[]
+function RatesUsagePanel(props: {
+  rows: () => RatesUsageRow[]
   text: () => RGBA
   textMuted: () => RGBA
-  tone: (tone: DealsRowTone) => RGBA
+  tone: (tone: RatesUsageRowTone) => RGBA
 }) {
   return (
     <Show when={props.rows().length > 0}>
@@ -541,19 +541,19 @@ function DealsPanel(props: {
  * dialog save repaints every mounted panel without a local signal. The
  * normalizer tolerates whatever the store holds, foreign keys included.
  */
-export function v1Layout(api: TuiPluginApi): DealsLayout {
-  return normalizeLayout(api.kv.get(DEALS_LAYOUT_KEY))
+export function v1Layout(api: TuiPluginApi): RatesUsageLayout {
+  return normalizeLayout(api.kv.get(RATES_USAGE_LAYOUT_KEY))
 }
 
 /** Persists a v1 layout; the KV store writes through to `state/kv.json`. */
-export function saveV1Layout(api: TuiPluginApi, layout: DealsLayout): void {
-  api.kv.set(DEALS_LAYOUT_KEY, layout)
+export function saveV1Layout(api: TuiPluginApi, layout: RatesUsageLayout): void {
+  api.kv.set(RATES_USAGE_LAYOUT_KEY, layout)
 }
 
 /** The v2 layout store the panel and the dialog share. */
 export interface V2LayoutStore {
-  layout: () => DealsLayout
-  save: (layout: DealsLayout) => void
+  layout: () => RatesUsageLayout
+  save: (layout: RatesUsageLayout) => void
 }
 
 /**
@@ -563,7 +563,7 @@ export interface V2LayoutStore {
  * both arrays so the stored value stays the plain JSON shape.
  */
 export function createV2LayoutStore(ctx: V2TuiContext): V2LayoutStore {
-  const [stored, mutate] = ctx.storage.store(DEALS_LAYOUT_KEY, { initial: defaultLayout() })
+  const [stored, mutate] = ctx.storage.store(RATES_USAGE_LAYOUT_KEY, { initial: defaultLayout() })
   return {
     layout: () => normalizeLayout(stored),
     save: (layout) => {
@@ -592,8 +592,8 @@ export function createV2LayoutStore(ctx: V2TuiContext): V2LayoutStore {
  * component.
  */
 function SegmentsDialog(props: {
-  layout: () => DealsLayout
-  save: (layout: DealsLayout) => void
+  layout: () => RatesUsageLayout
+  save: (layout: RatesUsageLayout) => void
   close: () => void
   text: () => RGBA
   muted: () => RGBA
@@ -676,7 +676,7 @@ function SegmentsDialog(props: {
                 <text fg={active() ? props.accent() : props.muted()}>{active() ? "›" : " "}</text>
                 <text fg={shown() ? props.text() : props.muted()}>{shown() ? "[x]" : "[ ]"}</text>
                 <text fg={shown() ? props.text() : props.muted()}>
-                  {active() ? <b>{DEALS_SEGMENT_LABELS[segment]}</b> : DEALS_SEGMENT_LABELS[segment]}
+                  {active() ? <b>{RATES_USAGE_SEGMENT_LABELS[segment]}</b> : RATES_USAGE_SEGMENT_LABELS[segment]}
                 </text>
               </box>
             )
@@ -703,7 +703,7 @@ export function bindV1DialogKeys(
   keymap: V1Keymap,
   handle: (intent: SegmentsKeyIntent) => void,
 ): () => void {
-  const name = (intent: SegmentsKeyIntent) => `commandcode.deals.segments.${intent}`
+  const name = (intent: SegmentsKeyIntent) => `commandcode.rates-usage.segments.${intent}`
   return keymap.registerLayer({
     priority: 1,
     commands: [
@@ -821,10 +821,10 @@ export function registerV1SegmentsCommand(api: TuiPluginApi): void {
     commands: [
       {
         namespace: "palette",
-        name: "commandcode.deals.segments",
+        name: "commandcode.rates-usage.segments",
         title: "Show, hide and reorder sidebar content",
         category: "Command Code",
-        slash: { name: "cmd-deals" },
+        slash: { name: "cmd-rates-usage" },
         run: () => openV1SegmentsDialog(api),
       },
     ],
@@ -898,8 +898,8 @@ function CmdPanelV1(props: { api: TuiPluginApi; sessionID: string; model: () => 
     ),
   )
   return (
-    <DealsPanel
-      rows={() => panelRows(dealSegments(props.model()), v1Layout(props.api), usage(), now())}
+    <RatesUsagePanel
+      rows={() => panelRows(ratesUsageSegments(props.model()), v1Layout(props.api), usage(), now())}
       text={() => props.api.theme.current.text}
       textMuted={() => props.api.theme.current.textMuted}
       tone={(tone) => props.api.theme.current[tone]}
@@ -907,7 +907,7 @@ function CmdPanelV1(props: { api: TuiPluginApi; sessionID: string; model: () => 
   )
 }
 
-function DealsPanelV1(props: { api: TuiPluginApi; session_id: string }) {
+function RatesUsagePanelV1(props: { api: TuiPluginApi; session_id: string }) {
   // Mid-session model switches update the session record (`session.updated`
   // reconciles it into the sync store), so reading `session.model` reactively
   // is enough — no event subscription needed.
@@ -1005,8 +1005,8 @@ function CmdPanelV2(props: {
   )
   const colors = () => v2ThemeColors(props.ctx.theme)
   return (
-    <DealsPanel
-      rows={() => panelRows(dealSegmentsV2(props.model()), props.layout.layout(), usage(), now())}
+    <RatesUsagePanel
+      rows={() => panelRows(ratesUsageSegmentsV2(props.model()), props.layout.layout(), usage(), now())}
       text={() => colors().text}
       textMuted={() => colors().muted}
       tone={(tone) => colors()[tone]}
@@ -1014,7 +1014,7 @@ function CmdPanelV2(props: {
   )
 }
 
-function DealsPanelV2(props: { ctx: V2TuiContext; sessionID: string; layout: V2LayoutStore }) {
+function RatesUsagePanelV2(props: { ctx: V2TuiContext; sessionID: string; layout: V2LayoutStore }) {
   // Same idea as v1 against the v2 data store: `data` is the host's live
   // client-local state, so reading the session's model and the model catalog
   // inside the memo re-renders the panel when either changes.
@@ -1040,7 +1040,7 @@ const tui: TuiPlugin = async (api) => {
     order: 200,
     slots: {
       sidebar_content(_ctx, props) {
-        return <DealsPanelV1 api={api} session_id={props.session_id} />
+        return <RatesUsagePanelV1 api={api} session_id={props.session_id} />
       },
     },
   })
@@ -1049,7 +1049,7 @@ const tui: TuiPlugin = async (api) => {
 /**
  * The v2 command entry (issue #253): `palette: true` surfaces it in the host
  * command palette, `slash` in prompt slash completion — so the dialog is
- * reachable as `/cmd-deals` even when the palette shortcut is captured by the
+ * reachable as `/cmd-rates-usage` even when the palette shortcut is captured by the
  * terminal multiplexer around the TUI. The title carries the whole wording on
  * purpose: the palette renders a description inline after the title and a
  * second line of copy only truncates, so the row and the slash completion
@@ -1060,11 +1060,11 @@ export function v2SegmentsCommand(
   layout: V2LayoutStore,
 ): V2TuiKeymapCommand {
   return {
-    id: "commandcode.deals.segments",
+    id: "commandcode.rates-usage.segments",
     title: "Show, hide and reorder sidebar content",
     group: "Command Code",
     palette: true,
-    slash: { name: "cmd-deals" },
+    slash: { name: "cmd-rates-usage" },
     run: () => openV2SegmentsDialog(ctx, layout),
   }
 }
@@ -1098,7 +1098,7 @@ const setup = (ctx: V2TuiContext): void => {
   })
   ctx.ui.slot({
     append: "sidebar.content",
-    render: (input) => <DealsPanelV2 ctx={ctx} sessionID={input.sessionID} layout={layout} />,
+    render: (input) => <RatesUsagePanelV2 ctx={ctx} sessionID={input.sessionID} layout={layout} />,
   })
 }
 

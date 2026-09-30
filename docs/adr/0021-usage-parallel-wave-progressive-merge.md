@@ -72,7 +72,7 @@ down on settle — late frames are ignored, so a queued event can never overwrit
 a settled outcome. The panel publishes partials without touching the backoff
 ladder or the roll bookkeeping; only a settled outcome does.
 
-**6. A session-keyed in-memory last-good cache.** `src/deals/usage-cache.ts`
+**6. A session-keyed in-memory last-good cache.** `src/rates-usage/usage-cache.ts`
 keeps the last published state per session (30-minute TTL, bounded recency) and
 the default instance hangs off `globalThis` so the host's module re-evaluation
 on hot reload cannot wipe it. Disk persistence is rejected: the snapshot is
@@ -108,5 +108,5 @@ outlive it and could surface one account's numbers under another.
   `@opencode/client` 2.0.3 through 2.0.20.
 - The scope cache no longer publishes on a pure-reuse chain, and a chain whose
   whoami failed publishes nothing — a behaviour change in `onScope` callers.
-- Deleting the Deals slice still leaves Core green: the cache lives in
-  `src/deals/`, and nothing in Core imports it.
+- Deleting the Rates & usage slice still leaves Core green: the cache lives in
+  `src/rates-usage/`, and nothing in Core imports it.

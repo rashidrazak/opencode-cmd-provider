@@ -13,7 +13,7 @@
 //
 // A model is reasoning-capable when ANY channel says yes. Classification is
 // a Core provider concern, so the module lives in the catalog layer (never
-// the excisable Deals slice).
+// the excisable Rates & usage slice).
 //
 // The capability map is **sparse** (issue #132): only models with evidence
 // get a MODEL_REASONING_CAPABILITY entry (true when any channel fires,

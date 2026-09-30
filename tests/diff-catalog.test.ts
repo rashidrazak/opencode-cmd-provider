@@ -116,7 +116,7 @@ run([
         "gpt-5.5": { tier: "premium" as const, free: false },
       }
       const md = diffCatalogs({ kind: "deals", before: deals, after: deals })
-      assert(md.includes("## Deals intelligence"), "must include the deals default label")
+      assert(md.includes("## Deals catalog"), "must include the deals default label")
       assert(md.includes("No changes."), "must short-circuit identical deals")
     },
   ],

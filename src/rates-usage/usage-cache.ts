@@ -1,4 +1,4 @@
-// src/deals/usage-cache.ts — the sidebar usage segment's last-good snapshot
+// src/rates-usage/usage-cache.ts — the sidebar usage segment's last-good snapshot
 // cache (issue #251). The panel component is remounted by the host — a session
 // switch, a model switch, and, in the plugin's own dev loop, every hot reload
 // of the TUI module — and a fresh panel has no state, so the segment used to

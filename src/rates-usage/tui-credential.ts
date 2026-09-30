@@ -1,4 +1,4 @@
-// src/deals/tui-credential.ts — the credential the v1 TUI host's Deals panel
+// src/rates-usage/tui-credential.ts — the credential the v1 TUI host's Rates & usage panel
 // reads usage with (issue #243, ADR-0020).
 //
 // The TUI host is a third process (ADR-0010) with no path to the ADR-0015
@@ -15,7 +15,7 @@
 // carries the credential, and the TUI context has no connection service, so
 // the credential lives only behind the Host's server-side seam. The v2 panel
 // therefore asks the plugin's own server half over the plugin-RPC bridge
-// (src/deals/usage-rpc.ts), which resolves the Host's active connection —
+// (src/rates-usage/usage-rpc.ts), which resolves the Host's active connection —
 // stored credentials included — and fetches the snapshot itself. No key ever
 // reaches the TUI process for v2, and no fallback is attempted: the bridge
 // answers with the connected account or the notice.
