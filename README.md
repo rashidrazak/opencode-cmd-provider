@@ -137,11 +137,12 @@ section for that model, split into segments:
 Every row is always shown: when a model has nothing for a row, its value reads
 `N/A` instead of the row disappearing.
 
-Don't need every segment? Run **Deals: sidebar segments** from the command
-palette (`ctrl+p`): press space to show or hide the selected segment,
-shift+↑/↓ to move it, `r` to restore the default layout. Your choices are
-remembered per machine. The blank line between segments is kept, and with
-every segment hidden the whole section disappears.
+Don't need every segment? Type `/cmd-deals` in the prompt — or run **Show,
+hide and reorder sidebar content** from the command palette (`ctrl+p`) —
+then: press space to show or hide the selected segment, shift+↑/↓ to move it,
+`r` to restore the default layout. Your choices are remembered per machine.
+The blank line between segments is kept, and with every segment hidden the
+whole section disappears.
 
 Toggle the sidebar with `ctrl+x b`. Switch to a model that isn't from Command
 Code and the section disappears — there is nothing to show for other providers.

@@ -287,10 +287,11 @@ and the counts above are the billing requests the server half makes.
 The panel's rows are five segments — Tier/Status, Allowance, Rates, Other
 Information and the Usage block above. Which of them render, and in which
 order, is a per-machine user choice (issue #253,
-[ADR-0022](adr/0022-sidebar-segment-layout.md)): the `Deals: sidebar segments`
-command palette entry opens a dialog where up/down moves the cursor,
-space/enter toggles the selected segment, shift+up/down reorders it, `r`
-restores the default layout and escape closes. Changes apply live.
+[ADR-0022](adr/0022-sidebar-segment-layout.md)): the **Show, hide and reorder
+sidebar content** command — `/cmd-deals` in the prompt — opens a dialog where
+up/down moves the cursor, space/enter toggles the selected segment,
+shift+up/down reorders it, `r` restores the default layout and escape closes.
+Changes apply live.
 
 The layout is a JSON record `{ order, hidden }`; `order` carries all five ids
 including hidden ones (unhiding restores a position) and `hidden` names what
