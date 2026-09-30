@@ -11,13 +11,14 @@
 //
 // The panel's rows are five segments — Tier/Status, Allowance, Rates, Other
 // Information and the live Usage block (issue #253). Users choose which
-// segments show and in what order from the `Deals: sidebar segments` command
-// palette entry: exactly one blank line separates any two visible segments, a
-// segment with no rows (Usage before its first load) leaves no gap, and with
-// every segment hidden the panel hides entirely. The layout persists per
-// machine (v1 `api.kv`, v2 `ctx.storage.store`) and is normalized on every
-// read, so a value from another release can never crash or hide a segment by
-// accident (src/deals/segments.ts).
+// segments show and in what order from the palette command `/cmd-deals`
+// (`Show, hide and reorder sidebar content`): exactly one blank line separates
+// any two visible segments, a segment with no rows (Usage before its first
+// load) leaves no gap, and with every segment hidden the panel hides
+// entirely. The layout persists per machine (v1 `api.kv`,
+// v2 `ctx.storage.store`) and is normalized on every read, so a value from
+// another release can never crash or hide a segment by accident
+// (src/deals/segments.ts).
 //
 // Two hosts, two TUI contracts (ADR-0010), one default export:
 //   v1  `{ id, tui(api) }`        — `api.slots.register({ slots: { sidebar_content } })`
@@ -808,7 +809,7 @@ interface V1Keymap {
 }
 
 /**
- * Registers the `Deals: sidebar segments` palette command on v1 through
+ * Registers the `Show, hide and reorder sidebar content` palette command on v1 through
  * `api.keymap.registerLayer` — the host's current command channel, which the
  * deprecated `api.command` shim only forwards to (with a warning). Feature
  * detected: a host without a keymap still renders the panel, just without the
@@ -821,9 +822,9 @@ export function registerV1SegmentsCommand(api: TuiPluginApi): void {
       {
         namespace: "palette",
         name: "commandcode.deals.segments",
-        title: "Deals: sidebar segments",
-        desc: "Show, hide and reorder the Command Code sidebar segments",
+        title: "Show, hide and reorder sidebar content",
         category: "Command Code",
+        slash: { name: "cmd-deals" },
         run: () => openV1SegmentsDialog(api),
       },
     ],
@@ -1046,8 +1047,13 @@ const tui: TuiPlugin = async (api) => {
 }
 
 /**
- * The v2 palette command (issue #253): `palette: true` surfaces it in the
- * host command palette; running it opens the segment settings.
+ * The v2 command entry (issue #253): `palette: true` surfaces it in the host
+ * command palette, `slash` in prompt slash completion — so the dialog is
+ * reachable as `/cmd-deals` even when the palette shortcut is captured by the
+ * terminal multiplexer around the TUI. The title carries the whole wording on
+ * purpose: the palette renders a description inline after the title and a
+ * second line of copy only truncates, so the row and the slash completion
+ * both read the same single sentence.
  */
 export function v2SegmentsCommand(
   ctx: V2TuiContext,
@@ -1055,10 +1061,10 @@ export function v2SegmentsCommand(
 ): V2TuiKeymapCommand {
   return {
     id: "commandcode.deals.segments",
-    title: "Deals: sidebar segments",
-    description: "Show, hide and reorder the Command Code sidebar segments",
+    title: "Show, hide and reorder sidebar content",
     group: "Command Code",
     palette: true,
+    slash: { name: "cmd-deals" },
     run: () => openV2SegmentsDialog(ctx, layout),
   }
 }

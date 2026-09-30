@@ -10,13 +10,17 @@ rules.
 
 ## Decisions
 
-**1. Interactive, not configuration.** The `Deals: sidebar segments` command
-palette entry opens a dialog: up/down moves the cursor, space/enter toggles
-the selected segment, shift+up/down moves it, `r` restores the default
-layout, escape closes. Changes apply live. Rejected: plugin options in
-`tui.json` (v1) and in the v2 `plugins` entry — one user preference would
-split across two host-specific config shapes, only apply after a restart,
-and sit in files the installers patch.
+**1. Interactive, not configuration.** The **Show, hide and reorder sidebar
+content** command — `/cmd-deals` in the prompt, so a terminal multiplexer
+capturing the palette shortcut cannot hide it — opens a dialog: up/down moves
+the cursor, space/enter toggles the selected segment, shift+up/down moves it,
+`r` restores the default layout, escape closes. The title carries the whole
+wording and the command carries no description on purpose: the palette renders
+a description inline after the title, where a second line of copy only
+truncates. Changes apply live. Rejected: plugin options in `tui.json` (v1) and
+in the v2 `plugins` entry — one user preference would split across two
+host-specific config shapes, only apply after a restart, and sit in files the
+installers patch.
 
 **2. Persistence is each host's own durable store.** v1 writes the layout to
 `api.kv` (`state/kv.json`, a reactive Solid store read through `kv.get`) under

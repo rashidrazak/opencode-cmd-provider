@@ -183,6 +183,8 @@ export interface V2TuiKeymapCommand {
   readonly group?: string
   readonly enabled?: boolean | (() => boolean)
   readonly palette?: true
+  /** Adds the command to prompt slash completion. */
+  readonly slash?: { readonly name: string; readonly aliases?: readonly string[] }
   readonly run: (input?: string, event?: unknown) => void | false | Promise<void>
 }
 

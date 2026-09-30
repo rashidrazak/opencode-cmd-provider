@@ -79,7 +79,7 @@ The deals catalog plus its enrichment (v1: `model.options.cmd`, `context_over_20
 _Avoid_: deals feature, pricing UI
 
 **Sidebar layout**:
-The per-machine user choice of which sidebar segments render and in which order, set from the `Deals: sidebar segments` dialog and persisted host-side (v1 `api.kv`, v2 `ctx.storage.store`) — never part of `opencode.json` or `tui.json` configuration. Normalized on every read, so a value written by another release cannot crash the panel or hide a segment. See issue #253 and ADR-0022.
+The per-machine user choice of which sidebar segments render and in which order, set from the `/cmd-deals` dialog (`Show, hide and reorder sidebar content`) and persisted host-side (v1 `api.kv`, v2 `ctx.storage.store`) — never part of `opencode.json` or `tui.json` configuration. Normalized on every read, so a value written by another release cannot crash the panel or hide a segment. See issue #253 and ADR-0022.
 _Avoid_: panel config, segment settings, deals preferences
 
 **Plan identity**:

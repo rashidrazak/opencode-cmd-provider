@@ -367,6 +367,8 @@ run([
         namespace?: string
         name?: string
         title?: string
+        desc?: string
+        slash?: { name?: string; aliases?: string[] }
         run: () => void
       }> = []
       let replaces = 0
@@ -394,6 +396,9 @@ run([
       assertEqual(commands.length, 1)
       assertEqual(commands[0]?.namespace, "palette")
       assertEqual(commands[0]?.name, "commandcode.deals.segments")
+      assertEqual(commands[0]?.title, "Show, hide and reorder sidebar content")
+      assertEqual(commands[0]?.desc, undefined, "the palette row carries no inline description")
+      assertEqual(commands[0]?.slash, { name: "cmd-deals" })
       commands[0]!.run()
       assertEqual(replaces, 1, "the run opens one dialog")
       assert(typeof render === "function")
@@ -406,7 +411,9 @@ run([
       const commands: Array<{
         id?: string
         title?: string
+        description?: string
         palette?: true
+        slash?: { name?: string; aliases?: string[] }
         run?: () => void
       }> = []
       const layers: Array<{ mode?: string; commands?: typeof commands }> = []
@@ -459,6 +466,9 @@ run([
       assertEqual(layers[0]?.mode, "global", "a base-mode layer is unreachable in the palette")
       assertEqual(commands.length, 1)
       assertEqual(commands[0]?.id, "commandcode.deals.segments")
+      assertEqual(commands[0]?.title, "Show, hide and reorder sidebar content")
+      assertEqual(commands[0]?.description, undefined, "no inline description to truncate")
+      assertEqual(commands[0]?.slash, { name: "cmd-deals" })
       assertEqual(commands[0]?.palette, true)
       commands[0]!.run?.()
       assertEqual(shows, 1, "the run opens one dialog")
