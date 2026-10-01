@@ -1,3 +1,59 @@
+## 2.2.1 - 2026-10-02
+
+**Fix — OpenCode v1 starts again with the provider registered.** v2.2.0's v1
+`config` hook advertised every model with an input-only `modalities` object,
+but OpenCode v1's schema requires `input` and `output` together once the key is
+present: a strict host rejected the whole config at `config.get` ("Missing key
+at `[...].modalities.output`") and failed the TUI at startup with "1 of 5
+requests failed: config.get"
+([#262](https://github.com/rashidrazak/opencode-cmd-provider/pull/262), fixes
+[#260](https://github.com/rashidrazak/opencode-cmd-provider/issues/260)). The
+hook now emits both lists — `output: ["text"]`, matching the v2 half and
+Command Code's text-only catalog — and pins the v1 entry's modality shape to
+the v1 SDK type, so a dropped list is a typecheck failure instead of a user's
+startup. The rest of the release lands the catalog refreshed on 2026-10-01 to
+`command-code@1.73.2`: GLM-5.3 Flash's allowance rises to goat $60 / pro $70,
+and `stealth/pixel-canary` ships core-only while the docs carry no RSC records
+for it.
+
+### Fixes
+
+- **The v1 config hook carries both modality lists**
+  ([#262](https://github.com/rashidrazak/opencode-cmd-provider/pull/262),
+  closes
+  [#260](https://github.com/rashidrazak/opencode-cmd-provider/issues/260)):
+  every v1 `config` entry now carries `input` and `output: ["text"]`, the
+  shape the v1 schema requires and the v2 half already emits; the entry's
+  modality type is pinned to the v1 SDK type, so a missing list fails
+  `npm run typecheck`, not a user's TUI startup.
+
+### Model catalog
+
+- **FACTS_PACKAGE_VERSION**: `1.73.0` → `1.73.2` — the refresh reads the newer
+  CLI bundle's `models.md`; membership, efforts, costs and modalities rows are
+  unchanged.
+- **FACTS_LAST_REFRESHED**: `2026-09-30` → `2026-10-01`
+
+### Reasoning classification
+
+- **CLASSIFICATION_LAST_REFRESHED**: `2026-09-30` → `2026-10-01` — date-only;
+  `stealth/pixel-canary` stays reasoning via its `models.md` efforts row.
+
+### Deals catalog
+
+- **DEAL_LAST_REFRESHED**: `2026-09-30` → `2026-10-01`
+- **GLM-5.3 Flash's allowance rises**: goat 40 → 60, pro 50 → 70.
+- **`stealth/pixel-canary` ships core-only**: the docs no longer carry its RSC
+  records while its `models.md` row (the membership authority) remains, so the
+  model keeps shipping with its Deals row replaced by a deals-pending note. The
+  refresh's fixture-coverage tests follow the issue #132 pending inversion — an
+  RSC-uncovered Snapshot model is a pending report, never a gate.
+
+| Model                  | Change    | Before            | After             |
+| ---------------------- | --------- | ----------------- | ----------------- |
+| `stealth/pixel-canary` | removed   | opensource (free) | —                 |
+| `z-ai/glm-5.3-flash`   | allowance | goat: 40, pro: 50 | goat: 60, pro: 70 |
+
 ## 2.2.0 - 2026-10-01
 
 **Highlight — the sidebar becomes a live Rates & usage panel.** The panel that
