@@ -519,11 +519,14 @@ run([
     },
   ],
   [
-    "missingDealsModelsFromRsc reports zero missing when the merged RSC source is complete",
+    "missingDealsModelsFromRsc reports exactly the RSC-uncovered snapshot models (pending, issue #132)",
     () => {
-      // When the full RSC path runs (all three RSC sources present),
-      // the merged bySnapshotId Map must cover every snapshot model.
-      // The gate must therefore report zero missing.
+      // Issue #132 inverts the old "fixtures cover every snapshot" gate: a
+      // snapshot model with no RSC record is a PENDING report (it ships
+      // core-only), never a red suite. The merged fixture source still
+      // covers the bulk of membership; `missing` must name precisely the
+      // rest, and the emit must project every merged record without a
+      // silent drop.
       const out = emitDealsModuleFromRsc({
         pricingLimitsRsc: RSC_PRICING,
         goatRsc: RSC_GOAT,
@@ -531,10 +534,7 @@ run([
         lastRefreshed: "2026-08-28",
         packageVersion: "rsc",
       })
-      // Reconstruct the bySnapshotId Map the emit function would have
-      // built, by extracting the ids from the emitted module. (The
-      // gate runs BEFORE emit, so the gate's contract is the same
-      // population the emit consumes.)
+      // Reconstruct the emitted ids (the population the gate runs against).
       const ids = new Set(
         out
           .split("\n")
@@ -542,8 +542,21 @@ run([
           .filter(Boolean)
           .map((m2) => m2[1]),
       )
+      const { bySnapshotId } = buildRscInputs({
+        pricingLimitsRsc: RSC_PRICING,
+        goatRsc: RSC_GOAT,
+        proRsc: RSC_PRO,
+      })
+      for (const id of bySnapshotId.keys()) {
+        assert(ids.has(id), `merged RSC record ${id} must reach the emitted module`)
+      }
       const { missing, covered } = missingDealsModelsFromRsc(ids)
-      assertEqual(missing, [], `full RSC must cover every snapshot, missing: ${missing.join(", ")}`)
+      const { byId } = snapshotIndex()
+      assertEqual(
+        missing,
+        [...byId.keys()].filter((id) => !bySnapshotId.has(id)),
+        "missing must be exactly the RSC-uncovered snapshot models (pending)",
+      )
       assert(covered > 50, `covered must be > 50, got ${covered}`)
     },
   ],

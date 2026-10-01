@@ -112,7 +112,6 @@ export const MODEL_DEALS: Readonly<Record<string, ModelDeals>> = {
   "Qwen/Qwen3.8-Max-0902": { tier: "opensource", benchmark: {"intelligence":45.4}, free: false, allowance: {"goat":20,"pro":30} },
   "Qwen/Qwen3.8-Omni-Flash": { tier: "opensource", free: false, allowance: {"goat":20,"pro":30} },
   "sakana/fugu-ultra": { tier: "premium", free: false, allowance: {"goat":20,"pro":20} },
-  "stealth/pixel-canary": { tier: "opensource", free: true },
   "stealth/space-bunny-alpha": { tier: "opensource", free: true },
   "stepfun/Step-3.5-Flash": { tier: "opensource", benchmark: {"intelligence":17}, free: false, allowance: {"goat":20,"pro":30} },
   "stepfun/Step-3.7-Flash": { tier: "opensource", benchmark: {"intelligence":19.5}, free: false, allowance: {"goat":20,"pro":30} },
@@ -129,7 +128,7 @@ export const MODEL_DEALS: Readonly<Record<string, ModelDeals>> = {
   "xiaomi/mimo-v2.6-flash": { tier: "opensource", benchmark: {"intelligence":37.9}, free: false, allowance: {"goat":20,"pro":30} },
   "xiaomi/mimo-v2.6-pro": { tier: "opensource", benchmark: {"intelligence":46.3}, free: false, allowance: {"goat":20,"pro":30} },
   "xiaomi/mimo-v2.6-pro-ultraspeed": { tier: "opensource", free: false, allowance: {"goat":10,"pro":20} },
-  "z-ai/glm-5.3-flash": { tier: "opensource", benchmark: {"intelligence":41.8}, free: false, allowance: {"goat":40,"pro":50} },
+  "z-ai/glm-5.3-flash": { tier: "opensource", benchmark: {"intelligence":41.8}, free: false, allowance: {"goat":60,"pro":70} },
   "z-ai/glm-5.3-flashx": { tier: "opensource", free: false, allowance: {"goat":20,"pro":30} },
   "zai-org/GLM-5": { tier: "opensource", benchmark: {"intelligence":27.9}, free: false, allowance: {"goat":20,"pro":30} },
   "zai-org/GLM-5.1": { tier: "opensource", benchmark: {"intelligence":26.1}, free: false, allowance: {"goat":20,"pro":30} },
@@ -159,5 +158,5 @@ export const PLAN_CATALOG: Readonly<Record<PlanId, PlanInfo>> = {
 }
 
 export const DEAL_SOURCE_URL = "https://commandcode.ai/docs/resources/pricing-limits"
-export const DEAL_LAST_REFRESHED = "2026-09-30"
+export const DEAL_LAST_REFRESHED = "2026-10-01"
 export const DEAL_PACKAGE_VERSION = "docs"
