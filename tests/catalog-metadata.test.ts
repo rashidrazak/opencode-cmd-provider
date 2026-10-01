@@ -52,11 +52,17 @@ run([
     () => {
       for (const model of MODEL_SNAPSHOT) {
         const costs = MODEL_COSTS[model.id]
+        assert(costs, `missing cost for ${model.id}`)
         if (FREE_MODELS.has(model.id)) {
-          assert(costs && costs.input === 0 && costs.output === 0, model.id)
+          assert(costs.input === 0 && costs.output === 0, model.id)
           continue
         }
-        assert(costs, `missing cost for ${model.id}`)
+        // A snapshot model with no deals record ships core-only (issue
+        // #132): the docs carry no free claim to contradict, and the ship
+        // bar already rejects a missing cost row ("missing never reads as
+        // free"), so an all-zero entry here is models.md marking the model
+        // free — the stealth-preview rows — not a zero-filled fallback.
+        if (!(model.id in MODEL_DEALS)) continue
         assert(costs.input > 0 || costs.output > 0, `zero-cost entry for ${model.id}`)
       }
     },

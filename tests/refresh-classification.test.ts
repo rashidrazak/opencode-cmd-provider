@@ -17,11 +17,22 @@ import { snapshotIndex } from "../scripts/snapshot-index.mjs"
 import {
   buildClassificationModule,
   emitClassificationModuleFromRsc,
+  snapshotEvidenceFromText,
 } from "../scripts/refresh-classification.mjs"
 import { assert, assertEqual, run } from "./harness.js"
 
 const RSC_GOAT = readFileSync(new URL("./fixtures/rsc-goat.txt", import.meta.url), "utf-8")
 const RSC_PRO = readFileSync(new URL("./fixtures/rsc-pro.txt", import.meta.url), "utf-8")
+const SNAPSHOT_TS = readFileSync(new URL("../src/catalog/snapshot.ts", import.meta.url), "utf-8")
+const MODELS_PAGE_HTML = readFileSync(
+  new URL("./fixtures/models-page.html", import.meta.url),
+  "utf-8",
+)
+// The CLI's own efforts-evidence read (the models.md channel, #132). The
+// helper is pure, so any expected emit must pass the same evidence the CLI
+// loads — a model absent from the RSC fixtures (upstream dropped its record)
+// still classifies via its snapshot efforts entry.
+const EFFORTS_BY_ID = snapshotEvidenceFromText(SNAPSHOT_TS).effortsById
 
 const TODAY = new Date().toISOString().split("T")[0]
 
@@ -86,10 +97,18 @@ run([
     async () => {
       const dir = await mkdtemp(join(tmpdir(), "cc-refresh-classification-"))
       const out = join(dir, "classification.ts")
+      // Probe ids derived from the generated catalogs (never literal
+      // upstream pins; the pricing-lint gate): one model without models.md
+      // efforts (a synthetic false sticks) and one with efforts (any-true
+      // must override the synthetic false).
+      const { byId: snapshotById } = snapshotIndex()
+      const noEffortsId = [...snapshotById.keys()].find((id) => !(EFFORTS_BY_ID[id]?.length ?? 0))
+      const effortsId = [...snapshotById.keys()].find((id) => (EFFORTS_BY_ID[id]?.length ?? 0) > 0)
+      assert(noEffortsId !== undefined, "the snapshot must carry an efforts-less model")
+      assert(effortsId !== undefined, "the snapshot must carry an efforts model")
       const reasoning = new Map([
-        ["claude-sonnet-5", true],
-        ["moonshotai/Kimi-K2.6", false],
-        ["tencent/hy3-paid", true],
+        [noEffortsId, false],
+        [effortsId, false],
       ])
       const payload = fullCoveragePayload(reasoning)
       const mock = await startMockCc({ rscGoat: payload, rscPro: payload })
@@ -98,6 +117,9 @@ run([
           ...process.env,
           COMMANDCODE_RSC_GOAT_URL: `${mock.url}/docs/plans/goat`,
           COMMANDCODE_RSC_PRO_URL: `${mock.url}/docs/plans/pro`,
+          // Page evidence: point at the mock (404) so the run never reaches
+          // the live models page — the synthetic payload alone decides.
+          COMMANDCODE_MODELS_PAGE_URL: `${mock.url}/models-page.html`,
         })
         assertEqual(result.status, 0, result.stderr || result.stdout)
         // Page subset: the per-plan pages only — the pricing-limits page
@@ -112,28 +134,16 @@ run([
         )
         assert(contents.includes("Do not edit"), "missing do-not-edit marker")
         const mod = await import(out)
-        // Values are asserted via snapshot-derived ids, not pinned literals
-        // (pricing-lint gate: tests/no-upstream-value-pins.test.ts). The
-        // generator consumed the real RSC fixtures, so a snapshot model
-        // present in the fixture RSC records classifies true, and one
-        // absent from them classifies false — whichever models those are
-        // after any upstream churn.
-        const { byId: fixtureById } = snapshotIndex()
-        const { extractPlanPageRsc } = await import("../scripts/parse-rsc.mjs")
-        const fixtureIds = new Set([
-          ...extractPlanPageRsc(RSC_GOAT).keys(),
-          ...extractPlanPageRsc(RSC_PRO).keys(),
-        ])
-        const coveredId = [...fixtureById.keys()].find((id) => fixtureIds.has(id))
-        const uncoveredId = [...fixtureById.keys()].find((id) => !fixtureIds.has(id))
-        assert(coveredId, "at least one snapshot model must appear in the RSC fixtures")
-        assertEqual(mod.MODEL_REASONING_CAPABILITY[coveredId], true, coveredId)
-        if (uncoveredId !== undefined) {
-          assertEqual(mod.MODEL_REASONING_CAPABILITY[uncoveredId], false, uncoveredId)
-        }
+        // Any-true-wins: the synthetic false sticks only for the efforts-less
+        // model (page evidence is the mock's 404); the model with models.md
+        // efforts still classifies true. The ids above are derived from the
+        // generated snapshot, never pinned literals.
+        assertEqual(mod.MODEL_REASONING_CAPABILITY[noEffortsId], false, noEffortsId)
+        assertEqual(mod.MODEL_REASONING_CAPABILITY[effortsId], true, `${effortsId} (efforts)`)
         assertEqual(mod.CLASSIFICATION_LAST_REFRESHED, TODAY)
-        // Every snapshot model got an entry — the coverage gate held.
-        for (const id of fixtureById.keys()) {
+        // Every snapshot model got an entry — the synthetic payload covers
+        // the whole membership set.
+        for (const id of snapshotById.keys()) {
           assertEqual(typeof mod.MODEL_REASONING_CAPABILITY[id], "boolean", id)
         }
       } finally {
@@ -260,12 +270,19 @@ run([
           ...process.env,
           COMMANDCODE_RSC_GOAT_URL: `${mock.url}/docs/plans/goat`,
           COMMANDCODE_RSC_PRO_URL: `${mock.url}/docs/plans/pro`,
+          // Page evidence: mock 404 → skipped with a note, matching the
+          // expected emit below (which passes no modelsPageHtml).
+          COMMANDCODE_MODELS_PAGE_URL: `${mock.url}/models-page.html`,
         })
         assertEqual(result.status, 0, result.stderr || result.stdout)
         const contents = await readFile(out, "utf-8")
+        // The CLI also loads the snapshot efforts channel; the expected
+        // emit must pass the same evidence or a fixture-uncovered model
+        // (upstream dropped its RSC record) would diverge.
         const expected = emitClassificationModuleFromRsc({
           goatRsc: RSC_GOAT,
           proRsc: RSC_PRO,
+          effortsById: EFFORTS_BY_ID,
           lastRefreshed: TODAY,
         }).module
         assertEqual(
@@ -325,9 +342,14 @@ run([
       )
       assertEqual(result.status, 0, result.stderr || result.stdout)
       const contents = await readFile(out, "utf-8")
+      // The fixtures path loads the snapshot efforts channel and the
+      // committed models page fixture; the expected emit passes the same
+      // evidence (a fixture-uncovered model still classifies via efforts).
       const expected = emitClassificationModuleFromRsc({
         goatRsc: RSC_GOAT,
         proRsc: RSC_PRO,
+        effortsById: EFFORTS_BY_ID,
+        modelsPageHtml: MODELS_PAGE_HTML,
         lastRefreshed: TODAY,
       }).module
       assertEqual(contents, expected, "--fixtures must match the fixture-based emit")
