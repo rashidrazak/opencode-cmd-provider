@@ -98,7 +98,6 @@ export const MODEL_REASONING_CAPABILITY: Readonly<Record<string, boolean>> = {
   "Qwen/Qwen3.8-Max-0902": true,
   "Qwen/Qwen3.8-Omni-Flash": true,
   "sakana/fugu-ultra": true,
-  "stealth/pixel-canary": true,
   "stealth/space-bunny-alpha": true,
   "stepfun/Step-3.5-Flash": true,
   "stepfun/Step-3.7-Flash": true,

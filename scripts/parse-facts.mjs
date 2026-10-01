@@ -10,6 +10,10 @@
 // Column format (verified against command-code@1.49.1):
 //   | `id` | Name | Context | Efforts | $in/$out · cache $read (write $write) | Min plan | Best for |
 // Efforts: comma-separated levels or "—" (model decides its own depth).
+// "off" is a thinking-ladder level, never an advertised reasoning effort
+// (ADR-0019: it means "do not request effort" and is never sent), so it is
+// normalized out of the parsed vocabulary — upstream began listing it in the
+// cell with command-code 1.73.4.
 // Pricing: "$0.66/$1.98 · cache $0.022" with optional "(write $2.5)".
 //
 // Cell-level signals (issue #130):
@@ -88,10 +92,22 @@ export function parsePriceCell(cell) {
 
 const EFFORTS_MISSING = new Set(["—", "-", ""])
 
+// The thinking-ladder "off" is not a reasoning effort (ADR-0019): the
+// provider maps it to "send nothing", never to a request value, so it must
+// not enter the advertised vocabulary — the generated MODEL_EFFORTS drives
+// the variant cycle and the thinking metadata, both of which pin the
+// no-"off" contract. A cell carrying only "off" has no advertised levels
+// and resolves to undefined.
+const EFFORTS_NON_VOCABULARY = new Set(["off"])
+
 function parseEffortsCell(cell) {
   const trimmed = String(cell).trim()
   if (EFFORTS_MISSING.has(trimmed)) return undefined
-  return trimmed.split(",").map((level) => level.trim())
+  const levels = trimmed
+    .split(",")
+    .map((level) => level.trim())
+    .filter((level) => !EFFORTS_NON_VOCABULARY.has(level))
+  return levels.length > 0 ? levels : undefined
 }
 
 /**

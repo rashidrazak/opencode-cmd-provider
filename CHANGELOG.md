@@ -12,9 +12,10 @@ hook now emits both lists — `output: ["text"]`, matching the v2 half and
 Command Code's text-only catalog — and pins the v1 entry's modality shape to
 the v1 SDK type, so a dropped list is a typecheck failure instead of a user's
 startup. The rest of the release lands the catalog refreshed on 2026-10-01 to
-`command-code@1.73.2`: GLM-5.3 Flash's allowance rises to goat $60 / pro $70,
-and `stealth/pixel-canary` ships core-only while the docs carry no RSC records
-for it.
+`command-code@1.73.4`: `stealth/pixel-canary`'s package row was retired (the
+Snapshot drops it, and its Deals row with it), `stealth/space-bunny-alpha`
+gains the `max` effort, and GLM-5.3 Flash's allowance rises to goat $60 /
+pro $70.
 
 ### Fixes
 
@@ -29,25 +30,36 @@ for it.
 
 ### Model catalog
 
-- **FACTS_PACKAGE_VERSION**: `1.73.0` → `1.73.2` — the refresh reads the newer
-  CLI bundle's `models.md`; membership, efforts, costs and modalities rows are
-  unchanged.
+- **FACTS_PACKAGE_VERSION**: `1.73.0` → `1.73.4` — the refresh reads the newer
+  CLI bundle's `models.md`.
 - **FACTS_LAST_REFRESHED**: `2026-09-30` → `2026-10-01`
+- **The upstream `off` thinking level is normalized out of the efforts
+  vocabulary** (ADR-0019): `off` means "do not request effort" and is never an
+  advertised variant, so the parser drops it instead of regenerating the
+  DeepSeek families' effort lists — the variant cycle and thinking metadata are
+  unchanged.
+
+| Model                       | Change  | Before                    | After                  |
+| --------------------------- | ------- | ------------------------- | ---------------------- |
+| `stealth/pixel-canary`      | removed | Pixel Canary · 262000 ctx | —                      |
+| `stealth/space-bunny-alpha` | efforts | low, medium, high         | low, medium, high, max |
 
 ### Reasoning classification
 
-- **CLASSIFICATION_LAST_REFRESHED**: `2026-09-30` → `2026-10-01` — date-only;
-  `stealth/pixel-canary` stays reasoning via its `models.md` efforts row.
+- **CLASSIFICATION_LAST_REFRESHED**: `2026-09-30` → `2026-10-01`
+
+| Model                       | Change         | Before                             | After                                  |
+| --------------------------- | -------------- | ---------------------------------- | -------------------------------------- |
+| `stealth/pixel-canary`      | retired        | efforts model (low, medium, xhigh) | —                                      |
+| `stealth/space-bunny-alpha` | classification | efforts model (low, medium, high)  | efforts model (low, medium, high, max) |
 
 ### Deals catalog
 
 - **DEAL_LAST_REFRESHED**: `2026-09-30` → `2026-10-01`
 - **GLM-5.3 Flash's allowance rises**: goat 40 → 60, pro 50 → 70.
-- **`stealth/pixel-canary` ships core-only**: the docs no longer carry its RSC
-  records while its `models.md` row (the membership authority) remains, so the
-  model keeps shipping with its Deals row replaced by a deals-pending note. The
-  refresh's fixture-coverage tests follow the issue #132 pending inversion — an
-  RSC-uncovered Snapshot model is a pending report, never a gate.
+- **`stealth/pixel-canary` leaves the Snapshot**: its `models.md` row (the
+  membership authority) was retired, so the model and its Deals row drop
+  together.
 
 | Model                  | Change    | Before            | After             |
 | ---------------------- | --------- | ----------------- | ----------------- |
