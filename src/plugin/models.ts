@@ -8,6 +8,7 @@
 // Both derive the same Display name, limits, reasoning variants, and modality
 // facts from the Snapshot row, so a model reads identically in either host.
 import type { Config, ProviderConfig } from "@opencode-ai/sdk/v2"
+import type { ProviderConfig as V1ProviderConfig } from "@opencode-ai/sdk"
 import type { CatalogModel } from "../catalog/snapshot.js"
 import type { V2ModelInfo } from "./v2-types.js"
 import { isFreeModelCost } from "../provider/pricing.js"
@@ -27,6 +28,17 @@ const PENDING_CONTEXT_LENGTH = 128_000
 
 type ConfigModel = NonNullable<NonNullable<ProviderConfig["models"]>[string]>
 type ConfigVariants = NonNullable<ConfigModel["variants"]>
+
+// The v1 `config` hook's entry is typed against the v2 SDK (for `variants`,
+// which the v1 generated types lack), but the v1 host *decodes* the config
+// with its own schema — and there `modalities` requires BOTH lists whenever
+// the key is present, while v2 makes them optional. This type pins the v1
+// entry's modality shape to the v1 schema, so a missing `output` is a
+// typecheck failure instead of a user's TUI startup: v2.2.0 shipped an
+// `input`-only `modalities` and OpenCode v1's `config.get` refused the whole
+// config ("Missing key at [...].modalities.output").
+type V1ConfigModel = NonNullable<NonNullable<V1ProviderConfig["models"]>[string]>
+type V1Modalities = NonNullable<V1ConfigModel["modalities"]>
 
 /**
  * Resolves the auto-registration display-name prefix from the user-declared
@@ -150,9 +162,7 @@ function configModelFor(model: CatalogModel, prefix = DEFAULT_DISPLAY_PREFIX): C
     // handles text + image content parts — claiming attachment support would
     // promise file uploads the plugin cannot deliver.
     tool_call: true,
-    modalities: {
-      input: [...inputModalitiesForModel(model.id)],
-    },
+    modalities: v1ModalitiesFor(model.id),
     ...(rowCost !== null
       ? {
           cost: {
@@ -187,6 +197,17 @@ function displayNameFor(model: CatalogModel, prefix: string): string {
 function limitsFor(model: CatalogModel): { context: number; output: number } {
   const contextLength = model.contextLength ?? PENDING_CONTEXT_LENGTH
   return { context: contextLength, output: Math.min(contextLength, DEFAULT_MAX_OUTPUT_TOKENS) }
+}
+
+/**
+ * v1 modality lists for a Snapshot row — both lists, always: the v1 config
+ * schema requires `input` and `output` together once `modalities` is present
+ * (see V1Modalities), and an `input`-only entry fails the host's config
+ * decode. `output` stays text-only: Command Code's published catalog exposes
+ * no non-text output, mirroring the v2 half's `capabilities.output`.
+ */
+function v1ModalitiesFor(modelId: string): V1Modalities {
+  return { input: [...inputModalitiesForModel(modelId)], output: ["text"] }
 }
 
 /**
