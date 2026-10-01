@@ -37,6 +37,12 @@ const PACKAGE_MD_FREE =
   "|---|---|---|---|---|---|---|\n" +
   "| `poolside/laguna-s-2.1-free` | Laguna S 2.1 | 256K | — | $0/$0 · cache $0 | Go and above | best |\n"
 
+const PACKAGE_MD_WITH_OFF =
+  "## Open Source\n\n" +
+  "| Id (use EXACTLY this) | Name | Context | Efforts | $/1M in/out · cache read | Min plan | Best for |\n" +
+  "|---|---|---|---|---|---|---|\n" +
+  "| `claude-sonnet-5` | Claude Sonnet 5 | 1M | off, high, max | $2/$10 · cache $0.2 (write $2.5) | Pro and above | best |\n"
+
 const CLI_BUNDLE =
   'const models={SONNET:{name:"Claude Sonnet 5",id:"claude-sonnet-5",inputModalities:["text","image"],contextWindow:2e5},' +
   'FLASH:{name:"DeepSeek V4 Flash (latest)",id:"deepseek/deepseek-v4-flash",inputModalities:["text"],contextWindow:1e6},' +
@@ -172,6 +178,37 @@ run([
         assertEqual(astra.contextLength, 1050000)
         assertEqual(astra.cost, { input: 10, output: 50, cacheRead: 1, cacheWrite: 12.5 })
         assertEqual(astra.efforts, ["low", "medium", "high", "xhigh", "max"])
+      } finally {
+        await mock.close()
+        await rm(dir, { recursive: true, force: true })
+      }
+    },
+  ],
+
+  [
+    'an upstream "off" level never reaches the generated efforts tables (ADR-0019)',
+    async () => {
+      const dir = await mkdtemp(join(tmpdir(), "cc-facts-off-"))
+      const out = join(dir, "snapshot.ts")
+      const factsOut = join(dir, "facts.ts")
+      const mock = await startMockCc({
+        models: API_MODELS,
+        registry: { "dist-tags": { latest: "1.49.1" } },
+        factsMd: PACKAGE_MD_WITH_OFF,
+        modalitiesBundle: CLI_BUNDLE,
+      })
+      try {
+        const result = await runScript(
+          ["scripts/refresh-snapshot.mjs", "--out", out, "--facts-out", factsOut],
+          scriptEnv(mock),
+        )
+        assert(result.status === 0, result.stderr || result.stdout)
+        const mod = await import(out)
+        const sonnet = mod.MODEL_SNAPSHOT.find((m) => m.id === "claude-sonnet-5")
+        assert(sonnet, "claude-sonnet-5 must ship")
+        assertEqual(sonnet.efforts, ["high", "max"])
+        const factsMod = await import(factsOut)
+        assertEqual(factsMod.MODEL_EFFORTS, { "claude-sonnet-5": ["high", "max"] })
       } finally {
         await mock.close()
         await rm(dir, { recursive: true, force: true })

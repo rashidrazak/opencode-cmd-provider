@@ -122,6 +122,20 @@ run([
   ],
 
   [
+    'the thinking-ladder "off" is normalized out of the efforts vocabulary (ADR-0019)',
+    () => {
+      const { rows } = parseCatalogMarkdown(
+        [
+          "| `a/model` | A Model | 1M | off, low, high | $1/$2 · cache $0.1 | Go and above | best |",
+          "| `b/model` | B Model | 1M | off | $1/$2 · cache $0.1 | Go and above | best |",
+        ].join("\n"),
+      )
+      assertEqual(rows[0].efforts, ["low", "high"])
+      assertEqual(rows[1].efforts, undefined)
+    },
+  ],
+
+  [
     "coarse Context tokens convert deterministically through the pinned decimal table",
     () => {
       // Table pins (issue #129 decision): K × 1000, M × 1000000;
