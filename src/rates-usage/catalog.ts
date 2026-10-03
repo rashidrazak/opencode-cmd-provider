@@ -88,9 +88,9 @@ export const MODEL_DEALS: Readonly<Record<string, ModelDeals>> = {
   "meituan/LongCat-2.0": { tier: "opensource", benchmark: {"intelligence":19.1}, free: false, allowance: {"goat":50,"pro":60} },
   "meta/muse-spark-1.1": { tier: "premium", benchmark: {"intelligence":33.7}, free: false, allowance: {"goat":20,"pro":20} },
   "meta/muse-spark-1.2": { tier: "opensource", benchmark: {"intelligence":39.6}, free: false, allowance: {"goat":20,"pro":30} },
-  "meta/muse-spark-1.2-contributor": { tier: "opensource", benchmark: {"intelligence":39.6}, free: false, allowance: {"goat":20,"pro":30} },
+  "meta/muse-spark-1.2-contributor": { tier: "opensource", free: false, allowance: {"goat":20,"pro":30} },
   "meta/muse-spark-1.3": { tier: "premium", benchmark: {"intelligence":48.1}, free: false, allowance: {"goat":20,"pro":30} },
-  "meta/muse-spark-1.3-contributor": { tier: "premium", benchmark: {"intelligence":48.1}, free: false, allowance: {"goat":20,"pro":30} },
+  "meta/muse-spark-1.3-contributor": { tier: "premium", free: false, allowance: {"goat":20,"pro":30} },
   "MiniMaxAI/MiniMax-M2.5": { tier: "opensource", benchmark: {"intelligence":22.8}, free: false, allowance: {"goat":20,"pro":30} },
   "MiniMaxAI/MiniMax-M2.7": { tier: "opensource", benchmark: {"intelligence":22.8}, free: false, allowance: {"goat":20,"pro":30} },
   "MiniMaxAI/MiniMax-M3": { tier: "opensource", discount: {"pct":50}, was: {"input":0.6,"output":2.4,"cacheRead":0.12}, now: {"input":0.3,"output":1.2,"cacheRead":0.06}, benchmark: {"intelligence":29.2}, free: false, allowance: {"goat":47,"pro":57} },
@@ -158,5 +158,5 @@ export const PLAN_CATALOG: Readonly<Record<PlanId, PlanInfo>> = {
 }
 
 export const DEAL_SOURCE_URL = "https://commandcode.ai/docs/resources/pricing-limits"
-export const DEAL_LAST_REFRESHED = "2026-10-01"
+export const DEAL_LAST_REFRESHED = "2026-10-03"
 export const DEAL_PACKAGE_VERSION = "docs"
