@@ -141,7 +141,7 @@ export interface UsageRpcOutcome {
 export interface UsageRpcRegistrationOptions {
   fetchOptions?: Omit<
     FetchUsageOptions,
-    "apiKey" | "scope" | "onScope" | "onPartial" | "previous" | "signal" | "now"
+    "apiKey" | "scope" | "onScope" | "onPartial" | "previous" | "signal"
   >
 }
 
