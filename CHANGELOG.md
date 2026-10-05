@@ -1,3 +1,80 @@
+## 2.2.2 - 2026-10-06
+
+**Fix — OpenCode can classify provider failures again.** Every error the
+transport raises from a non-OK response now surfaces as an AI SDK
+`APICallError` carrying the status, the URL, the headers, the full redacted
+`responseBody` and the ladder's own `isRetryable` verdict
+([#274](https://github.com/rashidrazak/opencode-cmd-provider/pull/274),
+closes
+[#273](https://github.com/rashidrazak/opencode-cmd-provider/issues/273)).
+OpenCode v2 classifies a provider failure from that shape, so fatal
+400/401/403/422 responses are no longer replayed (~10 attempts / ~84 s), and
+a context-overflow body reaches v1's compaction recovery through the same
+fields. The release also lands the catalog refreshed on 2026-10-05 to
+`command-code@1.74.1` — no model membership or data change, two Deals
+benchmark rows dropped — plus the npm minor/patch dependency group.
+
+### Fixes
+
+- **HTTP failures surface as AI SDK `APICallError`s**
+  ([#274](https://github.com/rashidrazak/opencode-cmd-provider/pull/274),
+  closes
+  [#273](https://github.com/rashidrazak/opencode-cmd-provider/issues/273)):
+  OpenCode v2's failure classifier reads `statusCode` / `responseBody` /
+  `isRetryable` only off an `APICallError`; every other shape reaches it as
+  an unknown failure it treats as retryable, so a fatal 400/401/403/422 was
+  replayed up to ~10 times before the session showed anything, and a
+  context-overflow body could never trigger compaction. Every error raised
+  from a non-OK response — the classified HTTP failure, the version-gate 403
+  and the plan-gate flip signal — now surfaces as an `APICallError` that
+  carries the status, URL, headers, the full redacted body and the ladder's
+  own replay verdict; the internal `failure` classification and the ladder's
+  decisions are unchanged. Non-HTTP failures (network, timeout, truncation,
+  stream events, pause/resume) stay plain, so v1 keeps leaving truncations
+  alone (ADR-0023).
+
+### Documentation
+
+- **ADR-0023** records the host-classifier contract — which errors carry the
+  `APICallError` shape, why the body is carried in full, and v1's
+  retryable-text cost; `docs/TECHNICAL.md` gains the corresponding note.
+
+### Dependencies
+
+- The npm minor/patch group
+  ([#268](https://github.com/rashidrazak/opencode-cmd-provider/pull/268)):
+  `@ai-sdk/provider` 4.0.17 → 4.0.20, `@opencode-ai/plugin` 1.18.32 →
+  1.18.33, `@secretlint/secretlint-rule-pattern` 13.0.5 → 13.0.6,
+  `@types/node` 26.6.2 → 26.6.3, `prettier` 3.9.8 → 3.9.9, `secretlint`
+  13.0.5 → 13.0.6.
+
+### Model catalog
+
+- **FACTS_PACKAGE_VERSION**: `1.73.4` → `1.74.1` — the refresh reads the newer
+  CLI bundle's `models.md`.
+- **FACTS_LAST_REFRESHED**: `2026-10-01` → `2026-10-05`
+- No membership or data change: the Snapshot stays at 85 models, and the
+  efforts, costs and modalities rows are byte-identical to `1.73.4` — only
+  the version/date header moved. The listing-API divergence note is clean.
+
+### Reasoning classification
+
+- **CLASSIFICATION_LAST_REFRESHED**: `2026-10-01` → `2026-10-05` — date-only;
+  every entry is unchanged.
+
+### Deals catalog
+
+- **DEAL_LAST_REFRESHED**: `2026-10-01` → `2026-10-05`
+- **The Muse Spark contributor rows lose their benchmark**: upstream dropped
+  their `intelligenceIndex`, so `meta/muse-spark-1.2-contributor` and
+  `meta/muse-spark-1.3-contributor` ship without a benchmark row; tiers and
+  allowances are unchanged.
+
+| Model                             | Change    | Before            | After |
+| --------------------------------- | --------- | ----------------- | ----- |
+| `meta/muse-spark-1.2-contributor` | benchmark | intelligence 39.6 | —     |
+| `meta/muse-spark-1.3-contributor` | benchmark | intelligence 48.1 | —     |
+
 ## 2.2.1 - 2026-10-02
 
 **Fix — OpenCode v1 starts again with the provider registered.** v2.2.0's v1
