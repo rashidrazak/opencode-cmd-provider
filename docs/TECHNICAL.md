@@ -580,6 +580,15 @@ The backoff is `min(10 s, max(1 s, 500 ms·2^attempt))`, no jitter, bounded by
 than being thrown into a generic retry. Request headers are rebuilt for every
 attempt, so a credential rotated mid-ladder is picked up by the next request.
 
+Every failure raised from a non-OK response is surfaced as an AI SDK
+`APICallError` (`HttpTransportFailureError`, ADR-0023): `statusCode`,
+`responseBody` (the full redacted body), `responseHeaders`, `url` and
+`isRetryable` are what the host classifiers read, so a fatal 4xx is not
+retried as an unknown shape on v2 and a context-overflow body can trigger
+compaction. The `failure` the ladder classified rides on the same instance, so
+the host shape changes nothing here. Failures that are not an HTTP response
+(network, timeout, truncation, stream events, pause/resume) stay plain errors.
+
 A replay only ever happens while the consumer has seen nothing _from the request
 being replayed_: any part it emitted other than `finish` — a bare `text-start` or
 `tool-input-start` included — rules it out, because part lifecycles cannot be
@@ -712,3 +721,4 @@ Both e2e scripts are excluded from `npm test`.
 | [0020](adr/0020-tui-host-credential-for-usage.md)              | The TUI host resolves its usage credential (v1 in-process, v2 via the plugin-RPC bridge)           |
 | [0021](adr/0021-usage-parallel-wave-progressive-merge.md)      | The usage refresh is one parallel wave, publishes progressively, and merges the last-good snapshot |
 | [0022](adr/0022-sidebar-segment-layout.md)                     | The sidebar segment layout is user state, persisted by each TUI host                               |
+| [0023](adr/0023-http-failures-surface-as-apicallerror.md)      | HTTP failures surface as AI SDK `APICallError`s (status, redacted body, retryable)                 |

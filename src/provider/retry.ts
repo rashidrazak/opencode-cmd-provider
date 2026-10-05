@@ -11,6 +11,8 @@
 // own mid-stream error event, the pause-turn bound, and a paused turn the
 // continuation cannot represent (issues #172, #188).
 
+import { APICallError } from "@ai-sdk/provider"
+
 /**
  * Statuses upstream's `isRetryableStatus` treats as transient: 408, 429 and
  * 5xx. Deliberately not "any status we can reach" — 400/401/403/404/422 are
@@ -308,6 +310,19 @@ export function abortError(message = "The operation was aborted"): DOMException 
   return new DOMException(message, "AbortError")
 }
 
+/** Errors the transport raises itself, which `fail` surfaces without re-wrapping
+ * (issue #170). The marker carries the invariant: the message is the transport's
+ * own, already redacted where it is built, and the metadata an AI SDK v3 `error`
+ * part has room for — `name`, `status` — rides on the instance. */
+export interface TransportError extends Error {
+  readonly transportError: true
+}
+
+/** A transport-raised error carrying the failure the ladder classifies. */
+export interface ClassifiedTransportError extends TransportError {
+  readonly failure: Failure
+}
+
 /**
  * A failure the transport (or its codecs) classified itself (issue #171). The
  * `Failure` rides on the error so the retry loop reads the cause instead of the
@@ -316,7 +331,7 @@ export function abortError(message = "The operation was aborted"): DOMException 
  * The transport reads the `failure` field and the `transportError` marker, so an
  * error raised anywhere in the transport carries its classification with it.
  */
-export class TransportFailureError extends Error {
+export class TransportFailureError extends Error implements ClassifiedTransportError {
   readonly transportError = true as const
   readonly failure: Failure
   readonly status?: number
@@ -325,6 +340,58 @@ export class TransportFailureError extends Error {
     this.name = "TransportFailureError"
     this.failure = failure
     this.status = status
+  }
+}
+
+/**
+ * The HTTP response facts an `HttpTransportFailureError` carries to the host.
+ * `status`, `url`, `responseHeaders` and `responseBody` are the fields
+ * OpenCode's classifiers read; `responseBody` must already be redacted because
+ * the classifier scans it (issue #273).
+ */
+export interface HttpFailureFacts {
+  /** The response's HTTP status. */
+  status: number
+  /** The request URL the response answered. */
+  url: string
+  /** The response's headers, as the host classifier expects them. */
+  responseHeaders: Record<string, string>
+  /** The full redacted response body. Classification scans it, so it is never
+   * truncated to the message's bound and never carries raw provider text. */
+  responseBody: string
+}
+
+/**
+ * An HTTP failure the transport raises from a non-OK response, surfaced as an
+ * AI SDK `APICallError` (issue #273). Both hosts classify from this shape:
+ * OpenCode v2 reads `statusCode`/`responseBody`/`isRetryable` to decide retry
+ * and context-overflow recovery, and OpenCode v1's `parseAPICallError` reads
+ * the same fields. Without them the failure is an unknown shape — retryable to
+ * v2, fatal 4xx included.
+ *
+ * The transport's own classification rides along unchanged: the ladder reads
+ * `failure` (and the `transportError` marker) before the host ever sees the
+ * error, so `isRetryable` restates that decision rather than deciding anything
+ * inside the plugin. `requestBodyValues` is deliberately empty: no classifier
+ * reads it, and the request body can be hundreds of thousands of tokens.
+ */
+export class HttpTransportFailureError extends APICallError implements ClassifiedTransportError {
+  readonly transportError = true as const
+  readonly failure: Failure
+  readonly status: number
+  constructor(message: string, failure: Failure, facts: HttpFailureFacts) {
+    super({
+      message,
+      url: facts.url,
+      requestBodyValues: {},
+      statusCode: facts.status,
+      responseHeaders: facts.responseHeaders,
+      responseBody: facts.responseBody,
+      isRetryable: failure.retryable,
+    })
+    this.name = "HttpTransportFailureError"
+    this.failure = failure
+    this.status = facts.status
   }
 }
 
