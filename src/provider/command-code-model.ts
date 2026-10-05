@@ -62,12 +62,16 @@ import {
   NETWORK_FAILURE,
   TRUNCATION_FAILURE,
   TRUNCATION_MESSAGE,
+  HttpTransportFailureError,
   TransportFailureError,
   UPGRADE_REQUIRED_FAILURE,
   VERSION_GATE_FAILURE,
   PAUSE_TURN_LIMIT_FAILURE,
   RESUME_UNSUPPORTED_FAILURE,
   type Failure,
+  type TransportError,
+  type ClassifiedTransportError,
+  type HttpFailureFacts,
 } from "./retry.js"
 import { projectSlugFromPath } from "./project-slug.js"
 import { FACTS_PACKAGE_VERSION } from "../catalog/facts.js"
@@ -162,6 +166,15 @@ function errorStream(message: string): ReadableStream<LanguageModelV3StreamPart>
   })
 }
 
+/** Response headers as the plain lowercase record the host classifiers expect. */
+function headersRecord(headers: Headers): Record<string, string> {
+  const record: Record<string, string> = {}
+  headers.forEach((value, key) => {
+    record[key] = value
+  })
+  return record
+}
+
 /**
  * Internal marker (issue #56 safety net): the Provider API answered its
  * plan-gate `403` — the documented `upgrade_required` envelope, or the live
@@ -170,13 +183,17 @@ function errorStream(message: string): ReadableStream<LanguageModelV3StreamPart>
  * and retries once. Never surfaced to callers — but it carries its failure
  * kind like every other transport-raised error, so the vocabulary in
  * `retry.ts` names the one failure the ladder never replays (issue #171).
+ * Raised from an HTTP response, so it is also host-classifiable (issue #273)
+ * for the pathological case where it does surface (a flip arriving after
+ * visible content) instead of reaching the host as an unknown shape.
  */
-class UpgradeRequiredError extends Error implements ClassifiedTransportError {
-  readonly transportError = true as const
-  readonly failure = UPGRADE_REQUIRED_FAILURE
-  readonly status = 403
-  constructor() {
-    super("Command Code Provider API requires a plan upgrade (403 upgrade_required)")
+class UpgradeRequiredError extends HttpTransportFailureError {
+  constructor(facts: HttpFailureFacts) {
+    super(
+      "Command Code Provider API requires a plan upgrade (403 upgrade_required)",
+      UPGRADE_REQUIRED_FAILURE,
+      facts,
+    )
     this.name = "UpgradeRequiredError"
   }
 }
@@ -186,16 +203,8 @@ class UpgradeRequiredError extends Error implements ClassifiedTransportError {
  * (issue #170). The marker carries the invariant: the message is the
  * transport's own, already redacted where it is built, and the metadata an AI
  * SDK v3 `error` part has room for — `name`, `status` — rides on the instance.
+ * The interface lives in `retry.ts` with the error classes that implement it.
  */
-interface TransportError extends Error {
-  readonly transportError: true
-}
-
-/** A transport-raised error carrying the failure the ladder classifies. */
-interface ClassifiedTransportError extends TransportError {
-  readonly failure: Failure
-}
-
 function isTransportError(error: unknown): error is TransportError {
   return (
     error instanceof Error &&
@@ -315,18 +324,23 @@ class UnmodelledBlockPauseError extends Error implements ClassifiedTransportErro
  * message is rebuilt here to name the plugin instead, and the server's minimum
  * when it named one. It is a fatal status, never the transport flip: nothing
  * about the plan changed, and the same build would get the same 403 on either
- * endpoint.
+ * endpoint. Raised from an HTTP response, so it carries the response facts
+ * (issue #273) and the host classifies a 403 as a deterministic rejection
+ * rather than retrying an unknown shape.
  */
-class VersionGateError extends Error implements ClassifiedTransportError {
-  readonly transportError = true as const
-  readonly failure = VERSION_GATE_FAILURE
-  readonly status = 403
-  constructor(minimumVersion: string | undefined, reportedVersion: string) {
+class VersionGateError extends HttpTransportFailureError {
+  constructor(
+    minimumVersion: string | undefined,
+    reportedVersion: string,
+    facts: HttpFailureFacts,
+  ) {
     const floor = minimumVersion === undefined ? "" : `, server minimum ${minimumVersion}`
     super(
       redactCommandCodeErrorText(
         `Command Code rejected this plugin as out of date (reported client version ${reportedVersion}${floor}). Update the opencode-cmd-provider plugin to continue.`,
       ),
+      VERSION_GATE_FAILURE,
+      facts,
     )
     this.name = "VersionGateError"
   }
@@ -1027,6 +1041,23 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
                       // Preserve useful plain-text provider errors only after secret
                       // redaction; upstream/proxy bodies may echo credentials.
                     }
+                    // The response facts every surfaced HTTP failure carries
+                    // (issue #273): the full redacted body (the host classifier
+                    // scans it, so a late overflow pattern must survive — only
+                    // the message keeps its 500-char plain-text bound), the
+                    // status, the headers, and the request URL. Built once,
+                    // before the gate branches, so the version gate, the
+                    // plan-gate flip signal, and the classified failure all
+                    // surface the same host-readable shape instead of an
+                    // unknown error.
+                    const redactedBody = redactCommandCodeErrorText(errBody)
+                    const safeBody = redactedBody.slice(0, 500)
+                    const facts: HttpFailureFacts = {
+                      status: response.status,
+                      url: t.url,
+                      responseHeaders: headersRecord(response.headers),
+                      responseBody: redactedBody,
+                    }
                     // One reading of the 403 body for both gates (issues #56,
                     // #173): whichever it is, it is never replayed, and only the
                     // plan gate may flip the transport.
@@ -1036,7 +1067,11 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
                     // updated plugin, not the legacy transport. The message names
                     // the plugin instead of the CLI the server's body blames.
                     if (gate.versionGate) {
-                      throw new VersionGateError(gate.minimumVersion, COMMAND_CODE_CLI_VERSION)
+                      throw new VersionGateError(
+                        gate.minimumVersion,
+                        COMMAND_CODE_CLI_VERSION,
+                        facts,
+                      )
                     }
                     // Safety net (issue #56): the plan-gate 403 on the Provider
                     // API flips the session to the legacy transport — the
@@ -1046,7 +1081,7 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
                     // bounded to one), and any other status flows through the
                     // existing error/redaction pipeline unchanged.
                     if (t.flipOnUpgradeRequired && gate.planGate) {
-                      throw new UpgradeRequiredError()
+                      throw new UpgradeRequiredError(facts)
                     }
                     const failure = classifyHttpFailure({
                       status: response.status,
@@ -1054,15 +1089,15 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
                       retryAfter: response.headers.get("retry-after"),
                       maxDelayMs: maxRetryDelayMs,
                     })
-                    const safeBody = redactCommandCodeErrorText(errBody).slice(0, 500)
                     const detail = redactCommandCodeErrorText(
                       errorDetail ?? (safeBody || "Provider returned an error"),
                     )
-                    throw new TransportFailureError(
+                    throw new HttpTransportFailureError(
                       failure.kind === "retry-after-cap"
                         ? `Command Code API error ${response.status}: Retry-After delay exceeds max retry delay`
                         : `Command Code API error ${response.status}: ${detail}`,
                       failure,
+                      facts,
                     )
                   }
 
