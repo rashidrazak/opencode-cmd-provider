@@ -249,7 +249,7 @@ run([
       const { ctx, port } = fakeServerCtx()
       const { urls, fetch } = stubFetch()
       await registerUsageRpc(ctx, async () => ({ key: "host_key", source: "host" }), {
-        fetchOptions: { baseURL: BASE, fetch, env: {} },
+        fetchOptions: { baseURL: BASE, fetch, env: {}, now: NOW },
       })
       const first = await callUsage(port(), {})
       const second = await callUsage(port(), { scope: first.scope })
