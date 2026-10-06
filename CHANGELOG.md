@@ -1,3 +1,23 @@
+## 2.2.4 - 2026-10-06
+
+### Model catalog
+
+- **FACTS_PACKAGE_VERSION**: `1.74.3` → `1.75.0`
+- Membership 84 → 85: upstream added `mistral/mistral-large-4`. The listing-API divergence note is clean.
+- Four context values recomputed from RSC `contextWindow` (GLM-5.1, MiniMax-M2.7, Qwen3.6-Max-Preview, Qwen3.6-Plus) — unchanged.
+
+### Reasoning classification
+
+- `mistral/mistral-large-4` enters as reasoning-capable; classification writes 85 entries (no pending bucket).
+
+### Deals catalog
+
+- `mistral/mistral-large-4` lands with the `opensource` tier and a goat 40 / pro 50 allowance; no other record changes.
+
+| Model                     | Change | Before | After                                          |
+| ------------------------- | ------ | ------ | ---------------------------------------------- |
+| `mistral/mistral-large-4` | added  | —      | Snapshot + facts + classification + deals rows |
+
 ## 2.2.3 - 2026-10-06
 
 ### Model catalog
