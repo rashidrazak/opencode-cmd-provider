@@ -12,10 +12,11 @@
 // upstream-derived input: it travels env → file → module (read as data),
 // never interpolated into run scripts.
 import { execFile } from "node:child_process"
-import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { cp, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { promisify } from "node:util"
+import { check as prettierCheck, resolveConfig } from "prettier"
 import { buildChangelogSection } from "../scripts/release-notes.mjs"
 import { assert, assertEqual, run } from "./harness.js"
 
@@ -92,6 +93,11 @@ const RELEASE_FRAGMENT = `
   node scripts/release-notes.mjs "\${next}" "\${date}" pr-body.md > release-notes.md
   { cat release-notes.md; cat CHANGELOG.md; } > CHANGELOG.md.new
   mv CHANGELOG.md.new CHANGELOG.md
+  # Normalize against the repo's Prettier config: the PR body is
+  # untrusted and hand-written tables can carry misaligned columns
+  # that \`format:check\` rejects on the tag. \`--no-install\` pins the
+  # lockfile's Prettier and fails loudly when it is missing.
+  npx --no-install prettier --write CHANGELOG.md >/dev/null
   npm version "\${next}" --no-git-tag-version --allow-same-version >/dev/null
   npm install --package-lock-only >/dev/null 2>&1
   git config user.name "github-actions[bot]"
@@ -139,9 +145,16 @@ async function setupRepo({ tag = false } = {}): Promise<Repo> {
     join(process.cwd(), "scripts", "release-notes.mjs"),
     join(work, "scripts", "release-notes.mjs"),
   )
+  // The fragment's `npx --no-install prettier` consumes the repo config;
+  // copy it so the synthetic run normalizes exactly like the workflow.
+  await cp(join(process.cwd(), ".prettierrc.json"), join(work, ".prettierrc.json"))
   await exec("git", ["-C", work, "add", "-A"])
   await exec("git", ["-C", work, "commit", "-q", "-m", "seed"])
   await exec("git", ["-C", work, "push", "-q", "origin", "main"])
+  // `--no-install` must resolve the lockfile-pinned Prettier; the synthetic
+  // repo has no dependencies of its own, so link the real node_modules in.
+  // Created after the seed commit so it is never tracked.
+  await symlink(join(process.cwd(), "node_modules"), join(work, "node_modules"), "dir")
   if (tag) {
     await exec("git", ["-C", work, "tag", "v1.6.3"])
     await exec("git", ["-C", work, "push", "-q", "origin", "v1.6.3"])
@@ -240,14 +253,15 @@ run([
     },
   ],
   [
-    "buildChangelogSection: output is Prettier-stable after CHANGELOG concatenation",
+    "buildChangelogSection: keeps the blank-line normal form after CHANGELOG concatenation",
     () => {
       // The workflow concatenates the emitted section against the existing
       // CHANGELOG (`{ cat release-notes.md; cat CHANGELOG.md; }`). A section
       // ending in a table must leave exactly one blank line before the
       // next `## X.Y.Z` heading, or format:check fails on the bump commit
-      // (the v1.6.4 release run). This locks the concatenation shape, not
-      // just the standalone emitter output.
+      // (the v1.6.4 release run). Full Prettier stability is the bump
+      // step's `prettier --write` (locked by the release-fragment test);
+      // here the emitter's blank-line contract is locked.
       const section = buildChangelogSection({
         version: "1.6.4",
         date: "2026-09-03",
@@ -316,6 +330,15 @@ run([
         )
         assert(!changelog.includes("Changed files"), changelog)
         assert(changelog.includes("## 1.6.2 - 2026-08-01"), "the old section must survive")
+        // The fixture PR body's tables are deliberately Prettier-unclean
+        // (misaligned columns, like the hand-written table that broke the
+        // v2.2.3 release), so this asserts the fragment's normalization —
+        // remove the `npx --no-install prettier` line and this fails.
+        const options = await resolveConfig(join(repo.work, "CHANGELOG.md"))
+        assert(
+          await prettierCheck(changelog, { ...options, parser: "markdown" }),
+          "the bot commit's CHANGELOG must satisfy the repo's format:check",
+        )
         // Bot-authored bump commit on main, tagged.
         const { stdout: subject } = await exec("git", ["-C", repo.work, "log", "-1", "--format=%s"])
         assertEqual(subject.trim(), "chore(release): 1.6.3")
@@ -413,6 +436,14 @@ run([
         "the push step must be gated on the bump step's skip output",
       )
       assert(workflow.includes('echo "skip=true" >> "$GITHUB_OUTPUT"'), workflow)
+      // The bump step must Prettier-normalize the composed CHANGELOG before
+      // committing: the tag-driven release run is otherwise the first
+      // `format:check` the commit ever meets — after the tag exists (run
+      // 37479767188 failed exactly this way on a misaligned PR-body table).
+      assert(
+        workflow.includes("npx --no-install prettier --write CHANGELOG.md"),
+        "the bump step must normalize CHANGELOG.md against format:check",
+      )
       // The body must travel as a file/env, never spliced into `run:`.
       assert(
         !workflow.includes("${{ github.event.pull_request.body }}") || workflow.includes("PR_BODY"),

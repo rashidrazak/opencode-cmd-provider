@@ -66,6 +66,14 @@ jobs:
           node-version: 22
           cache: npm
 
+      # The lockfile-pinned toolchain (only Prettier is used here) lets
+      # the bump step normalize the composed CHANGELOG against the repo's
+      # Prettier config before the bot commit lands. The tag-driven
+      # release run is otherwise the first `format:check` the commit ever
+      # meets — after the tag exists (run 37479767188 failed exactly this
+      # way: a hand-written PR-body table with misaligned columns).
+      - run: npm ci
+
       # The merged PR body is untrusted input: it is written to a file
       # via the environment (env vars are data passed to the step, not
       # spliced into the script text) and consumed as a file by
@@ -99,6 +107,11 @@ jobs:
           node scripts/release-notes.mjs "${next}" "${date}" pr-body.md > release-notes.md
           { cat release-notes.md; cat CHANGELOG.md; } > CHANGELOG.md.new
           mv CHANGELOG.md.new CHANGELOG.md
+          # Normalize against the repo's Prettier config: the PR body is
+          # untrusted and hand-written tables can carry misaligned columns
+          # that `format:check` rejects on the tag. `--no-install` pins the
+          # lockfile's Prettier and fails loudly when it is missing.
+          npx --no-install prettier --write CHANGELOG.md >/dev/null
           npm version "${next}" --no-git-tag-version --allow-same-version >/dev/null
           npm install --package-lock-only >/dev/null 2>&1
           git config user.name "github-actions[bot]"
