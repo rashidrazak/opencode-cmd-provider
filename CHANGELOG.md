@@ -16,9 +16,9 @@
 - **DEAL_LAST_REFRESHED**: `2026-10-05` → `2026-10-06`
 - `stealth/space-bunny-alpha`'s deal entry retires with the Snapshot row; no other record changes.
 
-| Model                      | Change  | Before                                             | After |
-| -------------------------- | ------- | -------------------------------------------------- | ----- |
-| `stealth/space-bunny-alpha` | retired | Snapshot + facts + classification + deals rows     | —     |
+| Model                       | Change  | Before                                         | After |
+| --------------------------- | ------- | ---------------------------------------------- | ----- |
+| `stealth/space-bunny-alpha` | retired | Snapshot + facts + classification + deals rows | —     |
 
 ## 2.2.2 - 2026-10-06
 
