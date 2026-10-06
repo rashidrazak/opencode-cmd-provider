@@ -21,6 +21,7 @@ import { createUsageCache } from "../src/rates-usage/usage-cache.js"
 import type { TuiCredentialV1Input } from "../src/rates-usage/tui-credential.js"
 import type { V1ProviderListClient } from "../src/rates-usage/host-credential.js"
 import { assert, assertEqual, run } from "./harness.js"
+import { createFakeClock } from "./helpers/fake-clock.js"
 
 const BASE = "http://mock"
 const WHOAMI = "/alpha/whoami"
@@ -353,12 +354,17 @@ run([
         return base.fetch(url, init)
       }) as unknown as typeof fetch
       const changes: UsagePanelState[] = []
+      // The panel's clock is pinned to NOW so the subscription record the
+      // mount caches (period end NOW + 5d) is still fresh at the refresh: the
+      // second chain must collapse to credits + summary. On the real clock the
+      // fixture's period end expires with the calendar and the refresh re-reads
+      // subscriptions, adding a third request (the 2026-10-06 cron failure).
       const panel = createUsagePanel(
         v1UsageLoader(v1Input([{ id: "commandcode", key: "k" }]), {
           credential: NO_CREDENTIAL,
           fetchOptions: { baseURL: BASE, fetch, env: {} },
         }),
-        { onChange: (state) => changes.push(state) },
+        { clock: createFakeClock(NOW), onChange: (state) => changes.push(state) },
       )
       await panel.mount()
       const first = panel.state()
