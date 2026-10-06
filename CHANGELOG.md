@@ -1,3 +1,25 @@
+## 2.2.3 - 2026-10-06
+
+### Model catalog
+
+- **FACTS_PACKAGE_VERSION**: `1.74.1` → `1.74.3`
+- **FACTS_LAST_REFRESHED**: `2026-10-05` → `2026-10-06`
+- Membership 85 → 84: upstream dropped `stealth/space-bunny-alpha`; its efforts, cost, and modalities rows retire with the Snapshot row. The listing-API divergence note is clean.
+
+### Reasoning classification
+
+- **CLASSIFICATION_LAST_REFRESHED**: `2026-10-05` → `2026-10-06`
+- `stealth/space-bunny-alpha` retires with the Snapshot row; the remaining 84 models are all classified (no pending bucket).
+
+### Deals catalog
+
+- **DEAL_LAST_REFRESHED**: `2026-10-05` → `2026-10-06`
+- `stealth/space-bunny-alpha`'s deal entry retires with the Snapshot row; no other record changes.
+
+| Model                      | Change  | Before                                             | After |
+| -------------------------- | ------- | -------------------------------------------------- | ----- |
+| `stealth/space-bunny-alpha` | retired | Snapshot + facts + classification + deals rows     | —     |
+
 ## 2.2.2 - 2026-10-06
 
 **Fix — OpenCode can classify provider failures again.** Every error the
