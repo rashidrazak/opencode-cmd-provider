@@ -6,9 +6,9 @@
 // parse from the CLI bundle (dist/cli.mjs). Regenerate with
 // `npm run refresh:snapshot`.
 
-export const FACTS_SOURCE_URL = "https://unpkg.com/command-code@1.74.3/dist/bundled/command-code-knowledge/reference/models.md"
-export const MODALITIES_SOURCE_URL = "https://unpkg.com/command-code@1.74.3/dist/cli.mjs"
-export const FACTS_PACKAGE_VERSION = "1.74.3"
+export const FACTS_SOURCE_URL = "https://unpkg.com/command-code@1.75.0/dist/bundled/command-code-knowledge/reference/models.md"
+export const MODALITIES_SOURCE_URL = "https://unpkg.com/command-code@1.75.0/dist/cli.mjs"
+export const FACTS_PACKAGE_VERSION = "1.75.0"
 export const FACTS_LAST_REFRESHED = "2026-10-06"
 
 export const MODEL_EFFORTS: Readonly<Record<string, readonly string[]>> = {
@@ -32,6 +32,7 @@ export const MODEL_EFFORTS: Readonly<Record<string, readonly string[]>> = {
   "stepfun/Step-5-Preview": ["low","medium","high"],
   "tencent/hy4-preview": ["low","medium","high"],
   "inclusionai/ling-3.1-flash:free": ["low","medium","high"],
+  "mistral/mistral-large-4": ["low","medium","high"],
   "claude-sonnet-5-5": ["low","medium","high","xhigh","max"],
   "claude-sonnet-5": ["low","medium","high","xhigh","max"],
   "claude-sonnet-4-6": ["low","medium","high","xhigh","max"],
@@ -120,6 +121,7 @@ export const MODEL_COSTS: Readonly<
   "poolside/laguna-s-2.1-free": { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
   "inclusionai/ling-3.0-flash-sante:free": { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
   "inclusionai/ling-3.1-flash:free": { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+  "mistral/mistral-large-4": { input: 1.36, output: 4.18, cacheRead: 0.14, cacheWrite: 0 },
   "claude-sonnet-5-5": { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 },
   "claude-sonnet-5": { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 },
   "claude-sonnet-4-6": { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
@@ -205,6 +207,7 @@ export const MODEL_INPUT_MODALITIES: Readonly<
   "meta/muse-spark-1.2-contributor": ["text","image"],
   "meta/muse-spark-1.3": ["text","image"],
   "meta/muse-spark-1.3-contributor": ["text","image"],
+  "mistral/mistral-large-4": ["text","image"],
   "moonshotai/Kimi-K2.5": ["text","image"],
   "moonshotai/Kimi-K2.6": ["text","image"],
   "moonshotai/Kimi-K2.7-Code": ["text","image"],
