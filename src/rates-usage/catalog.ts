@@ -94,6 +94,7 @@ export const MODEL_DEALS: Readonly<Record<string, ModelDeals>> = {
   "MiniMaxAI/MiniMax-M2.5": { tier: "opensource", benchmark: {"intelligence":22.8}, free: false, allowance: {"goat":20,"pro":30} },
   "MiniMaxAI/MiniMax-M2.7": { tier: "opensource", benchmark: {"intelligence":22.8}, free: false, allowance: {"goat":20,"pro":30} },
   "MiniMaxAI/MiniMax-M3": { tier: "opensource", discount: {"pct":50}, was: {"input":0.6,"output":2.4,"cacheRead":0.12}, now: {"input":0.3,"output":1.2,"cacheRead":0.06}, benchmark: {"intelligence":29.2}, free: false, allowance: {"goat":47,"pro":57} },
+  "mistral/mistral-large-4": { tier: "opensource", free: false, allowance: {"goat":40,"pro":50} },
   "moonshotai/Kimi-K2.5": { tier: "opensource", benchmark: {"intelligence":23.5}, free: false, allowance: {"goat":20,"pro":30} },
   "moonshotai/Kimi-K2.6": { tier: "opensource", benchmark: {"intelligence":27}, free: false, allowance: {"goat":20,"pro":30} },
   "moonshotai/Kimi-K2.7-Code": { tier: "opensource", benchmark: {"intelligence":25.8}, free: false, allowance: {"goat":60,"pro":70} },

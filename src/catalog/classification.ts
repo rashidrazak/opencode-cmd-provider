@@ -80,6 +80,7 @@ export const MODEL_REASONING_CAPABILITY: Readonly<Record<string, boolean>> = {
   "MiniMaxAI/MiniMax-M2.5": false,
   "MiniMaxAI/MiniMax-M2.7": false,
   "MiniMaxAI/MiniMax-M3": true,
+  "mistral/mistral-large-4": true,
   "moonshotai/Kimi-K2.5": false,
   "moonshotai/Kimi-K2.6": false,
   "moonshotai/Kimi-K2.7-Code": true,
