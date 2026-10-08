@@ -6,9 +6,9 @@
 // parse from the CLI bundle (dist/cli.mjs). Regenerate with
 // `npm run refresh:snapshot`.
 
-export const FACTS_SOURCE_URL = "https://unpkg.com/command-code@1.79.1/dist/bundled/command-code-knowledge/reference/models.md"
-export const MODALITIES_SOURCE_URL = "https://unpkg.com/command-code@1.79.1/dist/cli.mjs"
-export const FACTS_PACKAGE_VERSION = "1.79.1"
+export const FACTS_SOURCE_URL = "https://unpkg.com/command-code@1.79.2/dist/bundled/command-code-knowledge/reference/models.md"
+export const MODALITIES_SOURCE_URL = "https://unpkg.com/command-code@1.79.2/dist/cli.mjs"
+export const FACTS_PACKAGE_VERSION = "1.79.2"
 export const FACTS_LAST_REFRESHED = "2026-10-08"
 
 export const MODEL_EFFORTS: Readonly<Record<string, readonly string[]>> = {
@@ -125,7 +125,7 @@ export const MODEL_COSTS: Readonly<
   "inclusionai/ling-3.1-flash:free": { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
   "mistral/mistral-large-4": { input: 1.36, output: 4.18, cacheRead: 0.14, cacheWrite: 0 },
   "stealth/glyph-cluster:free": { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-  "claude-sonnet-5-5": { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 },
+  "claude-sonnet-5-5": { input: 2, output: 10, cacheRead: 0.1, cacheWrite: 2.5 },
   "claude-sonnet-5": { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 },
   "claude-sonnet-4-6": { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
   "claude-fable-5-1": { input: 10, output: 50, cacheRead: 0.25, cacheWrite: 12.5 },
