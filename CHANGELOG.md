@@ -1,6 +1,25 @@
 ## 2.2.5 - 2026-10-08
 
-Automated catalog refresh.
+### Model catalog
+
+- **FACTS_PACKAGE_VERSION**: `1.75.0` → `1.79.1`
+- **FACTS_LAST_REFRESHED**: `2026-10-06` → `2026-10-08`
+- Membership 85 → 87: upstream added `claude-haiku-5-5` and `stealth/glyph-cluster:free`. Slug pins for `pixel-canary` and `space-bunny-alpha` no longer resolve to Snapshot ids; reported as slug map drift, not pinned.
+
+| Model                        | Change | Before | After                                          |
+| ---------------------------- | ------ | ------ | ---------------------------------------------- |
+| `claude-haiku-5-5`           | added  | —      | Snapshot + facts + classification + deals rows |
+| `stealth/glyph-cluster:free` | added  | —      | Snapshot + facts + classification rows         |
+
+### Reasoning classification
+
+- **CLASSIFICATION_LAST_REFRESHED**: `2026-10-06` → `2026-10-08`
+- `claude-haiku-5-5` and `stealth/glyph-cluster:free` enter as reasoning-capable; classification writes 87 entries (no pending bucket).
+
+### Deals catalog
+
+- `claude-haiku-5-5` lands with the `premium` tier, context-tiered rates (≤ 100K and > 100K), and a goat 20 / pro 20 allowance; no other record changes.
+- Deals and RSC fixtures re-captured from the live docs pages.
 
 ## 2.2.4 - 2026-10-06
 
