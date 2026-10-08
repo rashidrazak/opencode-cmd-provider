@@ -53,6 +53,7 @@ export const MODEL_DEALS: Readonly<Record<string, ModelDeals>> = {
   "claude-fable-5": { tier: "premium", benchmark: {"intelligence":49.6}, free: false, allowance: {"goat":20,"pro":20} },
   "claude-fable-5-1": { tier: "premium", benchmark: {"intelligence":53.4}, free: false, allowance: {"goat":20,"pro":20} },
   "claude-haiku-4-5-20251001": { tier: "premium", benchmark: {"intelligence":15.4}, free: false, allowance: {"goat":20,"pro":20} },
+  "claude-haiku-5-5": { tier: "premium", contextTiers: [{"label":"Standard","context":"≤ 100K","rates":{"input":0.1,"output":0.5,"cacheRead":0.01,"cacheWrite":0.125}},{"label":"Long context","context":"> 100K","rates":{"input":0.5,"output":2.5,"cacheRead":0.05,"cacheWrite":0.625}}], free: false, allowance: {"goat":20,"pro":20} },
   "claude-opus-4-7": { tier: "premium", benchmark: {"intelligence":40.7}, free: false, allowance: {"goat":20,"pro":20} },
   "claude-opus-4-8": { tier: "premium", benchmark: {"intelligence":41.8}, free: false, allowance: {"goat":20,"pro":20} },
   "claude-opus-5": { tier: "premium", benchmark: {"intelligence":50.8}, free: false, allowance: {"goat":20,"pro":20} },
@@ -113,6 +114,7 @@ export const MODEL_DEALS: Readonly<Record<string, ModelDeals>> = {
   "Qwen/Qwen3.8-Max-0902": { tier: "opensource", benchmark: {"intelligence":45.4}, free: false, allowance: {"goat":20,"pro":30} },
   "Qwen/Qwen3.8-Omni-Flash": { tier: "opensource", free: false, allowance: {"goat":20,"pro":30} },
   "sakana/fugu-ultra": { tier: "premium", free: false, allowance: {"goat":20,"pro":20} },
+  "stealth/glyph-cluster:free": { tier: "opensource", free: true },
   "stepfun/Step-3.5-Flash": { tier: "opensource", benchmark: {"intelligence":17}, free: false, allowance: {"goat":20,"pro":30} },
   "stepfun/Step-3.7-Flash": { tier: "opensource", benchmark: {"intelligence":19.5}, free: false, allowance: {"goat":20,"pro":30} },
   "stepfun/Step-5-Preview": { tier: "opensource", benchmark: {"intelligence":43.7}, free: false, allowance: {"goat":20,"pro":30} },
@@ -158,5 +160,5 @@ export const PLAN_CATALOG: Readonly<Record<PlanId, PlanInfo>> = {
 }
 
 export const DEAL_SOURCE_URL = "https://commandcode.ai/docs/resources/pricing-limits"
-export const DEAL_LAST_REFRESHED = "2026-10-06"
+export const DEAL_LAST_REFRESHED = "2026-10-08"
 export const DEAL_PACKAGE_VERSION = "docs"

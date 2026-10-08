@@ -6,10 +6,10 @@
 // parse from the CLI bundle (dist/cli.mjs). Regenerate with
 // `npm run refresh:snapshot`.
 
-export const FACTS_SOURCE_URL = "https://unpkg.com/command-code@1.75.0/dist/bundled/command-code-knowledge/reference/models.md"
-export const MODALITIES_SOURCE_URL = "https://unpkg.com/command-code@1.75.0/dist/cli.mjs"
-export const FACTS_PACKAGE_VERSION = "1.75.0"
-export const FACTS_LAST_REFRESHED = "2026-10-06"
+export const FACTS_SOURCE_URL = "https://unpkg.com/command-code@1.79.1/dist/bundled/command-code-knowledge/reference/models.md"
+export const MODALITIES_SOURCE_URL = "https://unpkg.com/command-code@1.79.1/dist/cli.mjs"
+export const FACTS_PACKAGE_VERSION = "1.79.1"
+export const FACTS_LAST_REFRESHED = "2026-10-08"
 
 export const MODEL_EFFORTS: Readonly<Record<string, readonly string[]>> = {
   "deepseek/deepseek-v4-pro": ["high","max"],
@@ -33,6 +33,7 @@ export const MODEL_EFFORTS: Readonly<Record<string, readonly string[]>> = {
   "tencent/hy4-preview": ["low","medium","high"],
   "inclusionai/ling-3.1-flash:free": ["low","medium","high"],
   "mistral/mistral-large-4": ["low","medium","high"],
+  "stealth/glyph-cluster:free": ["low","medium","high","xhigh"],
   "claude-sonnet-5-5": ["low","medium","high","xhigh","max"],
   "claude-sonnet-5": ["low","medium","high","xhigh","max"],
   "claude-sonnet-4-6": ["low","medium","high","xhigh","max"],
@@ -42,6 +43,7 @@ export const MODEL_EFFORTS: Readonly<Record<string, readonly string[]>> = {
   "claude-opus-5": ["low","medium","high","xhigh","max"],
   "claude-opus-4-8": ["low","medium","high","xhigh","max"],
   "claude-opus-4-7": ["low","medium","high","xhigh","max"],
+  "claude-haiku-5-5": ["low","medium","high","xhigh","max"],
   "gpt-6-astra": ["low","medium","high","xhigh","max"],
   "gpt-6.1-sol": ["low","medium","high","xhigh","max"],
   "gpt-6-sol": ["low","medium","high","xhigh","max"],
@@ -122,6 +124,7 @@ export const MODEL_COSTS: Readonly<
   "inclusionai/ling-3.0-flash-sante:free": { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
   "inclusionai/ling-3.1-flash:free": { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
   "mistral/mistral-large-4": { input: 1.36, output: 4.18, cacheRead: 0.14, cacheWrite: 0 },
+  "stealth/glyph-cluster:free": { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
   "claude-sonnet-5-5": { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 },
   "claude-sonnet-5": { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 },
   "claude-sonnet-4-6": { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
@@ -131,6 +134,7 @@ export const MODEL_COSTS: Readonly<
   "claude-opus-5": { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 },
   "claude-opus-4-8": { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 },
   "claude-opus-4-7": { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 },
+  "claude-haiku-5-5": { input: 0.1, output: 0.5, cacheRead: 0.01, cacheWrite: 0.125 },
   "claude-haiku-4-5-20251001": { input: 1, output: 5, cacheRead: 0.1, cacheWrite: 1.25 },
   "gpt-6-astra": { input: 10, output: 50, cacheRead: 1, cacheWrite: 12.5 },
   "gpt-6.1-sol": { input: 2, output: 10, cacheRead: 0.1, cacheWrite: 2.5 },
@@ -175,6 +179,7 @@ export const MODEL_INPUT_MODALITIES: Readonly<
   "claude-fable-5": ["text","image"],
   "claude-fable-5-1": ["text","image"],
   "claude-haiku-4-5-20251001": ["text","image"],
+  "claude-haiku-5-5": ["text","image"],
   "claude-opus-4-7": ["text","image"],
   "claude-opus-4-8": ["text","image"],
   "claude-opus-5": ["text","image"],
