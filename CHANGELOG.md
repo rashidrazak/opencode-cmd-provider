@@ -1,3 +1,7 @@
+## 2.2.5 - 2026-10-08
+
+Automated catalog refresh.
+
 ## 2.2.4 - 2026-10-06
 
 ### Model catalog
