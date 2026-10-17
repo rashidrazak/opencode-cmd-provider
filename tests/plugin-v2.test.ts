@@ -690,6 +690,29 @@ run([
     },
   ],
   [
+    "registerProvider claims a provider the models.dev catalog pre-seeded",
+    () => {
+      // models.dev now carries a first-class `commandcode` entry, and the host's
+      // built-in catalog plugin adds it in an earlier provider.transform. Its `npm`
+      // lands in `package` and its `api` in `settings.baseURL`, so neither the
+      // empty-seed check nor "declared values win" can tell it from a user
+      // declaration.
+      const draft = new Map<string, ProviderRecord>()
+      draft.set(PROVIDER_ID, {
+        provider: {
+          id: PROVIDER_ID,
+          name: "CommandCode",
+          activation: "auto",
+          package: "@opencode/ai/providers/openai-compatible",
+          settings: { baseURL: "https://api.commandcode.ai/provider/v1" },
+        },
+        models: new Map(),
+      })
+      registerProvider(providerEditor(draft), "aisdk:opencode-cmd-provider@2.2.10")
+      assertEqual(draft.get(PROVIDER_ID)?.provider.package, "aisdk:opencode-cmd-provider@2.2.10")
+    },
+  ],
+  [
     "registerModels is additive and never drops a declared model",
     () => {
       const draft = new Map<string, ProviderRecord>()
