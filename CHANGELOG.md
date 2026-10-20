@@ -1,3 +1,75 @@
+## 2.2.11 - 2026-10-20
+
+**Fix — Go accounts on OpenCode v2 reach the legacy transport again.** models.dev
+added a first-class `commandcode` catalog entry on 2026-10-16, and the v2 host's
+built-in catalog plugin applies it before user plugins: the provider draft
+arrives with `package: "@ai-sdk/openai-compatible"` and `settings.baseURL:
+"https://api.commandcode.ai/provider/v1"`. `registerProvider` only claimed a
+provider whose `package` was still the empty seed, so the plugin silently
+stepped out of the request path — the `aisdk:` specifier was never installed and
+every turn went through the host's own OpenAI-compatible client against the
+Provider API, which refuses the Go plan with a raw `403 "Your Go plan doesn't
+include API access. Upgrade to Provider or higher …"`. The plan-gate flip to the
+legacy `/alpha/generate` transport — the only route that serves Go — could not
+run either, because the plugin was no longer in the path. A catalog entry is not
+an owner: the claim now gates on the `aisdk:` prefix, takes over the catalog's
+`baseURL`, and strips the model-level Anthropic packages it adds
+([#304](https://github.com/rashidrazak/opencode-cmd-provider/issues/304),
+[#305](https://github.com/rashidrazak/opencode-cmd-provider/pull/305)). The
+release also lands the catalog refreshed on 2026-10-20: membership is unchanged
+at 92 models on `command-code@1.84.0`, and the deals catalog drops
+`stealth/cat-jam:free`'s row and cuts `z-ai/glm-5.3-flash`'s allowance.
+
+### Fixes
+
+- **The provider is claimed when models.dev pre-seeds it, so Go accounts reach
+  the legacy transport again**
+  ([#304](https://github.com/rashidrazak/opencode-cmd-provider/issues/304),
+  [#305](https://github.com/rashidrazak/opencode-cmd-provider/pull/305)): the
+  empty-seed check (`provider.package === ""`) cannot tell a first-run draft
+  from a catalog entry that already carries a package, and the catalog's
+  `@ai-sdk/openai-compatible` is not a claim on the SDK — only an `aisdk:`
+  specifier is. `registerProvider` now claims any provider that is not already
+  `aisdk:`, rewrites `settings.baseURL` from the catalog's Provider API root
+  (`…/provider/v1`, which the transport would otherwise append to again) back to
+  the bare host, and clears the catalog's model-level `@ai-sdk/anthropic`
+  package so Claude models route through the plugin too. A user-declared
+  `aisdk:` package still wins, and `tests/plugin-v2.test.ts` pins the
+  catalog-seeded draft, the baseURL takeover, and the package stripping.
+
+### Model catalog
+
+- Membership unchanged at 92 models on `command-code@1.84.0`; no cost, effort or
+  modality changes. Only the `FACTS_LAST_REFRESHED` stamp moved to 2026-10-20.
+- `minimax/minimax-m3.1-flash` and `minimax/minimax-m3.1-flash:free` appear on
+  the docs pages and the listing API but not in the package's `models.md`, so
+  both stay docs-ahead and unpinned; the models-page slug map reports 16 pending
+  rows (up from 14). `reflection/beam:free` remains a listing-API-only
+  divergence note.
+
+### Reasoning classification
+
+- 92 entries, unchanged; the `CLASSIFICATION_LAST_REFRESHED` stamp moved to
+  2026-10-20.
+
+### Deals catalog
+
+- `stealth/cat-jam:free` left the pricing table while remaining in package
+  membership: its deal row is dropped and the model now ships core-only with a
+  pending report (91/92 snapshot models covered).
+- `z-ai/glm-5.3-flash` allowance cut from goat 100 / pro 100 to goat 80 / pro 90;
+  tier, benchmark and rates unchanged.
+- `deepseek/deepseek-v4.1-flash` and `deepseek/deepseek-v4.1-flash-fast` carry an
+  announced goat 100 / pro 110 budget window from 2026-10-20T01:00Z to
+  2026-10-21T01:00Z; the row-level allowance is unchanged, so the catalog does
+  not move.
+- Deals and RSC fixtures re-captured from the live docs pages.
+
+| Model                  | Change    | Before              | After                        |
+| ---------------------- | --------- | ------------------- | ---------------------------- |
+| `stealth/cat-jam:free` | deals row | free deal           | removed (core-only, pending) |
+| `z-ai/glm-5.3-flash`   | allowance | goat: 100, pro: 100 | goat: 80, pro: 90            |
+
 ## 2.2.10 - 2026-10-17
 
 ### Deals catalog
