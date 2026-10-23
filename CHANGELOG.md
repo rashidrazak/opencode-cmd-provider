@@ -1,3 +1,73 @@
+## 2.2.13 - 2026-10-23
+
+**Chore — the catalog is refreshed to `command-code@1.87.3`, and the Max
+plan-summary test stops pinning an upstream deal.** Two retired free variants
+leave the Snapshot, and `xiaomi/mimo-v2.5` / `xiaomi/mimo-v2.5-pro` ship
+core-only: the package still lists them, but the listing API and the docs RSC
+no longer serve them, so per issue #132 they keep their Snapshot row while
+their deals and classification rows become pending reports. The daily cron
+(run 39944493194) went red on `tests/plan-summary.test.ts`, which asserted the
+MiMo `98% off` row that the refresh correctly dropped — the test now derives
+its rows from the catalog through the shared `discountLabel` formatter, so a
+deal ending surfaces as a refresh-PR diff instead of a red suite (spec #108).
+
+### Model catalog
+
+- **FACTS_PACKAGE_VERSION**: `1.87.1` → `1.87.3`; membership 96 → 94.
+- `minimax/minimax-m3.1-flash:free` and `ornith/ornith-1.5-122b:free` left the
+  package's `models.md`, so both are pruned from the Snapshot, facts,
+  classification and deals catalogs together. Their paid counterparts are
+  untouched.
+- `xiaomi/mimo-v2.5` and `xiaomi/mimo-v2.5-pro` stay in package membership but
+  are no longer served by the listing API or the docs RSC records: they ship
+  core-only, absent from `MODEL_DEALS`, and parked in `MODEL_REASONING_PENDING`
+  (non-reasoning at runtime until evidence arrives).
+- The pinned slug map reports `ling-3-0-flash-sante-free`, `pixel-canary` and
+  `space-bunny-alpha` as pending (pinned ids no longer in the Snapshot); 16
+  docs-ahead page slugs stay unpinned.
+
+| Model                             | Change  | Before                           | After |
+| --------------------------------- | ------- | -------------------------------- | ----- |
+| `minimax/minimax-m3.1-flash:free` | removed | MiniMax M3.1 Flash · 1000000 ctx | —     |
+| `ornith/ornith-1.5-122b:free`     | removed | Ornith 1.5 122B · 262000 ctx     | —     |
+
+### Reasoning classification
+
+- The two retirements leave 92 classified entries, and `xiaomi/mimo-v2.5` and
+  `xiaomi/mimo-v2.5-pro` move out of `MODEL_REASONING_CAPABILITY` (both were
+  classified non-reasoning) into `MODEL_REASONING_PENDING`, so all 94 Snapshot
+  models stay covered. A pending model moves back into the capability table
+  with zero code once evidence arrives.
+
+| Model                             | Change  | Before                                        | After |
+| --------------------------------- | ------- | --------------------------------------------- | ----- |
+| `minimax/minimax-m3.1-flash:free` | retired | efforts model (low, medium, high, xhigh, max) | —     |
+| `ornith/ornith-1.5-122b:free`     | retired | reasoning-without-efforts                     | —     |
+
+### Deals catalog
+
+- `minimax/minimax-m3.1-flash:free` and `ornith/ornith-1.5-122b:free` lose their
+  free rows with the retirement.
+- `xiaomi/mimo-v2.5` and `xiaomi/mimo-v2.5-pro` lose their rows (98% and 99% off
+  respectively) while remaining in the Snapshot: the docs pricing table no
+  longer carries them, so they ship core-only with a pending report (92/94
+  snapshot models covered).
+- Deals and RSC fixtures re-captured from the live docs pages.
+
+| Model                             | Change  | Before            | After |
+| --------------------------------- | ------- | ----------------- | ----- |
+| `minimax/minimax-m3.1-flash:free` | removed | opensource (free) | —     |
+| `ornith/ornith-1.5-122b:free`     | removed | opensource (free) | —     |
+| `xiaomi/mimo-v2.5`                | removed | opensource        | —     |
+| `xiaomi/mimo-v2.5-pro`            | removed | opensource        | —     |
+
+### Chores
+
+- `tests/plan-summary.test.ts` derives each Max deal label from the live
+  catalog through the shared `discountLabel` formatter with a pinned render
+  date, instead of hard-coding the MiMo `98% off` literal — the assertion that
+  turned the 2026-10-23 catalog-refresh cron red.
+
 ## 2.2.12 - 2026-10-22
 
 ### Model catalog
