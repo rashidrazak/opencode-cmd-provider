@@ -28,8 +28,8 @@ Not sure which OpenCode version you have? Run:
 opencode --version
 ```
 
-- Prints `1.18.x` (or lower) → follow **[Install on OpenCode v1](#install-on-opencode-v1)**.
-- Prints `2.0.x` → follow **[Install on OpenCode v2](#install-on-opencode-v2)**.
+- Prints `1.x` → follow **[Install on OpenCode v1](#install-on-opencode-v1)**.
+- Prints `2.x` → follow **[Install on OpenCode v2](#install-on-opencode-v2)**.
 
 ## Install on OpenCode v1
 
@@ -118,34 +118,25 @@ opencode run --model commandcode/claude-sonnet-5 "hello"
 ### The Rates & usage panel
 
 While a session uses a `[CMD]` model, the sidebar shows the **Rates & usage**
-panel (titled **Command Code**) for that model, split into segments:
+panel (titled **Command Code**) for that model:
 
-- tier and status
-- an **Allowance** section listing the Go, GOAT, Pro, Max 10×, Max 20× and
-  Team Pro monthly allowances
-- a **Rates** section with the published rate bands — peak/off-peak for
-  time-of-day pricing (DeepSeek) and context-window tiers (OpenAI, Grok, Qwen) —
-  each band showing input, output, cache-read and cache-write rates per million
-  tokens, plus the peak windows; a model with no published band shows its
-  actual per-million price instead
-- an **Other Information** section with benchmark scores (intelligence,
-  tokens/second), current deals and `was`/`now` rates
-- a **Usage** section with live 5-hour, weekly and monthly usage plus the
-  current cycle's requests, tokens and spend, read from the account you're
-  connected with and refreshed as you work (never polled)
+<!--
+  TODO: add a screenshot of the panel, then uncomment. Use an absolute URL so
+  the image also renders on npmjs.com (docs/ is not published to npm).
+  ![The Rates & usage panel in the OpenCode sidebar](https://raw.githubusercontent.com/rashidrazak/opencode-cmd-provider/main/docs/images/rates-usage-panel.png)
+-->
 
-Every row is always shown: when a model has nothing for a row, its value reads
-`N/A` instead of the row disappearing.
+- **Tier and status** of the model
+- **Allowance** — the monthly allowance on each plan
+- **Rates** — input, output and cache rates per million tokens, including
+  peak/off-peak and context-window bands where Command Code publishes them
+- **Other Information** — benchmark scores, current deals and `was`/`now` rates
+- **Usage** — your live 5-hour, weekly and monthly usage, and this cycle's
+  requests, tokens and spend, refreshed as you work
 
-Don't need every segment? Type `/cmd-rates-usage` in the prompt — or run **Show,
-hide and reorder sidebar content** from the command palette (`ctrl+p`) —
-then: press space to show or hide the selected segment, shift+↑/↓ to move it,
-`r` to restore the default layout. Your choices are remembered per machine.
-The blank line between segments is kept, and with every segment hidden the
-whole section disappears.
-
-Toggle the sidebar with `ctrl+x b`. Switch to a model that isn't from Command
-Code and the section disappears — there is nothing to show for other providers.
+To show, hide or reorder segments, type `/cmd-rates-usage` in the prompt (or
+run **Show, hide and reorder sidebar content** from the command palette,
+`ctrl+p`). Toggle the sidebar with `ctrl+x b`.
 
 ### Plan and deal summaries
 
@@ -153,15 +144,11 @@ Ask OpenCode something like _"Which Command Code plan am I on?"_ or _"How many
 requests does my Command Code plan cover this month?"_ and it uses the built-in
 `cmd_plan_summary` tool: the plan and account the current credential resolves
 to (or the plan you pinned), its allowances and the current deals, turned into
-an estimate. If you want to force a plan, add it to the question (for example
-`plan=pro`) — a plan pinned that way is marked `(pinned)` in the header, so it
-never reads as a plan that was detected.
+an estimate. The summary says which credential and account it answered for.
 
-The summary always says where the credential came from — your OpenCode
-connection, `COMMANDCODE_API_KEY`, a legacy Command Code auth file, or the plan
-you pinned — and names the account it answered for when the API reports one. So
-an answer that came from a different account than the one you signed in with is
-visible instead of silent.
+To force a plan instead of detecting it, add it to the question (for example
+`plan=pro`) or set `COMMANDCODE_PLAN=pro` before starting OpenCode. A pinned
+plan is marked `(pinned)` in the summary.
 
 ### Everyday details
 
@@ -179,6 +166,13 @@ visible instead of silent.
   does not end your turn. Permanent answers — a usage-window limit, a rejected
   request — come straight back as errors, and a turn that already streamed text
   is never replayed.
+
+### Your data
+
+The plugin talks only to Command Code: your prompts, the background model-list
+refresh, and the usage lookups for the sidebar panel. It sends nothing anywhere
+else. To ask Command Code for zero data retention, set `CMD_ZDR=1` before
+starting OpenCode, as you would for the Command Code CLI.
 
 ## Keep it up to date
 
@@ -218,14 +212,14 @@ opencode plugin remove opencode-cmd-provider
 **OpenCode v1:** remove `opencode-cmd-provider` from the plugin list in your
 `opencode.json` (and from `tui.json` if it is listed there).
 
-Then remove the cached copy to free the space:
+Then remove the cached copies to free the space — the plugin package
+(`npm` on v2, `packages` on v1) and the plugin's saved model list:
 
 ```sh
-rm -rf ~/.cache/opencode/packages/opencode-cmd-provider*
+rm -rf ~/.cache/opencode/npm/opencode-cmd-provider* ~/.cache/opencode/packages/opencode-cmd-provider* ~/.cache/opencode-cmd-provider
 ```
 
-The provider and models this plugin registered disappear with it; there is
-nothing else to clean up.
+The provider and models this plugin registered disappear with it.
 
 ## Troubleshooting
 
@@ -241,21 +235,10 @@ nothing else to clean up.
 ## Learn more
 
 - **[Technical reference](docs/TECHNICAL.md)** — how the plugin works, where the
-  model and deals data comes from, and the decisions behind it. Jump straight to
-  a section:
-  - [Hosts and entry points](docs/TECHNICAL.md#hosts-and-entry-points) — which OpenCode processes load the plugin and what each one registers
-  - [Installation mechanics and caching](docs/TECHNICAL.md#installation-mechanics-and-caching) — where an install lands, how updates work, and why nothing updates by itself
-  - [Model discovery and offline behaviour](docs/TECHNICAL.md#model-discovery-and-offline-behaviour) — bundled model lists, the `[CMD]` name prefix, and mixing in your own model entries
-  - [Generated catalogs](docs/TECHNICAL.md#generated-catalogs) — the model, capability, and deals data files and how they are refreshed
-  - [Rates & usage](docs/TECHNICAL.md#rates--usage) — the sidebar panel: where allowances, benchmarks, rates, and deals come from, and what happens when they are unavailable
-  - [Reasoning support](docs/TECHNICAL.md#reasoning-support) — how thinking-effort levels reach the model
-  - [Image input](docs/TECHNICAL.md#image-input) — which models accept images
-  - [Claude prompt caching](docs/TECHNICAL.md#claude-prompt-caching) — how repeated Claude turns reuse a cached prefix instead of re-billing it
-  - [Pricing display](docs/TECHNICAL.md#pricing-display) — why some models show `$0` in OpenCode
-  - [Environment variables](docs/TECHNICAL.md#environment-variables) — credentials, plan pinning, and test/mock overrides
-  - [Development and testing](docs/TECHNICAL.md#development-and-testing) — build, test, and end-to-end commands
-  - [Troubleshooting](docs/TECHNICAL.md#troubleshooting) — deeper fixes when the table above is not enough
-  - [Design records](docs/TECHNICAL.md#design-records) — every design decision, one line each
+  model and deals data comes from, and the decisions behind it. Most useful
+  sections: [Environment variables](docs/TECHNICAL.md#environment-variables),
+  [Installation mechanics and caching](docs/TECHNICAL.md#installation-mechanics-and-caching),
+  and [Troubleshooting](docs/TECHNICAL.md#troubleshooting).
 - **[CHANGELOG.md](CHANGELOG.md)** — what changed in each release.
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** and **[RELEASE.md](RELEASE.md)** — for
   contributors and maintainers.

@@ -642,6 +642,7 @@ Credentials:
 | --------------------- | ----------------------------------------------------------------- |
 | `COMMANDCODE_API_KEY` | The API key. Used when no `/connect` credential is stored.        |
 | `COMMANDCODE_PLAN`    | Pin the plan for `cmd_plan_summary`, skipping the billing lookup. |
+| `CMD_ZDR`             | `1` opts into zero data retention (sends `x-cmd-zdr: 1`).         |
 
 Test, mock, and compatible-endpoint overrides:
 
