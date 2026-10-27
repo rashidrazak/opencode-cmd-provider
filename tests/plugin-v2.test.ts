@@ -39,6 +39,8 @@ import {
   PLAN_SUMMARY_ARG_DESCRIPTION,
 } from "../src/rates-usage/plan-summary.js"
 import { assert, assertEqual, run, withEnvVars } from "./harness.js"
+import { STUB_CATALOG_MODEL_ID, installCatalogSyncStub } from "./helpers/catalog-sync-stub.js"
+import { readCatalogCache } from "../src/catalog/catalog-cache.js"
 import type {
   V2ProviderEditor,
   V2ModelEditor,
@@ -54,6 +56,10 @@ import type {
   V2SetupContext,
   V2ToolDefinition,
 } from "../src/plugin/v2-types.js"
+
+// The entrypoint's `setup` starts the background catalog fetch (ADR-0024); keep
+// it off the network and off the developer's real cache.
+const catalogSync = installCatalogSyncStub()
 
 type ProviderRecord = { provider: V2ProviderInfo; models: Map<string, V2ModelInfo> }
 type IntegrationRecord = { id: string; name: string; methods: unknown[] }
@@ -846,6 +852,36 @@ run([
         typeof ports[0]?.handlers["usage"] === "function",
         "the usage method must have a handler",
       )
+    },
+  ],
+  [
+    "the v2 setup starts the background catalog sync (ADR-0024)",
+    async () => {
+      // `setup` is the only startup hook a v2 host calls (it never calls the v1
+      // `config` hook), so this is the v2 install's only path to a fresher cache.
+      catalogSync.reset()
+      catalogSync.serving = true
+      await installedFromEntrypoint()
+      assert(await catalogSync.settled(), "v2 setup must fetch the catalog and cache it")
+      assertEqual(catalogSync.calls.length, 1, "exactly one catalog fetch per start")
+      assertEqual(
+        readCatalogCache(catalogSync.cachePath)?.rows.map(({ id }) => id),
+        [STUB_CATALOG_MODEL_ID],
+      )
+      catalogSync.reset()
+    },
+  ],
+  [
+    "the next v2 start registers what the previous start cached",
+    async () => {
+      catalogSync.reset()
+      catalogSync.serving = true
+      await installedFromEntrypoint()
+      assert(await catalogSync.settled(), "the first start must prime the cache")
+      const models = (await installedFromEntrypoint()).replay().get(PROVIDER_ID)?.models
+      assert(models?.has(STUB_CATALOG_MODEL_ID), "the cached row must reach the v2 picker")
+      assertEqual(models?.size, MODEL_SNAPSHOT.length + 1, "the cache adds; it never removes")
+      catalogSync.reset()
     },
   ],
   [

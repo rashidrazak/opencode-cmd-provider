@@ -9,15 +9,20 @@ import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { pathToFileURL } from "node:url"
+import { readCatalogCache } from "../src/catalog/catalog-cache.js"
 import { MODEL_SNAPSHOT } from "../src/catalog/snapshot.js"
 import { resolveProviderNpm } from "../src/plugin/version.js"
 import { assert, assertEqual, run } from "./harness.js"
+import { STUB_CATALOG_MODEL_ID, installCatalogSyncStub } from "./helpers/catalog-sync-stub.js"
 
 const require = createRequire(import.meta.url)
 // The package's own manifest is the source of truth for the expected specifier:
 // the test derives both halves instead of re-typing them (spec #108).
 const pkg = require("../package.json") as { name: string; version: string }
 const PINNED = `${pkg.name}@${pkg.version}`
+// The config hook starts the background catalog fetch (ADR-0024); keep it off
+// the network and off the developer's real cache.
+const catalogSync = installCatalogSyncStub()
 
 /** Writes a throwaway directory tree; keys are repo-relative paths. */
 function tree(files: Record<string, string>): string {
@@ -134,6 +139,38 @@ run([
         provider: { commandcode: { npm: `${pkg.name}@1.0.0` } },
       })
       assertEqual(config.provider.commandcode.npm, `${pkg.name}@1.0.0`)
+    },
+  ],
+  [
+    "the v1 config hook starts the background catalog sync (ADR-0024)",
+    async () => {
+      // `config` is the only startup hook a v1 host calls (it never calls
+      // `setup`), so this is the v1 install's only path to a fresher cache.
+      catalogSync.reset()
+      catalogSync.serving = true
+      await configAfterHook()
+      assert(await catalogSync.settled(), "the v1 config hook must fetch the catalog and cache it")
+      assertEqual(catalogSync.calls.length, 1, "exactly one catalog fetch per start")
+      const cached = readCatalogCache(catalogSync.cachePath)
+      assertEqual(
+        cached?.rows.map(({ id }) => id),
+        [STUB_CATALOG_MODEL_ID],
+      )
+      catalogSync.reset()
+    },
+  ],
+  [
+    "the next v1 start registers what the previous start cached",
+    async () => {
+      catalogSync.reset()
+      catalogSync.serving = true
+      await configAfterHook()
+      assert(await catalogSync.settled(), "the first start must prime the cache")
+      const config = await configAfterHook()
+      const ids = Object.keys(config.provider.commandcode.models)
+      assert(ids.includes(STUB_CATALOG_MODEL_ID), "the cached row must reach the v1 picker")
+      assertEqual(ids.length, MODEL_SNAPSHOT.length + 1, "the cache adds; it never removes")
+      catalogSync.reset()
     },
   ],
 ])

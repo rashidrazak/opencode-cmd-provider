@@ -100,7 +100,8 @@ Membership is layered instead, in precedence order:
 3. _(nothing — never reached)_
 
 Startup reads the cache (≈1 ms), registers, returns; the fetch runs unawaited
-and primes the cache for the next start. So the network is never on the startup
+and primes the cache for the next start. Both startup hooks start it — the v1
+`config` hook and the v2 `setup` — because each host calls only its own. So the network is never on the startup
 path, and a slow, blocked, or captive-portal endpoint costs freshness only.
 
 Three rules make the cached tier safe:
@@ -126,15 +127,19 @@ stays what issue #130 made it: an annotate-only divergence note. It agrees with
 the client view on ids; when it does not, that is a log line, never a gate and
 never a fallback. It is not a membership source.
 
-## Verified host behaviour (2026-10-27, opencode 2.1.4)
+## Verified host behaviour (2026-10-27, opencode 2.1.4 and 1.18.30)
 
-Two findings from exercising the built plugin in a real v2 host, both of which
-shaped the implementation and neither of which a unit test had caught:
+Findings from exercising the built plugin in real hosts, each of which shaped
+the implementation and none of which a unit test had caught:
 
-- **`config` is a v1-only hook.** A v2 host never calls it, so the background
-  refresh must be started from `setup`. Starting it in `config` left the cache
-  permanently empty on every v2 install — the plugin worked, but only ever from
-  the bundled Snapshot.
+- **Each host calls only its own startup hook.** A v2 host never calls `config`,
+  and a v1 host never calls `setup` (its module contract is `{ id, server }`
+  only). The background refresh must therefore be started from **both**. The
+  sync first lived only in `config`, which left the cache permanently empty on
+  every v2 install; it then moved only to `setup`, which did the same to every
+  v1 install (opencode 1.18.30 served all 94 bundled models but made zero
+  catalog requests). In both cases the plugin worked, but only ever from the
+  bundled Snapshot. Starting it from both hooks still runs it once per session.
 - **`opencode models` does not activate plugins.** The one-shot read exits in
   ~60 ms without calling `setup`, so it exercises `config`-path registration
   only and can never demonstrate the cache. `opencode run` and a served instance

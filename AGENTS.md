@@ -116,8 +116,11 @@ fixtures (see `scripts/check-deals-coverage.mjs` and
   runtime host imports so both bundles can load it (ADR-0020).
 - **Membership is layered at runtime (ADR-0024).** `src/plugin/catalog-sync.ts`
   is the only module that may name the catalog endpoint, and it is fire-and-forget
-  from `setup()` (never `config` — that is the v1-only hook, so a sync started
-  there never runs on v2). Startup reads `src/catalog/catalog-cache.ts`
+  from **both** startup hooks: the v1 `config` hook and the v2 `setup()`. Each
+  host calls only its own (v1 never calls `setup`, v2 never calls `config`), so
+  dropping either call silently freezes that host on the bundled Snapshot —
+  `tests/plugin-registration.test.ts` (v1) and `tests/plugin-v2.test.ts` (v2) pin
+  one each. Startup reads `src/catalog/catalog-cache.ts`
   (XDG cache, ~1 ms) and merges it over `MODEL_SNAPSHOT` as a **union** — a
   cached row may add or refresh, never remove, so a stale cache cannot hide a
   shipped model. Any cache defect degrades silently to the bundle, and the sync

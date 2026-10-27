@@ -3,8 +3,11 @@
 // This is the only place the plugin talks to the model-catalog endpoint, and it
 // runs *behind* startup rather than on it:
 //
-//   config hook → read cache (fast) → register models → return
-//                                          └─▶ refreshCatalogCache() (unawaited)
+//   v1 `config` / v2 `setup` → read cache (fast) → register models → return
+//                                                       └─▶ refreshCatalogCache() (unawaited)
+//
+// Both startup hooks start it, because each host calls only its own: v1 never
+// calls `setup`, v2 never calls `config`.
 //
 // The result is cached for the NEXT start. That is the whole point: the host
 // awaits the `config` hook before it reads `provider.config`, and `commandcode`

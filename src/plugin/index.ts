@@ -45,6 +45,12 @@ const server: Plugin = async (input) => {
       })
       augmentConfigCommandCodeModels(config as Config)
       enrichCommandCodeModels(config as Config)
+      // Membership refresh runs *behind* registration (ADR-0024), exactly as it
+      // does from v2 `setup`: `config` is the only startup hook a v1 host calls,
+      // so without this line a v1 install never refreshes its cache (verified
+      // against opencode 1.18.30). Each host calls only its own hook, so a
+      // session starts the sync once.
+      void startCatalogSync()
     },
     auth: {
       provider: "commandcode",
@@ -144,9 +150,10 @@ const setup = async (ctx: V2SetupContext): Promise<void> => {
   // transform registers come from the disk cache or the bundle, so the host
   // never waits on the network. The fetch primes the cache for the next start.
   //
-  // It is started here, not in `config`, because `config` is the v1 hook — a v2
-  // host never calls it, so firing the sync there left the cache permanently
-  // empty on every v2 install (found by testing this against opencode 2.1.4).
+  // It is started here as well as in `config`, because `config` is the v1 hook —
+  // a v2 host never calls it, so firing the sync only there left the cache
+  // permanently empty on every v2 install (found by testing this against
+  // opencode 2.1.4).
   void startCatalogSync()
   await setupCommandCode(ctx, {
     snapshot: runtimeSnapshot(),

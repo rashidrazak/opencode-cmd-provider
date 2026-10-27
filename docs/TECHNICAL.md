@@ -711,11 +711,13 @@ Both e2e scripts are excluded from `npm test`.
   `$XDG_CACHE_HOME/opencode-cmd-provider/models.json`. A _new plugin release_
   still needs the install cache refreshed — see
   [Installation mechanics and caching](#installation-mechanics-and-caching).
-- **`opencode models` shows nothing / proves nothing about the cache.** That
-  one-shot command exits in ~60 ms without activating plugins, so it exercises
-  the `config`-hook registration path only and never runs `setup()` — where the
-  background refresh is started. Use `opencode run`, or a served instance with
-  `POST /api/plugin/await-activation`, to exercise the v2 path.
+- **`opencode models` shows nothing / proves nothing about the cache.** On v2
+  that one-shot command exits in ~60 ms without activating plugins, so it
+  exercises the `config`-hook registration path only and never runs `setup()` —
+  where v2 starts the background refresh. Use `opencode run`, or a served
+  instance with `POST /api/plugin/await-activation`, to exercise the v2 path. On
+  v1 the refresh starts from the `config` hook, but a one-shot command can exit
+  before the fetch lands; use `opencode serve` or `opencode run` there too.
 - **The provider fails loudly right after a local build.** The runtime provider
   is pinned to the package version; an unpublished version cannot be installed.
   Declare `provider.commandcode.npm` yourself
