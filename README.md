@@ -12,6 +12,10 @@ Provider, Team, or Enterprise plan from OpenCode. It also adds the **Rates &
 usage** panel — a **Command Code** section in the session sidebar — with your
 plan's allowances, benchmarks, current deals, and live usage.
 
+<!-- Absolute URL so the image also renders on npmjs.com (docs/ is not published to npm). -->
+
+![OpenCode running a Command Code model, with the Rates & usage panel in the sidebar](https://raw.githubusercontent.com/rashidrazak/opencode-cmd-provider/main/docs/images/opencode.png)
+
 > **Disclaimer:** This is an unofficial, community-maintained integration. It is
 > not affiliated with, endorsed by, or supported by Command Code. You need your
 > own Command Code account, and Command Code's terms, availability, and pricing
@@ -119,12 +123,6 @@ opencode run --model commandcode/claude-sonnet-5 "hello"
 
 While a session uses a `[CMD]` model, the sidebar shows the **Rates & usage**
 panel (titled **Command Code**) for that model:
-
-<!--
-  TODO: add a screenshot of the panel, then uncomment. Use an absolute URL so
-  the image also renders on npmjs.com (docs/ is not published to npm).
-  ![The Rates & usage panel in the OpenCode sidebar](https://raw.githubusercontent.com/rashidrazak/opencode-cmd-provider/main/docs/images/rates-usage-panel.png)
--->
 
 - **Tier and status** of the model
 - **Allowance** — the monthly allowance on each plan
