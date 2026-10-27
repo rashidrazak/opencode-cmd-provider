@@ -397,6 +397,16 @@ still dropped whole: an assistant message without `tool_calls` cannot carry
 `content: null`. The field matches the one the stream parser reads
 these models' reasoning from, and the pause-resume path already replays it.
 
+The legacy `/alpha/generate` gateway (the Go-plan transport) carries the same
+contract on its own wire: an earlier assistant turn's reasoning is a
+`{ type: "reasoning", text }` content part — the shape the official
+command-code client's `toWireMessages` emits — **not** a message-level
+`reasoning_content` string, which the gateway ignores. Beam 1.0 answers
+HTTP 400 for the whole turn when any earlier assistant message omits it, so
+`messagesToCC` replays those parts under the same reasoning-model gate; a
+non-reasoning model's legacy history stays unchanged. A reasoning-only
+assistant turn is still dropped whole, matching the OpenAI codec.
+
 Anthropic's `redacted_thinking` block — reasoning the provider's safety system
 encrypted — surfaces as a reasoning part too: no text, and its payload in
 `providerMetadata.anthropic.redactedData` on the `reasoning-start` part (issue

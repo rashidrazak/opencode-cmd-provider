@@ -242,10 +242,20 @@ function unwrapToolResult(result: unknown): string {
 
 export function messagesToCC(
   messages: PromptLike,
-  options: { allowImages?: boolean } = {},
+  options: { allowImages?: boolean; model?: string } = {},
 ): unknown[] {
   const allowImages = options.allowImages ?? false
   if (!allowImages) assertTextOnlyMessages(messages)
+
+  // The legacy `/alpha/generate` gateway serves the same reasoning contracts
+  // as the Provider API's OpenAI dialect: Beam 1.0 (and DeepSeek V4.x's
+  // tool-call continuations) answers HTTP 400 without every earlier assistant
+  // turn's `reasoning_content`. The CLI wire spells that field as a
+  // `{ type: "reasoning", text }` content part — the shape the official
+  // command-code client's `toWireMessages` emits — not a message-level string.
+  // Gate on the same catalog-derived reasoning classification as the OpenAI
+  // codec (ADR-0016), so a non-reasoning model's history is unchanged.
+  const preserveReasoning = options.model !== undefined && isReasoningModel(options.model)
 
   const out: unknown[] = []
   const pairedToolCallIds = completeToolCallIds(messages)
@@ -258,9 +268,11 @@ export function messagesToCC(
       })
     } else if (message.role === "assistant") {
       const parts: unknown[] = []
+      let hasPayload = false
       for (const content of recordArray(message.content)) {
         if (content.type === "text") {
           parts.push({ type: "text", text: stringValue(content.text) ?? "" })
+          hasPayload = true
         } else if (content.type === "tool-call") {
           const toolCallId = stringValue(content.toolCallId) ?? ""
           if (!pairedToolCallIds.has(toolCallId)) continue
@@ -270,9 +282,16 @@ export function messagesToCC(
             toolName: stringValue(content.toolName) ?? "",
             input: recordOrEmpty(content.input ?? content.args ?? content.arguments),
           })
+          hasPayload = true
+        } else if (content.type === "reasoning" && preserveReasoning) {
+          const text = textFromPart(content)
+          if (text) parts.push({ type: "reasoning", text })
         }
       }
-      if (parts.length > 0) out.push({ role: "assistant", content: parts })
+      // A turn whose only payload was reasoning (or an unpaired tool call)
+      // still vanishes whole, matching the OpenAI codec: reasoning rides on a
+      // turn that has something to replay it with.
+      if (hasPayload) out.push({ role: "assistant", content: parts })
     } else if (message.role === "tool") {
       for (const content of recordArray(message.content)) {
         const toolCallId = stringValue(content.toolCallId) ?? ""

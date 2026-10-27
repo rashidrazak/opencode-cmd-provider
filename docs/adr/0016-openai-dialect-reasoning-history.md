@@ -82,3 +82,15 @@ sent).
 - `tests/provider-codecs.test.ts` pins the codec shapes (replay, gate,
   Anthropic unchanged); `tests/provider-transport.test.ts` pins the field on
   the outgoing wire through the mock server.
+
+## Addendum — the legacy `/alpha/generate` wire (2026-10-28)
+
+The Go-plan transport is a second wire served by the same gateway, and it
+carries the same requirement. Its assistant reasoning is a
+`{ type: "reasoning", text }` **content part** — the shape the official
+command-code client's `toWireMessages` emits — not a message-level
+`reasoning_content` string; the gateway ignores the latter. Beam 1.0 answers
+HTTP 400 for the turn when any earlier assistant message omits the part.
+`messagesToCC` therefore replays reasoning parts under the same
+`isReasoningModel` gate as the OpenAI codec. The Provider API's Anthropic
+dialect is still unchanged.
