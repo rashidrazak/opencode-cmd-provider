@@ -30,6 +30,7 @@ import {
   registerProvider,
   setupCommandCode,
 } from "../src/plugin/v2.js"
+import { catalogModelForV2, DEFAULT_DISPLAY_PREFIX } from "../src/plugin/models.js"
 import { resolveProviderNpm } from "../src/plugin/version.js"
 import { MODEL_DEALS } from "../src/rates-usage/catalog.js"
 import { enrichCommandCodeModelsV2 } from "../src/rates-usage/enrichment.js"
@@ -513,20 +514,32 @@ run([
     },
   ],
   [
-    "a declared model keeps its name and limits and gains only missing variants",
+    "a model the models.dev catalog pre-seeded takes the Snapshot entry and Display name prefix",
     async () => {
+      // The host's built-in catalog plugin runs before external plugins and
+      // lists most Snapshot ids under its own names and limits; user config is
+      // applied after them (`opencode.config.provider`), so a model already in
+      // the draft here is the catalog's, never a user declaration.
       const row = MODEL_SNAPSHOT.find((model) => (model.efforts?.length ?? 0) > 0)!
       const host = fakeHost()
       host.seedCatalog((draft) => {
         draft.set(PROVIDER_ID, {
-          provider: emptyProvider(PROVIDER_ID),
+          provider: {
+            id: PROVIDER_ID,
+            name: "CommandCode",
+            activation: "auto",
+            package: "@opencode/ai/providers/openai-compatible",
+            settings: { baseURL: "https://api.commandcode.ai/provider/v1" },
+          },
           models: new Map([
             [
               row.id,
               {
                 ...defaultModel(PROVIDER_ID, row.id),
-                name: "My Name",
+                modelID: `upstream/${row.id}`,
+                name: "Catalog Name",
                 limit: { context: 12_345, output: 999 },
+                package: "@opencode/ai/providers/anthropic",
               },
             ],
           ]),
@@ -534,12 +547,20 @@ run([
       })
       await setupCommandCode(host.ctx, {})
       const model = host.replay().get(PROVIDER_ID)?.models.get(row.id)
-      assertEqual(model?.name, "My Name")
-      assertEqual(model?.limit, { context: 12_345, output: 999 })
+      const expected = catalogModelForV2(row)
+      assertEqual(model?.name, expected.name)
+      assert(model?.name.startsWith(DEFAULT_DISPLAY_PREFIX), "the Display name carries the prefix")
+      assertEqual(model?.limit, expected.limit)
+      assertEqual(model?.capabilities, expected.capabilities)
+      assertEqual(model?.cost, expected.cost)
       assertEqual(
         model?.variants.map((variant) => variant.id),
         [...(row.efforts as readonly string[])],
       )
+      // Routing is untouched: the catalog's upstream id stays, and the
+      // model-level package is still stripped so it runs through the plugin.
+      assertEqual(model?.modelID, `upstream/${row.id}`)
+      assertEqual(model?.package, undefined)
     },
   ],
   [

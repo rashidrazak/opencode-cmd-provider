@@ -20,7 +20,7 @@ import { MODEL_SNAPSHOT, type CatalogModel } from "../catalog/snapshot.js"
 import { getApiBase } from "../env.js"
 import { createCommandCode } from "../provider/index.js"
 import type { HostCredential } from "../provider/auth-key.js"
-import { catalogModelForV2, catalogVariantsForV2, DEFAULT_DISPLAY_PREFIX } from "./models.js"
+import { catalogModelForV2, DEFAULT_DISPLAY_PREFIX } from "./models.js"
 import { resolveProviderNpm } from "./version.js"
 import type {
   V2IntegrationEditor,
@@ -145,11 +145,17 @@ export function registerProvider(editor: V2ProviderEditor, specifier: string): v
 }
 
 /**
- * Snapshot → provider source models. A model the draft already carries came from
- * the user's config or an earlier plugin, and declared models are never
- * modified — the one exception is the reasoning gap-fill v1 also performed on
- * declared entries (`augmentConfigCommandCodeModels`): variants are added only
- * when the entry has none, so a declared effort list survives.
+ * Snapshot → provider source models. Every Snapshot row takes its full entry,
+ * even when the draft already carries the id: at this point the only thing that
+ * can have put it there is an earlier plugin — in practice the host's built-in
+ * models.dev catalog, whose `commandcode` entry lists most Snapshot ids under
+ * its own names and limits, so treating it as a declaration left those models
+ * without the Display name prefix. User config is not in the draft yet: the
+ * host applies it in a post-plugin pass (`opencode.config.provider`), so a
+ * user's own name, limits, or variants still win.
+ *
+ * Only the descriptive fields `catalogModelForV2` returns are written; routing
+ * (`modelID`, `package`, `settings`) stays with registerProvider and the host.
  */
 export function registerModels(
   editor: V2ProviderEditor,
@@ -157,12 +163,7 @@ export function registerModels(
 ): void {
   const prefix = displayPrefixFromDraft(editor)
   for (const model of snapshot) {
-    const declared = editor.get(PROVIDER_ID)?.models.get(model.id) !== undefined
     editor.models.update(PROVIDER_ID, model.id, (entry: V2ModelInfo) => {
-      if (declared) {
-        if (entry.variants.length === 0) entry.variants = catalogVariantsForV2(model.id)
-        return
-      }
       Object.assign(entry, catalogModelForV2(model, prefix))
     })
   }

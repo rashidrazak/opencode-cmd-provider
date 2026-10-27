@@ -87,8 +87,9 @@ a blank `models.md` cell did.
 
 The plugin must not fetch on the startup path, because it _cannot_ do so
 gracefully: OpenCode awaits the `config` hook before reading `provider.config`,
-and `commandcode` is not in models.dev, so the lazy async `provider.models` hook
-never fires for us (`src/plugin/models.ts`). A fetch in `config` is therefore a
+and `commandcode` was not in models.dev when this was decided, so the lazy async
+`provider.models` hook never fired for us (`src/plugin/models.ts`). models.dev
+has since added a `commandcode` entry; the v2 half claims it (ADR-0010). A fetch in `config` is therefore a
 synchronous startup stall for the length of its timeout.
 
 Membership is layered instead, in precedence order:

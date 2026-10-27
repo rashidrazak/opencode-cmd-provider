@@ -112,9 +112,14 @@ entry's own imports.
   advertises an empty v2 `cost` array, never a $0 tier.
 - **Declared wins.** Provider-level keys are filled only while they still hold
   the editor's seed value (`name === id`, `package === ""`), so a user-declared
-  `providers.commandcode` entry survives. Declared models keep their name and
-  limits; only missing reasoning variants are added — the same gap-fill v1's
-  `augmentConfigCommandCodeModels` performs.
+  `providers.commandcode` entry survives. Snapshot models always take their
+  full entry, even when the draft already carries the id: user config is
+  applied in a post-plugin pass (`opencode.config.provider`), so a model already
+  in the draft can only come from an earlier plugin — in practice the
+  models.dev catalog's `commandcode` entry — and a user's own model settings
+  still win after it. (Originally declared-looking models kept their name and
+  limits, which left every id models.dev also lists without the `[CMD]`
+  prefix.)
 - **First-run default.** v1 lands on `commandcode/gpt-5.6-terra` through
   OpenCode's hardcoded provider-priority list; v2 has no such list, so the
   transform sets that default explicitly — and only when no default exists yet.

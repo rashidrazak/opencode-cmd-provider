@@ -61,11 +61,13 @@ export interface AutoRegisterOptions {
  * snapshot model is available without any user declaration.
  *
  * opencode only invokes a plugin's `provider.models` hook for providers that
- * already exist in its models.dev catalog; `commandcode` is not in that
- * catalog, so models reach the session through the config-declared
- * `provider.commandcode.models` map. The `config` hook runs before opencode
- * reads `config.provider` and honors in-place mutation (ADR-0001), which makes
- * this the only zero-declaration mechanism available today.
+ * already exist in its models.dev catalog; `commandcode` was not in that
+ * catalog when this was written (it is now, and the v2 half has to claim it —
+ * see registerProvider / registerModels in v2.ts), so models reach the session
+ * through the config-declared `provider.commandcode.models` map. The `config`
+ * hook runs before opencode reads `config.provider` and honors in-place
+ * mutation (ADR-0001), which makes this the only zero-declaration mechanism
+ * available today.
  *
  * Pure function: takes a config and a snapshot, mutates and returns the config.
  * Merge semantics — the user's declared entry always wins:
