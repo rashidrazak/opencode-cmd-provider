@@ -18,7 +18,61 @@ run([
   ],
 
   [
-    "drops reasoning parts from assistant history",
+    "legacy wire replays assistant reasoning for a reasoning model",
+    () => {
+      // The legacy /alpha/generate gateway serves the same provider contracts
+      // as the Provider API: Beam 1.0 answers HTTP 400 when an earlier
+      // assistant turn's reasoning is missing. The CLI wire spells it as a
+      // reasoning content part, which is what the official client sends.
+      const out = messagesToCC(
+        [
+          { role: "user", content: [{ type: "text", text: "Hello" }] },
+          {
+            role: "assistant",
+            content: [
+              { type: "reasoning", text: "User just said hello; greet them." },
+              { type: "text", text: "Hello! How can I help you today?" },
+            ],
+          },
+          { role: "user", content: [{ type: "text", text: "Tell me more" }] },
+        ],
+        { model: "reflection/beam:free" },
+      )
+      assertEqual(out, [
+        { role: "user", content: [{ type: "text", text: "Hello" }] },
+        {
+          role: "assistant",
+          content: [
+            { type: "reasoning", text: "User just said hello; greet them." },
+            { type: "text", text: "Hello! How can I help you today?" },
+          ],
+        },
+        { role: "user", content: [{ type: "text", text: "Tell me more" }] },
+      ])
+    },
+  ],
+
+  [
+    "legacy wire drops reasoning for a non-reasoning model",
+    () => {
+      const out = messagesToCC(
+        [
+          {
+            role: "assistant",
+            content: [
+              { type: "reasoning", text: "secret chain" },
+              { type: "text", text: "visible" },
+            ],
+          },
+        ],
+        { model: "moonshotai/Kimi-K2.5" },
+      )
+      assertEqual(out, [{ role: "assistant", content: [{ type: "text", text: "visible" }] }])
+    },
+  ],
+
+  [
+    "legacy wire drops reasoning when the model is unknown",
     () => {
       const out = messagesToCC([
         {
@@ -30,6 +84,61 @@ run([
         },
       ])
       assertEqual(out, [{ role: "assistant", content: [{ type: "text", text: "visible" }] }])
+    },
+  ],
+
+  [
+    "legacy wire replays reasoning before a completed tool call",
+    () => {
+      const out = messagesToCC(
+        [
+          {
+            role: "assistant",
+            content: [
+              { type: "reasoning", text: "I should read the file first." },
+              { type: "tool-call", toolCallId: "tc1", toolName: "read", input: { path: "a.ts" } },
+            ],
+          },
+          {
+            role: "tool",
+            content: [
+              { type: "tool-result", toolCallId: "tc1", toolName: "read", result: "file contents" },
+            ],
+          },
+        ],
+        { model: "deepseek/deepseek-v4.1-flash" },
+      )
+      assertEqual(out, [
+        {
+          role: "assistant",
+          content: [
+            { type: "reasoning", text: "I should read the file first." },
+            { type: "tool-call", toolCallId: "tc1", toolName: "read", input: { path: "a.ts" } },
+          ],
+        },
+        {
+          role: "tool",
+          content: [
+            {
+              type: "tool-result",
+              toolCallId: "tc1",
+              toolName: "read",
+              output: { type: "text", value: "file contents" },
+            },
+          ],
+        },
+      ])
+    },
+  ],
+
+  [
+    "legacy wire drops a reasoning-only assistant turn",
+    () => {
+      const out = messagesToCC(
+        [{ role: "assistant", content: [{ type: "reasoning", text: "just a thought" }] }],
+        { model: "reflection/beam:free" },
+      )
+      assertEqual(out, [])
     },
   ],
 
