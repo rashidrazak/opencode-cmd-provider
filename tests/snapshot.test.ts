@@ -41,7 +41,7 @@ run([
   ],
 
   [
-    "snapshot rows carry ship-bar cost and efforts fields (models.md is the membership authority, issue #130)",
+    "snapshot rows carry ship-bar cost and efforts fields (the catalog decides what ships, issue #130)",
     () => {
       for (const model of MODEL_SNAPSHOT) {
         // A row may carry cost: null (missing price cell — the cost ladder

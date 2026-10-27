@@ -45,9 +45,14 @@ models` for this — v2 activates plugins asynchronously and the one-shot CLI
 `src/catalog/snapshot.ts`, `src/catalog/facts.ts`,
 `src/catalog/classification.ts`, and `src/rates-usage/catalog.ts` are generated
 (`scripts/refresh-snapshot.mjs`, `scripts/refresh-classification.mjs`,
-`scripts/refresh-deals.mjs`). Regenerate with `npm run refresh` — the
-snapshot comes from the npm package's bundled models.md table (the sole
-membership authority since #130; the listing API is annotate-only); the
+`scripts/refresh-deals.mjs`). Regenerate with `npm run refresh` — the snapshot
+comes from the Command Code model catalog's client view
+(`GET /provider/v1/models?view=client`, the only source of which models ship since
+ADR-0024; `hidden` records never ship, and the plain listing endpoint is
+annotate-only). The npm registry is still read for the `command-code` dist-tag
+(`FACTS_PACKAGE_VERSION` feeds the version-gated `x-command-code-version`
+header). `models.md` is no longer read at all — `scripts/parse-facts.mjs`,
+`scripts/parse-modalities.mjs` and their fixtures/tests are gone. The
 RSC fixtures (`tests/fixtures/rsc-*.txt`) and the models-page index fixture
 (`tests/fixtures/models-page.html`, issue #131) are re-captured from the
 live docs pages (`scripts/capture-rsc-fixtures.mjs`, all-or-nothing, loud on
@@ -60,7 +65,7 @@ fixture fallback, 4xx fails loudly); offline-only:
 `npm run refresh:deals -- --fixtures` / `npm run refresh:classification --
 --fixtures`.
 Since issue #132 the enrichment coverage gates are **inverted to
-membership-superset-of-enrichment with pending reports**: deals records,
+shipped-superset-of-enrichment with pending reports**: deals records,
 classification entries, and modalities are asserted as subsets of the
 Snapshot, and a snapshot model missing enrichment ships core-only with a
 visible pending note — never an exit-1. `refresh:deals` and
@@ -109,6 +114,20 @@ fixtures (see `scripts/check-deals-coverage.mjs` and
   (`registerUsageRpc` → the `rpc` extension in `src/plugin/v2.ts`) is the one
   server↔TUI channel of the slice: `src/rates-usage/usage-rpc.ts` must stay free of
   runtime host imports so both bundles can load it (ADR-0020).
+- **Membership is layered at runtime (ADR-0024).** `src/plugin/catalog-sync.ts`
+  is the only module that may name the catalog endpoint, and it is fire-and-forget
+  from **both** startup hooks: the v1 `config` hook and the v2 `setup()`. Each
+  host calls only its own (v1 never calls `setup`, v2 never calls `config`), so
+  dropping either call silently freezes that host on the bundled Snapshot —
+  `tests/plugin-registration.test.ts` (v1) and `tests/plugin-v2.test.ts` (v2) pin
+  one each. Startup reads `src/catalog/catalog-cache.ts`
+  (XDG cache, ~1 ms) and merges it over `MODEL_SNAPSHOT` as a **union** — a
+  cached row may add or refresh, never remove, so a stale cache cannot hide a
+  shipped model. Any cache defect degrades silently to the bundle, and the sync
+  never rejects. Do not derive the catalog URL from `COMMANDCODE_API_BASE`
+  (that is the transport base — mocks and proxies serve no `?view=client`);
+  use `COMMANDCODE_CATALOG_URL`. `src/catalog/` must stay fetch-free.
+  `tests/api-demotion.test.ts` pins all of this.
 - **Never runtime-import `@opencode-ai/*` or `@opencode/*`.** `@opencode-ai/plugin`/`@opencode-ai/sdk`
   are optional peer deps: `opencode plugin <pkg>` installs them in `.opencode/`,
   not next to the plugin, so a runtime import fails to resolve at load and kills

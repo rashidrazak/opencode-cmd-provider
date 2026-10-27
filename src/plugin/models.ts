@@ -17,13 +17,12 @@ import { inputModalitiesForModel } from "../provider/modalities.js"
 
 const DEFAULT_MAX_OUTPUT_TOKENS = 65_536
 export const DEFAULT_DISPLAY_PREFIX = "[CMD] "
-// Context advertised for a snapshot row whose models.md Context cell is
-// missing ("—"): the row ships as pending-context (issue #130) and the
-// fallback ladder lands in #132. OpenCode requires a numeric limit, so a
-// conservative placeholder keeps the model usable — it is deliberately
-// NOT the listing API's value (the API wins no ship-bar field) and NOT
-// any carried-forward number: a reviewer sees the real gap in the
-// refresh log's "context pending" note and the #132 ladder resolves it.
+// Context advertised for a snapshot row whose catalog record carried no
+// usable context length: the row ships as pending-context (issue #130) and
+// the #132 ladder resolves it at refresh time. OpenCode requires a numeric
+// limit, so a conservative placeholder keeps the model usable — never a
+// carried-forward number: a reviewer sees the real gap in the refresh log's
+// "context pending" note.
 const PENDING_CONTEXT_LENGTH = 128_000
 
 type ConfigModel = NonNullable<NonNullable<ProviderConfig["models"]>[string]>
@@ -141,12 +140,12 @@ export function augmentConfigCommandCodeModels(config: Config): void {
  * 65_536, and metadata enriched from the reasoning, modality, and pricing
  * tables.
  *
- * Ship-bar fields come from the snapshot row itself (issue #130: the
- * models.md row is the authority; the listing API wins no field):
- *  - contextLength null (the models.md Context cell was "—") falls back to
- *    the OpenCode default context — never 0, never a fabricated API value;
- *  - cost null (the price cell was "—") advertises NO cost entry — missing
- *    never zero-fills (only an explicit all-zero cell means free).
+ * Ship-bar fields come from the snapshot row itself (ADR-0024: the catalog
+ * endpoint's client view decides which models ship):
+ *  - contextLength null falls back to the OpenCode default context — never 0,
+ *    never a fabricated value;
+ *  - cost null advertises NO cost entry — missing never zero-fills (only an
+ *    explicit all-zero record means free).
  */
 function configModelFor(model: CatalogModel, prefix = DEFAULT_DISPLAY_PREFIX): ConfigModel {
   const variants = reasoningVariantsForModel(model.id)
@@ -190,7 +189,7 @@ function displayNameFor(model: CatalogModel, prefix: string): string {
 
 /**
  * Context/output limits for a Snapshot row. OpenCode requires a numeric
- * context limit, so a row whose models.md Context cell was missing ships as
+ * context limit, so a row whose catalog record carried no context ships as
  * pending-context (issue #130) behind PENDING_CONTEXT_LENGTH — never 0, never
  * a fabricated listing-API value.
  */

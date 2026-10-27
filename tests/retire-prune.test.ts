@@ -20,26 +20,27 @@ import { assert, assertEqual, run } from "./harness.js"
 const KEEP = "vendor/keep-model"
 const RETIRE = "vendor/retire-model"
 
-const mdRow = (id, name) =>
-  `| \`${id}\` | ${name} | 1M | low | $2/$10 · cache $0.2 | Go and above | best |`
+/** A catalog record for the given model. */
+const rec = (id, name) => ({
+  id,
+  name,
+  context_length: 1_000_000,
+  reasoningEfforts: ["low"],
+  inputModalities: ["text"],
+  pricing: { inputCost: 2, outputCost: 10, cacheReadCost: 0.2 },
+})
 
-const MODELS_MD_BEFORE =
-  "## Open Source\n\n" +
-  "| Id (use EXACTLY this) | Name | Context | Efforts | $/1M in/out · cache read | Min plan | Best for |\n" +
-  "|---|---|---|---|---|---|---|\n" +
-  `${mdRow(KEEP, "Keep Model")}\n` +
-  `${mdRow(RETIRE, "Retire Model")}\n`
+/** The catalog before the retirement: both models selectable. */
+const CATALOG_BEFORE = {
+  catalogVersion: "test-catalog-before",
+  data: [rec(KEEP, "Keep Model"), rec(RETIRE, "Retire Model")],
+}
 
-const MODELS_MD_AFTER =
-  "## Open Source\n\n" +
-  "| Id (use EXACTLY this) | Name | Context | Efforts | $/1M in/out · cache read | Min plan | Best for |\n" +
-  "|---|---|---|---|---|---|---|\n" +
-  `${mdRow(KEEP, "Keep Model")}\n`
-
-const CLI_BUNDLE = (ids) =>
-  `const models={${ids
-    .map((id, i) => `M${i}:{name:"${id}",id:"${id}",inputModalities:["text"],contextWindow:1e6}`)
-    .join(",")}}`
+/** The catalog after: upstream dropped the record entirely. */
+const CATALOG_AFTER = {
+  catalogVersion: "test-catalog-after",
+  data: [rec(KEEP, "Keep Model")],
+}
 
 const API_MODELS = {
   object: "list",
@@ -72,8 +73,7 @@ function scriptEnv(mock: { url: string }) {
     ...process.env,
     COMMANDCODE_API_BASE: mock.url,
     COMMANDCODE_REGISTRY_URL: `${mock.url}/registry`,
-    COMMANDCODE_FACTS_URL: `${mock.url}/models.md`,
-    COMMANDCODE_MODALITIES_URL: `${mock.url}/cli.mjs`,
+    COMMANDCODE_CATALOG_URL: `${mock.url}/provider/v1/models?view=client`,
     COMMANDCODE_RSC_GOAT_URL: `${mock.url}/docs/plans/goat`,
     COMMANDCODE_RSC_PRO_URL: `${mock.url}/docs/plans/pro`,
     COMMANDCODE_MODELS_PAGE_URL: `${mock.url}/models-page.html`,
@@ -81,16 +81,15 @@ function scriptEnv(mock: { url: string }) {
   }
 }
 
-/** One snapshot refresh against a synthetic package table; own dir per run. */
-async function refreshOnce(factsMd: string) {
+/** One snapshot refresh against a synthetic catalog; own dir per run. */
+async function refreshOnce(catalog) {
   const dir = await mkdtemp(join(tmpdir(), "cc-retire-"))
   const out = join(dir, "snapshot.ts")
   const factsOut = join(dir, "facts.ts")
   const mock = await startMockCc({
     models: API_MODELS,
     registry: { "dist-tags": { latest: "9.9.9" } },
-    factsMd,
-    modalitiesBundle: CLI_BUNDLE([KEEP, RETIRE]),
+    catalog,
   })
   try {
     const result = await runScript(
@@ -112,8 +111,8 @@ run([
   [
     "retire-prune end to end: row removal prunes the Snapshot; diff is loud; release notes state it; declared configs survive",
     async () => {
-      const before = await refreshOnce(MODELS_MD_BEFORE)
-      const after = await refreshOnce(MODELS_MD_AFTER)
+      const before = await refreshOnce(CATALOG_BEFORE)
+      const after = await refreshOnce(CATALOG_AFTER)
       try {
         // 1. The removed row vanishes from the next Snapshot immediately.
         assertEqual(

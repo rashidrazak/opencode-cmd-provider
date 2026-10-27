@@ -3,6 +3,10 @@
 // enrichment gap the same way the real pipeline does, with provenance and
 // never a silent default. Synthetic worlds only (never upstream's current
 // values): value moves must surface as refresh PR diffs, not red tests.
+//
+// Membership comes from the catalog endpoint's client view (ADR-0024), so a
+// "gap" here is a catalog record with an absent `context_length` or
+// `pricing` block — the same shape a blank models.md cell used to produce.
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, dirname } from "node:path"
@@ -22,27 +26,44 @@ function runScript(args, env) {
   })
 }
 
-const MODELS_MD = (rows) =>
-  "## Open Source\n\n" +
-  "| Id | Name | Context | Efforts | $/1M in/out · cache read | Min plan | Best for |\n" +
-  "|---|---|---|---|---|---|---|\n" +
-  rows.join("\n") +
-  "\n"
+/** A catalog record with the given ship-bar fields; omit a key to create a gap. */
+function rec({
+  id,
+  name = "Model",
+  context = 1_000_000,
+  efforts = null,
+  pricing,
+  modalities = ["text"],
+  ...rest
+}) {
+  return {
+    id,
+    name,
+    ...(context === undefined ? {} : { context_length: context }),
+    reasoningEfforts: efforts,
+    inputModalities: modalities,
+    ...(pricing === undefined ? {} : { pricing }),
+    ...rest,
+  }
+}
 
+const PRICING = { inputCost: 2, outputCost: 10, cacheReadCost: 0.2 }
 const API_UNLISTED = { object: "list", data: [] }
 const REGISTRY = { "dist-tags": { latest: "9.9.9" } }
 
 const MODEL_A = "vendor/day1-with-efforts"
 const MODEL_B = "vendor/no-evidence"
 const MODEL_C = "vendor/missing-ctx"
-const MODEL_D = "vendor/missing-price"
 
 /**
  * Runs one snapshot refresh against a fully-synthetic upstream world.
  * Returns the process result + the emitted snapshot rows (via the module
  * text, so the test asserts on the ladder *output*, not internals).
  */
-async function refreshSnapshot({ md, cli, rscGoat, rscPro, detail }, assertLkg = true) {
+async function refreshSnapshot(
+  { records, catalog, rscGoat, rscPro, detail, modelsPageHtml },
+  assertLkg = true,
+) {
   const dir = await mkdtemp(join(tmpdir(), "cc-ladders-"))
   const out = join(dir, "snapshot.ts")
   const factsOut = join(dir, "facts.ts")
@@ -63,20 +84,17 @@ async function refreshSnapshot({ md, cli, rscGoat, rscPro, detail }, assertLkg =
   const mock = await startMockCc({
     models: API_UNLISTED,
     registry: REGISTRY,
-    factsMd: MODELS_MD(md),
-    modalitiesBundle:
-      cli ??
-      `const models = { U: { id: "vendor/unrelated", name: "U", inputModalities: ["text"], contextWindow: 1e6 } }`,
+    catalog: catalog ?? { catalogVersion: "test-catalog", data: records },
     rscGoat: rscGoat ?? "",
     rscPro: rscPro ?? "",
     modelDetailPages: detail ?? {},
+    ...(modelsPageHtml === undefined ? {} : { modelsPageHtml }),
   })
   const env = {
     ...process.env,
     COMMANDCODE_API_BASE: mock.url,
     COMMANDCODE_REGISTRY_URL: `${mock.url}/registry`,
-    COMMANDCODE_FACTS_URL: `${mock.url}/models.md`,
-    COMMANDCODE_MODALITIES_URL: `${mock.url}/cli.mjs`,
+    COMMANDCODE_CATALOG_URL: `${mock.url}/provider/v1/models?view=client`,
     COMMANDCODE_RSC_GOAT_URL: `${mock.url}/docs/plans/goat`,
     COMMANDCODE_RSC_PRO_URL: `${mock.url}/docs/plans/pro`,
     COMMANDCODE_MODELS_PAGE_URL: `${mock.url}/models-page.html`,
@@ -89,8 +107,6 @@ async function refreshSnapshot({ md, cli, rscGoat, rscPro, detail }, assertLkg =
     )
     let rows = []
     let factsText = ""
-    // The emitted snapshot is a .ts module; parse it with tsx (the same
-    // mechanism the cron's extract step uses) so assertions read real rows.
     try {
       const mod = (await import(/* @vite-ignore */ out)) as {
         MODEL_SNAPSHOT?: Array<Record<string, unknown>>
@@ -110,24 +126,40 @@ async function refreshSnapshot({ md, cli, rscGoat, rscPro, detail }, assertLkg =
   }
 }
 
+const modelsPageRow = (
+  slug,
+  label,
+  { input = "$7", output = "$14", cacheRead = "$0.7", caps = "Text input" } = {},
+) =>
+  `<tr><td><a href="/models/${slug}">${label}</a></td><td><span>1M</span></td><td>52</td>` +
+  `<td><span>${input}</span></td><td><span>${output}</span></td><td><span>${cacheRead}</span></td>` +
+  `<td><span>—</span></td><td><button type="button" aria-label="Capabilities: ${caps}"></button></td></tr>`
+
+const modelsPageTable = (rows) =>
+  `<table><thead><tr><th>Model</th><th>Context</th><th>Intelligence</th><th>Input</th><th>Output</th><th>Cache read</th><th>Cache write</th><th>Caps</th></tr></thead><tbody>` +
+  rows.join("") +
+  `</tbody></table>`
+
 run([
   [
-    "skew: a day-1 model with efforts but no API/RSC record ships reasoning-with-efforts (any-true via models.md)",
+    "skew: a day-1 model with efforts ships reasoning-with-efforts (efforts reach the facts shim)",
     async () => {
       const { result, rows, factsText, dir } = await refreshSnapshot({
-        md: [
-          `| \`${MODEL_A}\` | Day One | 1M | low, medium, high | $2/$10 · cache $0.2 | Go | best |`,
+        records: [
+          rec({
+            id: MODEL_A,
+            name: "Day One",
+            efforts: ["low", "medium", "high"],
+            pricing: PRICING,
+          }),
         ],
-        cli: `const models = { A: { id: "${MODEL_A}", name: "Day One", inputModalities: ["text"], contextWindow: 1e6 } }`,
-        rscGoat: `2:${JSON.stringify([{ slug: "day1", id: MODEL_A, name: "Day One", vendor: "vendor", category: "opensource", minPlanName: "Go", tiers: [], caps: {}, reasoning: false }])}\n`,
-        rscPro: "",
       })
       assertEqual(result.status, 0, result.stderr || result.stdout)
       const row = rows.find((r) => r.id === MODEL_A)
       assert(row, "day-1 model must ship")
-      assertEqual(row.contextLength, 1000000)
-      assertEqual(row.cost.input, 2)
-      // Any-true classification: efforts from models.md (see
+      assertEqual(row.contextLength, 1_000_000)
+      assertEqual((row.cost as Record<string, number>).input, 2)
+      // Any-true classification: efforts from the catalog (see
       // refresh-classification), so it advertises reasoning with variants.
       assert(factsText.includes('"low","medium","high"'), "efforts must reach the facts shim")
       await rm(dir, { recursive: true, force: true })
@@ -138,22 +170,22 @@ run([
     "skew: a no-evidence model ships core-only with the classification-pending bucket and text fallback",
     async () => {
       const { result, rows, factsText, dir } = await refreshSnapshot({
-        // No RSC record, no efforts, no page evidence for MODEL_B; its
-        // models.md Context cell is missing too, so the context ladder
-        // walks RSC (absent) → CLI (absent) → carried-forward LKG (400000).
-        md: [`| \`${MODEL_B}\` | No Evidence | — | — | $2/$10 · cache $0.2 | Go | best |`],
-        rscGoat: "",
-        rscPro: "",
+        // No RSC record, no efforts, no page evidence for MODEL_B; the catalog
+        // omits its context too, so the context ladder walks RSC (absent) →
+        // carried-forward LKG (400000).
+        records: [
+          {
+            id: MODEL_B,
+            name: "No Evidence",
+            pricing: PRICING,
+          },
+        ],
       })
       assertEqual(result.status, 0, result.stderr || result.stdout)
       const row = rows.find((r) => r.id === MODEL_B)
       assert(row, "no-evidence model must ship")
-      // Carried-forward LKG resolves its context (previous snapshot had
-      // 400000) with provenance.
-      assertEqual(row.contextLength, 400000)
+      assertEqual(row.contextLength, 400_000)
       assertEqual(row.contextSource, "carried-forward")
-      // Text fallback: no image entry in MODEL_INPUT_MODALITIES (the
-      // runtime falls back to ["text"]), even though the row has costs.
       const modSection = factsText.slice(factsText.indexOf("MODEL_INPUT_MODALITIES"))
       assert(
         !modSection.includes(MODEL_B),
@@ -166,16 +198,12 @@ run([
   [
     "skew: total cost-ladder absence fails loudly (never carry-forward, never zero-fill)",
     async () => {
-      // With no models page / detail / RSC rates configured, a missing
-      // price row is unshippable after the full ladder → loud failure
-      // naming it (and stating costs never carry forward). A previous
-      // snapshot with a cost for the same row must NOT be used.
       const { result, dir } = await refreshSnapshot({
-        md: [`| \`${MODEL_B}\` | No Evidence | 1M | — | — | Go | best |`],
+        records: [rec({ id: MODEL_B, name: "No Evidence" })],
         rscGoat: "",
         rscPro: "",
       })
-      assert(result.status !== 0, "a price row with no rates anywhere must fail loudly")
+      assert(result.status !== 0, "a record with no rates anywhere must fail loudly")
       assert(
         result.stderr.includes(MODEL_B) &&
           /no cost after the full fallback ladder/.test(result.stderr),
@@ -192,51 +220,20 @@ run([
   [
     "skew: cost ladder resolves via the models page row with provenance when rates exist there",
     async () => {
-      // gpt-5-4's models.md row has a missing price cell ("—"); the models
-      // page index serves its rates, so the cost ladder resolves at the
-      // models-page step with provenance. (Synthetic rate values on a real
-      // slug — the page row never decides membership.)
+      // The catalog omits the pricing block; the models page index serves the
+      // rates, so the cost ladder resolves at the models-page step.
       const MODEL = "gpt-5.4"
-      const modelsPage =
-        `<table><thead><tr><th>Model</th><th>Context</th><th>Intelligence</th><th>Input</th><th>Output</th><th>Cache read</th><th>Cache write</th><th>Caps</th></tr></thead><tbody>` +
-        `<tr><td><a href="/models/gpt-5-4">GPT-5.4</a></td><td><span>1M</span></td><td>52</td><td><span>$7</span></td><td><span>$14</span></td><td><span>$0.7</span></td><td><span>—</span></td><td><button type="button" aria-label="Capabilities: Text input"></button></td></tr>` +
-        `</tbody></table>`
-      const dir = await mkdtemp(join(tmpdir(), "cc-ladders2-"))
-      const out = join(dir, "snapshot.ts")
-      const factsOut = join(dir, "facts.ts")
-      const mock = await startMockCc({
-        models: API_UNLISTED,
-        registry: REGISTRY,
-        factsMd: MODELS_MD([`| \`${MODEL}\` | GPT-5.4 | 1M | — | — | Go | best |`]),
-        modalitiesBundle: `const models = { U: { id: "vendor/unrelated", name: "U", inputModalities: ["text"], contextWindow: 1e6 } }`,
-        rscGoat: "",
-        rscPro: "",
-        modelsPageHtml: modelsPage,
+      const { result, rows, dir } = await refreshSnapshot({
+        records: [rec({ id: MODEL, name: "GPT-5.4" })],
+        modelsPageHtml: modelsPageTable([modelsPageRow("gpt-5-4", "GPT-5.4")]),
       })
-      const env = {
-        ...process.env,
-        COMMANDCODE_API_BASE: mock.url,
-        COMMANDCODE_REGISTRY_URL: `${mock.url}/registry`,
-        COMMANDCODE_FACTS_URL: `${mock.url}/models.md`,
-        COMMANDCODE_MODALITIES_URL: `${mock.url}/cli.mjs`,
-        COMMANDCODE_RSC_GOAT_URL: `${mock.url}/docs/plans/goat`,
-        COMMANDCODE_RSC_PRO_URL: `${mock.url}/docs/plans/pro`,
-        COMMANDCODE_MODELS_PAGE_URL: `${mock.url}/models-page.html`,
-        COMMANDCODE_MODELS_DETAIL_URL: `${mock.url}/model-detail`,
-      }
       try {
-        const result = await runScript(
-          ["scripts/refresh-snapshot.mjs", "--out", out, "--facts-out", factsOut],
-          env,
-        )
         assertEqual(result.status, 0, result.stderr || result.stdout)
-        const mod = (await import(out)) as { MODEL_SNAPSHOT?: Array<Record<string, unknown>> }
-        const row = (mod.MODEL_SNAPSHOT ?? []).find((r) => r.id === MODEL)
-        assert(row, "the missing-price row must ship")
+        const row = rows.find((r) => r.id === MODEL)
+        assert(row, "the missing-pricing row must ship")
         assertEqual(row.costSource, "models-page")
         assertEqual(row.cost, { input: 7, output: 14, cacheRead: 0.7, cacheWrite: 0 })
       } finally {
-        await mock.close()
         await rm(dir, { recursive: true, force: true })
       }
     },
@@ -245,174 +242,91 @@ run([
   [
     "skew: a docs-ahead models-page slug is a pending pin, never a refresh abort (spec #108)",
     async () => {
-      // The pinned SLUG_TO_SNAPSHOT_ID map mirrors two upstream-owned facts
-      // (the page slug and the Snapshot id), so upstream can move either out
-      // from under it. A page row the map does not know yet is *pin drift*,
-      // not a shape change: the page is enrichment — never membership, never
-      // a gate (issue #132) — so the refresh must still complete and report
-      // the drift as a pending pin. It used to `fail()` on the first
-      // unpinned slug, which aborted the entire refresh the moment any
-      // models.md row needed the cost ladder (the 2026-09-19/20 cron class:
-      // the live page carried five unpinned slugs).
       const MODEL = "gpt-5.4"
-      const modelsPage =
-        `<table><thead><tr><th>Model</th><th>Context</th><th>Intelligence</th><th>Input</th><th>Output</th><th>Cache read</th><th>Cache write</th><th>Caps</th></tr></thead><tbody>` +
-        `<tr><td><a href="/models/gpt-5-4">GPT-5.4</a></td><td><span>1M</span></td><td>52</td><td><span>$7</span></td><td><span>$14</span></td><td><span>$0.7</span></td><td><span>—</span></td><td><button type="button" aria-label="Capabilities: Text input"></button></td></tr>` +
-        `<tr><td><a href="/models/brand-new-model">Brand New Model</a></td><td><span>1M</span></td><td>60</td><td><span>$1</span></td><td><span>$2</span></td><td><span>$0.1</span></td><td><span>—</span></td><td><button type="button" aria-label="Capabilities: Text input, Reasoning"></button></td></tr>` +
-        `</tbody></table>`
-      const dir = await mkdtemp(join(tmpdir(), "cc-ladders-pin-"))
-      const out = join(dir, "snapshot.ts")
-      const factsOut = join(dir, "facts.ts")
-      const mock = await startMockCc({
-        models: API_UNLISTED,
-        registry: REGISTRY,
-        factsMd: MODELS_MD([`| \`${MODEL}\` | GPT-5.4 | 1M | — | — | Go | best |`]),
-        modalitiesBundle: `const models = { U: { id: "vendor/unrelated", name: "U", inputModalities: ["text"], contextWindow: 1e6 } }`,
-        rscGoat: "",
-        rscPro: "",
-        modelsPageHtml: modelsPage,
+      // The record carries no pricing, so the cost ladder engages and the
+      // models page is actually fetched (which is what produces pageSlugs and
+      // therefore the slug-map drift report).
+      const { result, rows, dir } = await refreshSnapshot({
+        records: [rec({ id: MODEL, name: "GPT-5.4" })],
+        modelsPageHtml: modelsPageTable([
+          modelsPageRow("gpt-5-4", "GPT-5.4"),
+          modelsPageRow("brand-new-model", "Brand New Model", { caps: "Text input, Reasoning" }),
+        ]),
       })
-      const env = {
-        ...process.env,
-        COMMANDCODE_API_BASE: mock.url,
-        COMMANDCODE_REGISTRY_URL: `${mock.url}/registry`,
-        COMMANDCODE_FACTS_URL: `${mock.url}/models.md`,
-        COMMANDCODE_MODALITIES_URL: `${mock.url}/cli.mjs`,
-        COMMANDCODE_RSC_GOAT_URL: `${mock.url}/docs/plans/goat`,
-        COMMANDCODE_RSC_PRO_URL: `${mock.url}/docs/plans/pro`,
-        COMMANDCODE_MODELS_PAGE_URL: `${mock.url}/models-page.html`,
-        COMMANDCODE_MODELS_DETAIL_URL: `${mock.url}/model-detail`,
-      }
       try {
-        const result = await runScript(
-          ["scripts/refresh-snapshot.mjs", "--out", out, "--facts-out", factsOut],
-          env,
-        )
         assertEqual(result.status, 0, result.stderr || result.stdout)
-        // The pinned row still resolved through the page rung…
-        const mod = (await import(out)) as { MODEL_SNAPSHOT?: Array<Record<string, unknown>> }
-        const row = (mod.MODEL_SNAPSHOT ?? []).find((r) => r.id === MODEL)
+        const row = rows.find((r) => r.id === MODEL)
         assertEqual(row?.costSource, "models-page")
-        // …and the docs-ahead slug is a visible pending pin, never silence.
         assert(
           result.stdout.includes("slug map pending — key brand-new-model"),
           `expected a pending pin note naming the docs-ahead slug, got stdout: ${result.stdout}`,
         )
       } finally {
-        await mock.close()
         await rm(dir, { recursive: true, force: true })
       }
     },
   ],
 
   [
-    "skew: explicit all-zero stays free (picker suffix and sidebar agreement), missing never reads as free",
+    "skew: explicit all-zero stays free, missing never reads as free",
     async () => {
       const FREE = "vendor/free-model"
-      const dir = await mkdtemp(join(tmpdir(), "cc-ladders3-"))
-      const out = join(dir, "snapshot.ts")
-      const factsOut = join(dir, "facts.ts")
-      const mock = await startMockCc({
-        models: API_UNLISTED,
-        registry: REGISTRY,
-        factsMd: MODELS_MD([
-          `| \`${FREE}\` | Free Model | 256K | — | $0/$0 · cache $0 | Go | best |`,
-          `| \`${MODEL_C}\` | Missing Ctx | — | — | $1/$2 · cache $0.1 | Go | best |`,
-        ]),
-        modalitiesBundle: `const models = { F: { id: "${FREE}", name: "Free", inputModalities: ["text"], contextWindow: 256e3 } }`,
+      const { result, rows, factsText, dir } = await refreshSnapshot({
+        records: [
+          rec({
+            id: FREE,
+            name: "Free Model",
+            context: 262_144,
+            pricing: { inputCost: 0, outputCost: 0, cacheReadCost: 0 },
+          }),
+          { id: MODEL_C, name: "Missing Ctx", pricing: PRICING },
+        ],
         rscGoat: `2:${JSON.stringify([{ slug: "mctx", id: MODEL_C, name: "Missing Ctx", vendor: "vendor", category: "opensource", minPlanName: "Go", contextWindow: 33000, tiers: [], caps: {}, reasoning: false }])}\n`,
-        rscPro: "",
       })
-      const env = {
-        ...process.env,
-        COMMANDCODE_API_BASE: mock.url,
-        COMMANDCODE_REGISTRY_URL: `${mock.url}/registry`,
-        COMMANDCODE_FACTS_URL: `${mock.url}/models.md`,
-        COMMANDCODE_MODALITIES_URL: `${mock.url}/cli.mjs`,
-        COMMANDCODE_RSC_GOAT_URL: `${mock.url}/docs/plans/goat`,
-        COMMANDCODE_RSC_PRO_URL: `${mock.url}/docs/plans/pro`,
-        COMMANDCODE_MODELS_PAGE_URL: `${mock.url}/models-page.html`,
-        COMMANDCODE_MODELS_DETAIL_URL: `${mock.url}/model-detail`,
-      }
       try {
-        const result = await runScript(
-          ["scripts/refresh-snapshot.mjs", "--out", out, "--facts-out", factsOut],
-          env,
-        )
         assertEqual(result.status, 0, result.stderr || result.stdout)
-        const text = await readFile(out, "utf-8")
-        const freeRow = text.split("\n").find((l) => l.includes(FREE))
-        assert(
-          freeRow.includes("input: 0"),
-          `explicit all-zero must parse to free, got: ${freeRow}`,
-        )
-        const ctxRow = text.split("\n").find((l) => l.includes(MODEL_C))
-        assert(ctxRow.includes("contextLength: 33000"), `RSC context must resolve, got: ${ctxRow}`)
-        assert(ctxRow.includes('contextSource: "rsc"'), `RSC provenance missing, got: ${ctxRow}`)
-        // Sidebar (deals) agreement: the deals generator marks free models.
-        const factsText = await readFile(factsOut, "utf-8")
+        const free = rows.find((r) => r.id === FREE)
+        assertEqual(free.cost, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 })
+        const ctx = rows.find((r) => r.id === MODEL_C)
+        assertEqual(ctx.contextLength, 33_000)
+        assertEqual(ctx.contextSource, "rsc")
         assert(
           factsText.includes(`"${FREE}": { input: 0, output: 0`),
           `free model must carry all-zero facts, got: ${factsText.slice(0, 200)}`,
         )
       } finally {
-        await mock.close()
         await rm(dir, { recursive: true, force: true })
       }
     },
   ],
 
   [
-    "skew: cost ladder resolves via the model detail page header with provenance when no models-page row exists",
+    "skew: cost ladder resolves via the model detail page header when no models-page row exists",
     async () => {
-      // gpt-5.4's models.md row has a missing price and the models page
-      // index does NOT carry the row; the detail page (/model-detail/...)
-      // does, so the ladder resolves at the detail step with provenance.
-      // Detail pages are live-fetch-only by design (issue #129) — the mock
-      // serves one on demand.
       const MODEL = "gpt-5.4"
+      // The label regex requires the `<button>` that follows it on real pages.
+      const info = `type="button" aria-label="Input — Price per 1M input (prompt) tokens." class="relative flex size-[15px] cursor-help items-center justify-center border border-border text-[11px] leading-none text-muted-foreground/70" data-state="closed">i</button>`
+      const detailRow = (label: string, price: string) =>
+        `<div class="border-b border-border/60 px-5 py-[18px] odd:border-r odd:border-border/60">` +
+        `<div class="flex items-center gap-1.5 font-mono text-[10px] tracking-[0.1em] uppercase text-muted-foreground">${label}<button ${info}</div>` +
+        `<div class="mt-1 text-[21px] font-semibold tabular-nums">${price}<!-- --> <span class="text-xs font-normal text-muted-foreground/70">/M</span></div></div>`
       const detailPage =
         `<div class="grid grid-cols-2 rail-2 rail-lg-noleft">` +
-        `<div class="border-b border-border/60 px-5 py-[18px] odd:border-r odd:border-border/60"><div class="flex items-center gap-1.5 font-mono text-[10px] tracking-[0.1em] uppercase text-muted-foreground">Input<button type="button" aria-label="Input — Price per 1M input (prompt) tokens." class="relative flex size-[15px] cursor-help items-center justify-center border border-border text-[11px] leading-none text-muted-foreground/70 transition-colors hover:text-foreground focus:outline-none focus-visible:text-foreground focus-visible:ring-1 focus-visible:ring-current after:absolute after:-inset-[14.5px] after:content-[&#x27;&#x27;]" data-state="closed">i</button></div><div class="mt-1 text-[21px] font-semibold tabular-nums">$3.5<!-- --> <span class="text-xs font-normal text-muted-foreground/70">/M</span></div></div>` +
-        `<div class="border-b border-border/60 px-5 py-[18px] odd:border-r odd:border-border/60"><div class="flex items-center gap-1.5 font-mono text-[10px] tracking-[0.1em] uppercase text-muted-foreground">Output<button type="button" aria-label="Output — Price per 1M output (generated) tokens." class="relative flex size-[15px] cursor-help items-center justify-center border border-border text-[11px] leading-none text-muted-foreground/70 transition-colors hover:text-foreground focus:outline-none focus-visible:text-foreground focus-visible:ring-1 focus-visible:ring-current after:absolute after:-inset-[14.5px] after:content-[&#x27;&#x27;]" data-state="closed">i</button></div><div class="mt-1 text-[21px] font-semibold tabular-nums">$14<!-- --> <span class="text-xs font-normal text-muted-foreground/70">/M</span></div></div>` +
-        `<div class="border-b border-border/60 px-5 py-[18px] odd:border-r odd:border-border/60"><div class="flex items-center gap-1.5 font-mono text-[10px] tracking-[0.1em] uppercase text-muted-foreground">Cache read<button type="button" aria-label="Cache read — Price per 1M cached input tokens re-read from context — far cheaper than fresh input." class="relative flex size-[15px] cursor-help items-center justify-center border border-border text-[11px] leading-none text-muted-foreground/70 transition-colors hover:text-foreground focus:outline-none focus-visible:text-foreground focus-visible:ring-1 focus-visible:ring-current after:absolute after:-inset-[14.5px] after:content-[&#x27;&#x27;]" data-state="closed">i</button></div><div class="mt-1 text-[21px] font-semibold tabular-nums">$0.35<!-- --> <span class="text-xs font-normal text-muted-foreground/70">/M</span></div></div>` +
+        detailRow("Input", "$3.5") +
+        detailRow("Output", "$14") +
+        detailRow("Cache read", "$0.35") +
         `</div>`
-      const dir = await mkdtemp(join(tmpdir(), "cc-ladders-detail-"))
-      const out = join(dir, "snapshot.ts")
-      const factsOut = join(dir, "facts.ts")
-      const mock = await startMockCc({
-        models: API_UNLISTED,
-        registry: REGISTRY,
-        factsMd: MODELS_MD([`| \`${MODEL}\` | GPT-5.4 | 1M | — | — | Go | best |`]),
-        modalitiesBundle: `const models = { U: { id: "vendor/unrelated", name: "U", inputModalities: ["text"], contextWindow: 1e6 } }`,
-        rscGoat: "",
-        rscPro: "",
-        modelDetailPages: { "gpt-5.4": detailPage },
+      const { result, rows, dir } = await refreshSnapshot({
+        records: [rec({ id: MODEL, name: "GPT-5.4" })],
+        detail: { "gpt-5.4": detailPage },
       })
-      const env = {
-        ...process.env,
-        COMMANDCODE_API_BASE: mock.url,
-        COMMANDCODE_REGISTRY_URL: `${mock.url}/registry`,
-        COMMANDCODE_FACTS_URL: `${mock.url}/models.md`,
-        COMMANDCODE_MODALITIES_URL: `${mock.url}/cli.mjs`,
-        COMMANDCODE_RSC_GOAT_URL: `${mock.url}/docs/plans/goat`,
-        COMMANDCODE_RSC_PRO_URL: `${mock.url}/docs/plans/pro`,
-        COMMANDCODE_MODELS_PAGE_URL: `${mock.url}/models-page.html`,
-        COMMANDCODE_MODELS_DETAIL_URL: `${mock.url}/model-detail`,
-      }
       try {
-        const result = await runScript(
-          ["scripts/refresh-snapshot.mjs", "--out", out, "--facts-out", factsOut],
-          env,
-        )
         assertEqual(result.status, 0, result.stderr || result.stdout)
-        const mod = (await import(out)) as { MODEL_SNAPSHOT?: Array<Record<string, unknown>> }
-        const row = (mod.MODEL_SNAPSHOT ?? []).find((r) => r.id === MODEL)
-        assert(row, "the missing-price row must ship via the detail page")
+        const row = rows.find((r) => r.id === MODEL)
+        assert(row, "the missing-pricing row must ship via the detail page")
         assertEqual(row.costSource, "detail")
         assertEqual(row.cost, { input: 3.5, output: 14, cacheRead: 0.35, cacheWrite: 0 })
       } finally {
-        await mock.close()
         await rm(dir, { recursive: true, force: true })
       }
     },
@@ -421,9 +335,6 @@ run([
   [
     "skew: cost ladder resolves via RSC slug-record rates (costSource rsc) when page and detail are absent",
     async () => {
-      // A model with a missing models.md price, no models-page row, and a
-      // detail page that carries no pricing (all-null parse) falls through
-      // to the RSC slug-record rates. cacheWrite "$undefined" resolves to 0.
       const MODEL = "gpt-5.4"
       const slugRecord = {
         slug: "gpt-5-4",
@@ -458,87 +369,33 @@ run([
         caps: {},
         reasoning: true,
       }
-      const dir = await mkdtemp(join(tmpdir(), "cc-ladders-rsc-"))
-      const out = join(dir, "snapshot.ts")
-      const factsOut = join(dir, "facts.ts")
-      const mock = await startMockCc({
-        models: API_UNLISTED,
-        registry: REGISTRY,
-        factsMd: MODELS_MD([`| \`${MODEL}\` | GPT-5.4 | 1M | — | — | Go | best |`]),
-        modalitiesBundle: `const models = { U: { id: "vendor/unrelated", name: "U", inputModalities: ["text"], contextWindow: 1e6 } }`,
+      const { result, rows, dir } = await refreshSnapshot({
+        records: [rec({ id: MODEL, name: "GPT-5.4" })],
         rscGoat: `2:${JSON.stringify([filler, slugRecord])}\n`,
-        rscPro: "",
       })
-      const env = {
-        ...process.env,
-        COMMANDCODE_API_BASE: mock.url,
-        COMMANDCODE_REGISTRY_URL: `${mock.url}/registry`,
-        COMMANDCODE_FACTS_URL: `${mock.url}/models.md`,
-        COMMANDCODE_MODALITIES_URL: `${mock.url}/cli.mjs`,
-        COMMANDCODE_RSC_GOAT_URL: `${mock.url}/docs/plans/goat`,
-        COMMANDCODE_RSC_PRO_URL: `${mock.url}/docs/plans/pro`,
-        COMMANDCODE_MODELS_PAGE_URL: `${mock.url}/models-page.html`,
-        COMMANDCODE_MODELS_DETAIL_URL: `${mock.url}/model-detail`,
-      }
       try {
-        const result = await runScript(
-          ["scripts/refresh-snapshot.mjs", "--out", out, "--facts-out", factsOut],
-          env,
-        )
         assertEqual(result.status, 0, result.stderr || result.stdout)
-        const mod = (await import(out)) as { MODEL_SNAPSHOT?: Array<Record<string, unknown>> }
-        const row = (mod.MODEL_SNAPSHOT ?? []).find((r) => r.id === MODEL)
-        assert(row, "the missing-price row must ship via RSC rates")
+        const row = rows.find((r) => r.id === MODEL)
+        assert(row, "the missing-pricing row must ship via RSC rates")
         assertEqual(row.costSource, "rsc")
         assertEqual(row.cost, { input: 9, output: 45, cacheRead: 0.9, cacheWrite: 0 })
       } finally {
-        await mock.close()
         await rm(dir, { recursive: true, force: true })
       }
     },
   ],
 
   [
-    "skew: a CLI-omitted model with a models-page Caps Vision bit promotes to image with provenance",
+    "skew: a catalog record advertising no modalities with a models-page Caps Vision bit promotes to image",
     async () => {
-      // The modalities ladder: CLI omits the model, but the models page
-      // Caps Vision bit is set → MODEL_INPUT_MODALITIES gains a text+image
-      // entry (the runtime advertises image input).
       const MODEL = "gpt-5.4"
-      const modelsPage =
-        `<table><thead><tr><th>Model</th><th>Context</th><th>Intelligence</th><th>Input</th><th>Output</th><th>Cache read</th><th>Cache write</th><th>Caps</th></tr></thead><tbody>` +
-        `<tr><td><a href="/models/gpt-5-4">GPT-5.4</a></td><td><span>1M</span></td><td>52</td><td><span>$1</span></td><td><span>$2</span></td><td><span>$0.1</span></td><td><span>—</span></td><td><button type="button" aria-label="Capabilities: Text input, Vision"></button></td></tr>` +
-        `</tbody></table>`
-      const dir = await mkdtemp(join(tmpdir(), "cc-ladders-vision-"))
-      const out = join(dir, "snapshot.ts")
-      const factsOut = join(dir, "facts.ts")
-      const mock = await startMockCc({
-        models: API_UNLISTED,
-        registry: REGISTRY,
-        factsMd: MODELS_MD([
-          `| \`${MODEL}\` | GPT-5.4 | 1M | — | $1/$2 · cache $0.1 | Go | best |`,
+      const { result, factsText, dir } = await refreshSnapshot({
+        records: [rec({ id: MODEL, name: "GPT-5.4", pricing: PRICING, modalities: null })],
+        modelsPageHtml: modelsPageTable([
+          modelsPageRow("gpt-5-4", "GPT-5.4", { caps: "Text input, Vision" }),
         ]),
-        modalitiesBundle: `const models = { U: { id: "vendor/unrelated", name: "U", inputModalities: ["text"], contextWindow: 1e6 } }`,
-        rscGoat: "",
-        rscPro: "",
-        modelsPageHtml: modelsPage,
       })
-      const env = {
-        ...process.env,
-        COMMANDCODE_API_BASE: mock.url,
-        COMMANDCODE_REGISTRY_URL: `${mock.url}/registry`,
-        COMMANDCODE_FACTS_URL: `${mock.url}/models.md`,
-        COMMANDCODE_MODALITIES_URL: `${mock.url}/cli.mjs`,
-        COMMANDCODE_RSC_GOAT_URL: `${mock.url}/docs/plans/goat`,
-        COMMANDCODE_RSC_PRO_URL: `${mock.url}/docs/plans/pro`,
-        COMMANDCODE_MODELS_PAGE_URL: `${mock.url}/models-page.html`,
-        COMMANDCODE_MODELS_DETAIL_URL: `${mock.url}/model-detail`,
-      }
       try {
-        const result = await runScript(
-          ["scripts/refresh-snapshot.mjs", "--out", out, "--facts-out", factsOut],
-          env,
-        )
         assertEqual(result.status, 0, result.stderr || result.stdout)
         assert(
           result.stdout.includes(
@@ -546,13 +403,11 @@ run([
           ),
           `expected a page-Vision promotion note, got: ${result.stdout}`,
         )
-        const factsText = await readFile(factsOut, "utf-8")
         assert(
           factsText.includes(`"${MODEL}": ["text","image"]`),
           `page-Vision model must gain a text+image facts entry, got: ${factsText.slice(-300)}`,
         )
       } finally {
-        await mock.close()
         await rm(dir, { recursive: true, force: true })
       }
     },

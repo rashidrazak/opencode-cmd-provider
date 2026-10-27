@@ -256,6 +256,23 @@ run([
     },
   ],
   [
+    "extractPlanTableRsc reads an Up-to-qualified money cell (2026-10-27 wording)",
+    () => {
+      // Upstream reworded the repriced GOAT/Pro cells from "$70 of usage" to
+      // "Up to $100 of usage" (and the window cells to "Up to $20"). The
+      // qualifier still introduces the row's figure; anything else stays a
+      // shape change (the test below).
+      const table = renderedTableRsc(PLAN_TABLE_HEADER, [
+        ["GOAT", "$$10", "Up to $100 of usage", "Up to $20", "Up to $50"],
+        ["Pro", "$$20", "Up to $110 of usage", "Up to $22", "Up to $55"],
+      ])
+      assertEqual(extractPlanTableRsc(table), [
+        { display: "GOAT", price: 10, credits: 100, window5h: 20, windowWeek: 50 },
+        { display: "Pro", price: 20, credits: 110, window5h: 22, windowWeek: 55 },
+      ])
+    },
+  ],
+  [
     "extractPlanTableRsc throws on a renamed header (shape change, never a default)",
     () => {
       const table = renderedTableRsc(
@@ -270,6 +287,12 @@ run([
     () => {
       const table = renderedTableRsc(PLAN_TABLE_HEADER, [["Go", "Free", "$$10", "$$3", "$$6"]])
       throws(() => extractPlanTableRsc(table), /Your cost/)
+      // Only "Up to " is tolerated as a qualifier — another phrasing stays a
+      // shape change rather than silently reading the wrong figure.
+      const reworded = renderedTableRsc(PLAN_TABLE_HEADER, [
+        ["GOAT", "$$10", "From $100 of usage", "$$20", "$$50"],
+      ])
+      throws(() => extractPlanTableRsc(reworded), /Monthly credits/)
     },
   ],
   [

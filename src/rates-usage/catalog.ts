@@ -85,6 +85,7 @@ export const MODEL_DEALS: Readonly<Record<string, ModelDeals>> = {
   "gpt-6-luna": { tier: "opensource", benchmark: {"intelligence":38.1}, contextTiers: [{"label":"Standard","context":"≤ 272K","rates":{"input":0.1,"output":0.5,"cacheRead":0.01,"cacheWrite":0.125}},{"label":"Long context","context":"> 272K","rates":{"input":0.2,"output":0.75,"cacheRead":0.02,"cacheWrite":0.25}}], free: false, allowance: {"goat":20,"pro":30} },
   "gpt-6-sol": { tier: "premium", benchmark: {"intelligence":47.6}, contextTiers: [{"label":"Standard","context":"≤ 272K","rates":{"input":2,"output":10,"cacheRead":0.2,"cacheWrite":2.5}},{"label":"Long context","context":"> 272K","rates":{"input":4,"output":15,"cacheRead":0.4,"cacheWrite":5}}], free: false, allowance: {"goat":20,"pro":20} },
   "gpt-6.1-sol": { tier: "premium", benchmark: {"intelligence":51.8}, contextTiers: [{"label":"Standard","context":"≤ 272K","rates":{"input":2,"output":10,"cacheRead":0.1,"cacheWrite":2.5}},{"label":"Long context","context":"> 272K","rates":{"input":4,"output":15,"cacheRead":0.2,"cacheWrite":5}}], free: false, allowance: {"goat":20,"pro":20} },
+  "gpt-6.1-terra": { tier: "premium", contextTiers: [{"label":"Standard","context":"≤ 272K","rates":{"input":1,"output":5,"cacheRead":0.05,"cacheWrite":1.25}},{"label":"Long context","context":"> 272K","rates":{"input":2,"output":7.5,"cacheRead":0.1,"cacheWrite":2.5}}], free: false, allowance: {"goat":20,"pro":20} },
   "inclusionai/ling-3.1-flash": { tier: "opensource", benchmark: {"intelligence":41.1}, free: false, allowance: {"goat":100,"pro":110} },
   "meituan/LongCat-2.0": { tier: "opensource", benchmark: {"intelligence":19.1}, free: false, allowance: {"goat":50,"pro":60} },
   "meta/muse-spark-1.1": { tier: "premium", benchmark: {"intelligence":33.7}, free: false, allowance: {"goat":20,"pro":20} },
@@ -104,6 +105,7 @@ export const MODEL_DEALS: Readonly<Record<string, ModelDeals>> = {
   "moonshotai/Kimi-K2.7-Code": { tier: "opensource", benchmark: {"intelligence":25.8}, free: false, allowance: {"goat":60,"pro":70} },
   "moonshotai/Kimi-K2.7-Code-Highspeed": { tier: "opensource", free: false, allowance: {"goat":20,"pro":30} },
   "moonshotai/Kimi-K3": { tier: "opensource", benchmark: {"intelligence":43.6}, free: false, allowance: {"goat":20,"pro":30} },
+  "moonshotai/Kimi-K3.1-Pro": { tier: "opensource", free: false, allowance: {"goat":20,"pro":30} },
   "nvidia/nemotron-3-ultra-550b-a55b": { tier: "opensource", benchmark: {"intelligence":22.9}, free: false, allowance: {"goat":20,"pro":30} },
   "nvidia/nemotron-3.5-super-vl": { tier: "opensource", benchmark: {"intelligence":26.5}, free: false, allowance: {"goat":20,"pro":30} },
   "ornith/ornith-1.5-122b": { tier: "opensource", free: false, allowance: {"goat":20,"pro":30} },
@@ -146,8 +148,8 @@ export const MODEL_DEALS: Readonly<Record<string, ModelDeals>> = {
 
 export const PLAN_CATALOG: Readonly<Record<PlanId, PlanInfo>> = {
   go: { price: 1, credits: 10, window5h: 2, windowWeek: 5, display: "Go" },
-  goat: { price: 10, credits: 70, window5h: 14, windowWeek: 35, display: "GOAT" },
-  pro: { price: 20, credits: 80, window5h: 16, windowWeek: 40, display: "Pro" },
+  goat: { price: 10, credits: 100, window5h: 20, windowWeek: 50, display: "GOAT" },
+  pro: { price: 20, credits: 110, window5h: 22, windowWeek: 55, display: "Pro" },
   // Legacy Pro: the docs table's row before the Aug 2026 repricing, kept
   // for grandfathered individual-pro accounts (issue #162). Source:
   // https://web.archive.org/web/20260803033612/https://commandcode.ai/docs/resources/pricing-limits
@@ -165,5 +167,5 @@ export const PLAN_CATALOG: Readonly<Record<PlanId, PlanInfo>> = {
 }
 
 export const DEAL_SOURCE_URL = "https://commandcode.ai/docs/resources/pricing-limits"
-export const DEAL_LAST_REFRESHED = "2026-10-23"
+export const DEAL_LAST_REFRESHED = "2026-10-27"
 export const DEAL_PACKAGE_VERSION = "docs"

@@ -142,7 +142,7 @@ run([
         assertEqual(mod.MODEL_REASONING_CAPABILITY[effortsId], true, `${effortsId} (efforts)`)
         assertEqual(mod.CLASSIFICATION_LAST_REFRESHED, TODAY)
         // Every snapshot model got an entry — the synthetic payload covers
-        // the whole membership set.
+        // the whole shipped set.
         for (const id of snapshotById.keys()) {
           assertEqual(typeof mod.MODEL_REASONING_CAPABILITY[id], "boolean", id)
         }

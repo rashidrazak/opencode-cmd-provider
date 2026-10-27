@@ -1,6 +1,6 @@
 // scripts/check-deals-coverage.mjs — subset + pending report (issue #132).
 //
-// Deals are a SUBSET of membership since issue #132: every snapshot model
+// Deals are a SUBSET of the shipped catalog since issue #132: every snapshot model
 // without a deals record ships core-only (enrichment skipped) with a
 // visible pending report — never an exit-1. This script mirrors the
 // refresh script's native pending report as a standalone check:
@@ -64,7 +64,7 @@ if (missing.length > 0) {
     `DEALS PENDING — ${missing.length} snapshot model(s) ship core-only (no RSC record): ${missing.join(", ")}`,
   )
   console.log(
-    "OK — deals remain a subset of membership; pending models skip enrichment (issue #132).",
+    "OK — deals remain a subset of the shipped catalog; pending models skip enrichment (issue #132).",
   )
 } else {
   console.log("OK — every snapshot model has a deals record")

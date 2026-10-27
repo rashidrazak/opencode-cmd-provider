@@ -25,20 +25,27 @@ npm publish --tag next --access public
 ```
 
 `npm run refresh` regenerates everything at once: `src/catalog/snapshot.ts`
-from the live Command Code catalog and `src/catalog/facts.ts` from the CLI
-package's `models.md` plus `dist/cli.mjs` input-modality fields, then
-re-captures the RSC fixtures (`tests/fixtures/rsc-*.txt`) from the live docs
-pages and regenerates `src/catalog/classification.ts` (ADR-0006) and
-`src/rates-usage/catalog.ts` from them (see ADR-0005). The
-release therefore ships the current model list, reasoning/cost facts, vision
-metadata, derived reasoning classification, and deal/allowance/benchmark
-intelligence; commit the updated
-generated files and fixtures with the release. The refresh fails if an API
-model is missing from the CLI modality catalog, if the bundle structure
-changes in a way the parser cannot verify, if the coverage gate finds a
-snapshot model with no RSC record, or if the RSC records are missing the
-`reasoning` flag the classification derives from (a 4xx from the docs site
-also fails loudly; 5xx/network falls back to the committed fixtures).
+and `src/catalog/facts.ts` from the catalog endpoint's client view
+(`GET /provider/v1/models?view=client`, ADR-0024), then re-captures the RSC
+fixtures (`tests/fixtures/rsc-*.txt`) from the live docs pages and regenerates
+`src/catalog/classification.ts` (ADR-0006) and `src/rates-usage/catalog.ts`
+from them (see ADR-0005). The release therefore ships the current model list,
+reasoning/cost facts, vision metadata, derived reasoning classification, and
+deal/allowance/benchmark intelligence; commit the updated generated files and
+fixtures with the release.
+
+The refresh fails loudly on a catalog payload shape change, on a record with
+no context or cost after its full fallback ladder (an unshippable row), or on
+an unreachable catalog — the model list has no fallback source, so a failed fetch
+is a failed refresh rather than a silently smaller catalog. Enrichment sources
+(RSC pages, models page, detail pages) degrade to the next ladder step with a
+note; a 4xx from the docs site fails loudly, while 5xx/network falls back to
+the committed fixtures.
+
+The snapshot this generates is the _bundled floor_. Published installs also
+keep a runtime catalog cache (ADR-0024), so a model that launches between
+releases reaches users without a new version — but shipping a fresh snapshot
+is still what makes it work offline and on a cold cache.
 
 If npm asks for browser or OTP auth, run the publish command manually and complete the npm prompt.
 

@@ -1,4 +1,4 @@
-// tests/deals-coverage.test.ts — deals are a SUBSET of membership (issue
+// tests/deals-coverage.test.ts — deals are a SUBSET of the shipped catalog (issue
 // #132): every MODEL_DEALS record resolves to a snapshot model, and a
 // snapshot model with no deals record is a visible pending report — never
 // a red suite. The old "every snapshot model must have a deals record so
@@ -30,7 +30,7 @@ const RSC_PRO = readFileSync(new URL("./fixtures/rsc-pro.txt", import.meta.url),
 
 run([
   [
-    "every MODEL_DEALS entry resolves to a snapshot model (deals ⊆ membership)",
+    "every MODEL_DEALS entry resolves to a snapshot model (deals ⊆ shipped catalog)",
     () => {
       const snapshotIds = new Set(MODEL_SNAPSHOT.map((model) => model.id))
       const stale = Object.keys(MODEL_DEALS).filter((id) => !snapshotIds.has(id))
@@ -59,7 +59,7 @@ run([
     () => {
       // The RSC's per-plan (goat, pro) slug records are the source of truth
       // for the snapshot id (the alias is applied inside extractPlanPageRsc).
-      // Records that don't resolve to a snapshot id are docs-ahead-of-membership
+      // Records that don't resolve to a snapshot id are docs-ahead of the catalog
       // skew (catalog-refresh run 33924108227: the docs shipped gpt-6-astra
       // before the package table did) — the generators drop them by design
       // (the !snapshotIds.has(sid) guards in buildRscInputs /

@@ -1,11 +1,13 @@
-// tests/api-demotion.test.ts — issue #133: the provider listing API is a
-// pure divergence reporter (set-diff notes, both directions, zero gating
-// power, zero field writes, zero runtime knowledge) and the refresh
-// pipeline reads membership first (registry dist-tag to package table)
-// with enrichment attached after.
+// tests/api-demotion.test.ts — the plain listing endpoint is a divergence
+// reporter, and the runtime stays offline.
 //
-// Synthetic worlds only (never upstream's live ids): the listing API is
-// annotate-only, so its values must never leak into the emitted modules.
+// ADR-0024 moved the model list to the catalog endpoint's client view
+// (`/provider/v1/models?view=client`). The *plain* listing endpoint
+// (`/provider/v1/models`, the thin shape) remains what it was after issue #130:
+// annotate-only — set-diff notes in both directions, zero gating power, zero
+// field writes. Its values must never reach the emitted modules.
+//
+// Synthetic worlds only (never upstream's live ids).
 import { mkdtemp, readFile, rm } from "node:fs/promises"
 import { readdirSync, readFileSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -14,14 +16,19 @@ import { spawn } from "node:child_process"
 import { startMockCc } from "./helpers/mock-cc.js"
 import { assert, assertEqual, run } from "./harness.js"
 
-const PACKAGE_MD =
-  "## Open Source\n\n" +
-  "| Id (use EXACTLY this) | Name | Context | Efforts | $/1M in/out · cache read | Min plan | Best for |\n" +
-  "|---|---|---|---|---|---|---|\n" +
-  "| `vendor/divergent` | Divergent Model | 1M | low | $2/$10 · cache $0.2 | Go and above | best |\n"
-
-const CLI_BUNDLE =
-  'const models={D:{name:"Divergent Model",id:"vendor/divergent",inputModalities:["text"],contextWindow:1e6}}'
+const CATALOG = {
+  catalogVersion: "test-catalog",
+  data: [
+    {
+      id: "vendor/divergent",
+      name: "Divergent Model",
+      context_length: 1_000_000,
+      reasoningEfforts: ["low"],
+      inputModalities: ["text"],
+      pricing: { inputCost: 2, outputCost: 10, cacheReadCost: 0.2 },
+    },
+  ],
+}
 
 function runScript(args, env): Promise<{ status: number | null; stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
@@ -42,8 +49,7 @@ function scriptEnv(mock: { url: string }) {
     ...process.env,
     COMMANDCODE_API_BASE: mock.url,
     COMMANDCODE_REGISTRY_URL: `${mock.url}/registry`,
-    COMMANDCODE_FACTS_URL: `${mock.url}/models.md`,
-    COMMANDCODE_MODALITIES_URL: `${mock.url}/cli.mjs`,
+    COMMANDCODE_CATALOG_URL: `${mock.url}/provider/v1/models?view=client`,
     COMMANDCODE_RSC_GOAT_URL: `${mock.url}/docs/plans/goat`,
     COMMANDCODE_RSC_PRO_URL: `${mock.url}/docs/plans/pro`,
     COMMANDCODE_MODELS_PAGE_URL: `${mock.url}/models-page.html`,
@@ -51,23 +57,33 @@ function scriptEnv(mock: { url: string }) {
   }
 }
 
+/** Runs one refresh with the given plain-endpoint failure mode. */
+async function refreshWithPlainEndpoint(options: Record<string, unknown>) {
+  const dir = await mkdtemp(join(tmpdir(), "cc-api-"))
+  const out = join(dir, "snapshot.ts")
+  const factsOut = join(dir, "facts.ts")
+  const mock = await startMockCc({
+    registry: { "dist-tags": { latest: "9.9.9" } },
+    catalog: CATALOG,
+    ...options,
+  })
+  try {
+    const result = await runScript(
+      ["scripts/refresh-snapshot.mjs", "--out", out, "--facts-out", factsOut],
+      scriptEnv(mock),
+    )
+    return { result, out, factsOut, dir }
+  } finally {
+    await mock.close()
+  }
+}
+
 run([
   [
-    "listing API 500 degrades to a skipped-divergence note; membership ships with exit 0",
+    "plain listing API 500 degrades to a skipped-divergence note; the model list ships with exit 0",
     async () => {
-      const dir = await mkdtemp(join(tmpdir(), "cc-api-500-"))
-      const out = join(dir, "snapshot.ts")
-      const mock = await startMockCc({
-        modelsStatus: 500,
-        registry: { "dist-tags": { latest: "9.9.9" } },
-        factsMd: PACKAGE_MD,
-        modalitiesBundle: CLI_BUNDLE,
-      })
+      const { result, out, dir } = await refreshWithPlainEndpoint({ modelsStatus: 500 })
       try {
-        const result = await runScript(
-          ["scripts/refresh-snapshot.mjs", "--out", out, "--facts-out", join(dir, "facts.ts")],
-          scriptEnv(mock),
-        )
         assertEqual(result.status, 0, result.stderr || result.stdout)
         assert(
           result.stdout.includes("divergence note skipped"),
@@ -77,31 +93,20 @@ run([
         assertEqual(
           mod.MODEL_SNAPSHOT.map((m) => m.id),
           ["vendor/divergent"],
-          "membership must ship despite the API outage",
         )
       } finally {
-        await mock.close()
         await rm(dir, { recursive: true, force: true })
       }
     },
   ],
 
   [
-    "listing API non-JSON body degrades to a skipped-divergence note; membership ships with exit 0",
+    "plain listing API non-JSON body degrades to a skipped-divergence note; the model list ships",
     async () => {
-      const dir = await mkdtemp(join(tmpdir(), "cc-api-raw-"))
-      const out = join(dir, "snapshot.ts")
-      const mock = await startMockCc({
+      const { result, out, dir } = await refreshWithPlainEndpoint({
         modelsRaw: "<html>not json</html>",
-        registry: { "dist-tags": { latest: "9.9.9" } },
-        factsMd: PACKAGE_MD,
-        modalitiesBundle: CLI_BUNDLE,
       })
       try {
-        const result = await runScript(
-          ["scripts/refresh-snapshot.mjs", "--out", out, "--facts-out", join(dir, "facts.ts")],
-          scriptEnv(mock),
-        )
         assertEqual(result.status, 0, result.stderr || result.stdout)
         assert(
           result.stdout.includes("divergence note skipped"),
@@ -111,31 +116,20 @@ run([
         assertEqual(
           mod.MODEL_SNAPSHOT.map((m) => m.id),
           ["vendor/divergent"],
-          "membership must ship despite the API garbage body",
         )
       } finally {
-        await mock.close()
         await rm(dir, { recursive: true, force: true })
       }
     },
   ],
 
   [
-    "listing API wrong-shape JSON degrades to a skipped-divergence note; membership ships with exit 0",
+    "plain listing API wrong-shape JSON degrades to a skipped-divergence note; the model list ships",
     async () => {
-      const dir = await mkdtemp(join(tmpdir(), "cc-api-shape-"))
-      const out = join(dir, "snapshot.ts")
-      const mock = await startMockCc({
-        models: { object: "list", data: "not-an-array" },
-        registry: { "dist-tags": { latest: "9.9.9" } },
-        factsMd: PACKAGE_MD,
-        modalitiesBundle: CLI_BUNDLE,
+      const { result, out, dir } = await refreshWithPlainEndpoint({
+        models: { object: "not-a-list" },
       })
       try {
-        const result = await runScript(
-          ["scripts/refresh-snapshot.mjs", "--out", out, "--facts-out", join(dir, "facts.ts")],
-          scriptEnv(mock),
-        )
         assertEqual(result.status, 0, result.stderr || result.stdout)
         assert(
           result.stdout.includes("divergence note skipped"),
@@ -145,37 +139,26 @@ run([
         assertEqual(
           mod.MODEL_SNAPSHOT.map((m) => m.id),
           ["vendor/divergent"],
-          "membership must ship despite the API shape change",
         )
       } finally {
-        await mock.close()
         await rm(dir, { recursive: true, force: true })
       }
     },
   ],
 
   [
-    "same-id divergent API values never reach Snapshot or facts fields (the API wins no field)",
+    "same-id divergent plain-API values never reach Snapshot or facts fields (the plain API wins no field)",
     async () => {
-      const dir = await mkdtemp(join(tmpdir(), "cc-api-fields-"))
-      const out = join(dir, "snapshot.ts")
-      const factsOut = join(dir, "facts.ts")
-      const mock = await startMockCc({
-        // The API serves the SAME id with wrong values: a wrong name and a
-        // context_length no package row carries. Neither may leak anywhere.
+      const { result, out, factsOut, dir } = await refreshWithPlainEndpoint({
+        // The plain endpoint serves the SAME id with wrong values: a wrong
+        // name and a context_length no catalog record carries. Neither may
+        // leak anywhere — the catalog view is the only authority.
         models: {
           object: "list",
           data: [{ id: "vendor/divergent", name: "WRONG NAME FROM API", context_length: 1 }],
         },
-        registry: { "dist-tags": { latest: "9.9.9" } },
-        factsMd: PACKAGE_MD,
-        modalitiesBundle: CLI_BUNDLE,
       })
       try {
-        const result = await runScript(
-          ["scripts/refresh-snapshot.mjs", "--out", out, "--facts-out", factsOut],
-          scriptEnv(mock),
-        )
         assertEqual(result.status, 0, result.stderr || result.stdout)
         const mod = await import(out)
         assertEqual(mod.MODEL_SNAPSHOT, [
@@ -183,10 +166,10 @@ run([
             id: "vendor/divergent",
             name: "Divergent Model",
             contextLength: 1000000,
-            contextSource: "models.md",
+            contextSource: "catalog",
             efforts: ["low"],
             cost: { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 0 },
-            costSource: "models.md",
+            costSource: "catalog",
           },
         ])
         const factsMod = await import(factsOut)
@@ -195,22 +178,20 @@ run([
         })
         assertEqual(factsMod.MODEL_EFFORTS, { "vendor/divergent": ["low"] })
       } finally {
-        await mock.close()
         await rm(dir, { recursive: true, force: true })
       }
     },
   ],
 
   [
-    "a membership failure aborts before the listing API is contacted (membership-before-enrichment)",
+    "a model-list failure aborts before the plain listing endpoint is contacted",
     async () => {
       const dir = await mkdtemp(join(tmpdir(), "cc-api-order-"))
       const out = join(dir, "snapshot.ts")
       const mock = await startMockCc({
         models: { object: "list", data: [] },
         registryRaw: "<html>not json</html>",
-        factsMd: PACKAGE_MD,
-        modalitiesBundle: CLI_BUNDLE,
+        catalog: CATALOG,
       })
       try {
         const result = await runScript(
@@ -221,7 +202,7 @@ run([
         assertEqual(
           mock.hits.models,
           0,
-          "a broken membership read must abort before the listing API is contacted",
+          "the plain endpoint must not be contacted when the model list cannot be resolved",
         )
       } finally {
         await mock.close()
@@ -231,22 +212,24 @@ run([
   ],
 
   [
-    "CLI bundle outage degrades to text-only modalities with a pending note, exit 0 (enrichment, never a membership gate)",
+    "a record advertising no modalities logs a pending note and ships text-only (never a failure)",
     async () => {
-      const dir = await mkdtemp(join(tmpdir(), "cc-cli-outage-"))
-      const out = join(dir, "snapshot.ts")
-      const factsOut = join(dir, "facts.ts")
-      const mock = await startMockCc({
+      const { result, out, factsOut, dir } = await refreshWithPlainEndpoint({
+        catalog: {
+          catalogVersion: "test-catalog",
+          data: [
+            {
+              id: "vendor/divergent",
+              name: "Divergent Model",
+              context_length: 1_000_000,
+              inputModalities: null,
+              pricing: { inputCost: 2, outputCost: 10, cacheReadCost: 0.2 },
+            },
+          ],
+        },
         models: { object: "list", data: [] },
-        registry: { "dist-tags": { latest: "9.9.9" } },
-        factsMd: PACKAGE_MD,
-        cliStatus: 500,
       })
       try {
-        const result = await runScript(
-          ["scripts/refresh-snapshot.mjs", "--out", out, "--facts-out", factsOut],
-          scriptEnv(mock),
-        )
         assertEqual(result.status, 0, result.stderr || result.stdout)
         assert(
           result.stdout.includes("modalities pending") &&
@@ -254,35 +237,38 @@ run([
           `expected a modalities-pending note naming the model, got stdout: ${result.stdout}`,
         )
         const mod = await import(out)
-        const row = mod.MODEL_SNAPSHOT.find((m) => m.id === "vendor/divergent")
-        assert(row, "the package row must ship despite the CLI outage")
-        assertEqual(row.contextLength, 1000000)
-        assertEqual(row.cost, { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 0 })
-        // Text-only fallback: no image entry for the model.
+        assert(
+          mod.MODEL_SNAPSHOT.some((m) => m.id === "vendor/divergent"),
+          "the row must ship",
+        )
         const factsText = await readFile(factsOut, "utf-8")
         const modSection = factsText.slice(factsText.indexOf("MODEL_INPUT_MODALITIES"))
         assert(
           !modSection.includes("vendor/divergent"),
-          "a CLI-outage model must fall back to text-only (no modalities entry)",
+          "a modality-less model must fall back to text-only (no modalities entry)",
         )
       } finally {
-        await mock.close()
         await rm(dir, { recursive: true, force: true })
       }
     },
   ],
 
   [
-    "runtime source has no listing-API code path (stays offline)",
+    "runtime source reaches the catalog only from the background-sync module",
     () => {
-      // The plugin runtime never reads the listing endpoint: membership
-      // ships bundled in the Snapshot. Any refresh-time fetch must stay in
-      // scripts/, never in src/. Two pins: no reference to the listing
-      // endpoint anywhere under src/, AND no fetch() at all in the
-      // offline layers (src/plugin, src/catalog) — network at runtime
-      // lives only in the provider transport (generate/messages/whoami)
-      // and the plan-summary tool, never in catalog/plugin wiring.
+      // ADR-0024 changed this policy deliberately: the model list may refresh at
+      // runtime, but ONLY from src/plugin/catalog-sync.ts, and only behind
+      // registration (the entry point fires it unawaited, after the config hook
+      // has already registered models from the cache/bundle).
+      //
+      // Two pins keep that narrow:
+      //   1. `src/plugin/catalog-sync.ts` is the one module allowed to name the
+      //      catalog endpoint — anywhere else it is a code path nobody audited;
+      //   2. no module under src/catalog/ may fetch at all: the catalog data
+      //      layer stays pure, so the disk cache is readable without network
+      //      semantics and the runtime bundle cannot grow a second transport.
       const root = join(dirname(new URL(import.meta.url).pathname), "..")
+      const syncModule = join(root, "src", "plugin", "catalog-sync.ts")
       const offenders: string[] = []
       const fetchOffenders: string[] = []
       const walk = (dir: string) => {
@@ -293,13 +279,20 @@ run([
             continue
           }
           if (!entry.name.endsWith(".ts") && !entry.name.endsWith(".tsx")) continue
+          if (full === syncModule) continue
           const text = readFileSync(full, "utf-8")
-          if (text.includes("/provider/v1/models")) {
-            offenders.push(full)
+          // A `*_SOURCE_URL` provenance declaration legitimately names the
+          // endpoint (it is metadata a surface can display); any other mention
+          // would be a code path. Check per line so the constant cannot mask a
+          // real offender in the same file.
+          for (const line of text.split("\n")) {
+            if (!line.includes("/provider/v1/models")) continue
+            if (/^\s*\/\//.test(line)) continue
+            if (/export const [A-Z_]*SOURCE_URL\s*=/.test(line)) continue
+            offenders.push(`${full}: ${line.trim()}`)
           }
           if (
-            (full.includes(`${join(root, "src", "plugin")}/`) ||
-              full.includes(`${join(root, "src", "catalog")}/`)) &&
+            full.includes(`${join(root, "src", "catalog")}/`) &&
             /(^|[^A-Za-z0-9_.])fetch\s*\(/.test(text)
           ) {
             fetchOffenders.push(full)
@@ -307,11 +300,15 @@ run([
         }
       }
       walk(join(root, "src"))
-      assertEqual(offenders, [], "runtime source must not reference the listing endpoint")
+      assertEqual(
+        offenders,
+        [],
+        "only src/plugin/catalog-sync.ts may reference the catalog endpoint",
+      )
       assertEqual(
         fetchOffenders,
         [],
-        "the offline layers (src/plugin, src/catalog) must not fetch at runtime",
+        "the catalog data layer (src/catalog) must stay pure — no fetch at all",
       )
     },
   ],

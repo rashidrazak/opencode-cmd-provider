@@ -1,7 +1,7 @@
 // scripts/parse-models-page.mjs — the Command Code models page index parser
 // (issue #131). The models page (`https://commandcode.ai/models`) is an
 // **enrichment source** since the models.md-primary flip (issue #130): it
-// never decides Snapshot membership and never wins a ship-bar field. Its
+// never decides which models ship and never wins a ship-bar field. Its
 // outputs are:
 //
 //   - per-row display rates (Input/Output/Cache read/Cache write) — the
@@ -12,7 +12,7 @@
 //   - the Caps capability bits (Text input / Vision / Reasoning) — feed the
 //     reasoning any-true-wins derivation and the modalities fallback ladder
 //     (issue #132);
-//   - the per-row slug list, joined to Snapshot membership via the pinned
+//   - the per-row slug list, joined to the shipped Snapshot rows via the pinned
 //     slug-to-id map below (date-suffixed and vendor-prefixed ids resolve;
 //     an unmapped slug fails loudly — a shape change needs parser work).
 //
@@ -368,10 +368,10 @@ export function slugToSnapshotId(slug) {
  * value change, and a value change must land as a refresh-PR diff, never
  * as a red suite. The 2026-09-19/20 catalog-refresh cron went red exactly
  * because a pinned *value* (`meituan/LongCat-2.0:free`) was asserted
- * against live membership after upstream renamed the id.
+ * against the live shipped ids after upstream renamed the id.
  *
  *  - `stale`: a map value that is no longer a Snapshot id. Needs the
- *    membership side (`snapshotIds`).
+ *    shipped-ids side (`snapshotIds`).
  *  - `dangling`: a map key no live models-page row carries any more while
  *    its pinned id is still shipped — the model lives, the page slug
  *    moved, so the key needs re-pinning. Needs both sides.
@@ -381,7 +381,7 @@ export function slugToSnapshotId(slug) {
  * A side whose evidence was not supplied reports `null` — "not evaluated",
  * never "clean" — so a caller that skipped the page fetch cannot claim the
  * page-relative classes are empty. `dangling` is restricted to live pins
- * on purpose: a pin whose model also left membership is already `stale`,
+ * on purpose: a pin whose model also stopped shipping is already `stale`,
  * and a page that renders few rows must not flood the report with every
  * key it happens not to carry.
  *

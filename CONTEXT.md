@@ -5,12 +5,20 @@ Plugin + provider package that lets OpenCode use Command Code as a model provide
 ## Language
 
 **Model catalog**:
-The list of models Command Code offers, as published in the command-code npm package's bundled models.md table (id, name, Context, Efforts, price) — the sole membership authority; every row ships.
+The list of models Command Code offers, as served by the catalog endpoint's client view (`GET /provider/v1/models?view=client`) — the only source that decides which models ship since ADR-0024; every non-`hidden` record ships. The `hidden` flag is upstream's own "do not offer this" marker (free variants, retired aliases, stealth previews). The npm package's `models.md` is a rendering of this catalog's non-`hidden` rows and is no longer read.
 _Avoid_: models list, model endpoint, offerings
 
+**Membership**:
+Which models the Model catalog carries — the set of records that ship. Purely structural: it is never a subscription, plan, or account status (those are Plan identity and Rates & usage). A model is either a member of the catalog or absent from it; enrichment is separate and may be missing for a member without affecting membership.
+_Avoid_: subscription, entitlement, plan status, model list
+
 **Snapshot**:
-A copy of the Model catalog's membership bundled inside the plugin package, each row carrying its ship-bar fields (id, name, context length, costs, efforts); the runtime source of truth for which Command Code models exist.
+A copy of the Model catalog bundled inside the plugin package, each row carrying its ship-bar fields (id, name, context length, costs, efforts); the guaranteed runtime source of truth for which Command Code models exist, and the floor under the Catalog cache.
 _Avoid_: embedded catalog, static catalog, shipped list
+
+**Catalog cache**:
+The last Model catalog the plugin's background fetch accepted, on disk (`$XDG_CACHE_HOME/opencode-cmd-provider/models.json`). Read at startup (~1 ms) so the network is never on the startup path; the fetch that refreshes it runs behind registration for the next start. Merged as a **union** with the Snapshot — it may add or refresh rows, never remove one — and any defect degrades silently to the Snapshot (ADR-0024).
+_Avoid_: membership cache, model cache, catalog file, disk snapshot
 
 **Auto-registration**:
 The plugin making the `commandcode` provider and its models available to OpenCode without the user declaring them in `opencode.json`.
@@ -46,7 +54,7 @@ Models the user explicitly lists under `provider.commandcode.models` in `opencod
 _Avoid_: user models, custom models, overrides
 
 **Catalog refresh**:
-Updating the snapshot to match the Model catalog's membership (the models.md table); a package-table row removal prunes the snapshot immediately. Happens on plugin release, never at runtime.
+Updating the snapshot to match the Model catalog (the catalog endpoint); a record upstream drops prunes the snapshot immediately. Happens on plugin release, never at runtime — the _runtime_ path only reads the Catalog cache, which is a separate and purely non-blocking concern (ADR-0024).
 _Avoid_: model sync, catalog update, live refresh
 
 **Core**:
@@ -63,7 +71,7 @@ rates, context-window rate bands, and GOAT/Pro monthly allowances. Bundled in
 and regenerated via `npm run refresh:deals` (live, with 5xx/network fallback
 to the committed `tests/fixtures/rsc-*.txt` fixtures and loud 4xx failure;
 offline via `-- --fixtures`).
-Deals are a **subset of membership** (issue #132): a snapshot model with no
+Deals are a **subset of the shipped catalog** (issue #132): a snapshot model with no
 RSC/deals record ships core-only — enrichment skipped, a `deals pending —`
 report logged, never an exit-1. The fixtures are re-captured on every
 `npm run refresh` and by the daily catalog-refresh cron so they stay in sync
@@ -107,9 +115,10 @@ _Avoid_: plan detection default, detected-guess plan
 
 **Classification**:
 The per-model reasoning capability (reasoning-capable or not, and whether
-with explicit efforts), derived any-true-wins across the models.md efforts
-entry, the `reasoning` flag on the docs' RSC slug records, and the models
-page Caps Reasoning bit, and generated into `src/catalog/classification.ts`;
+with explicit efforts), derived any-true-wins across the catalog record's
+`reasoningEfforts` list, the `reasoning` flag on the docs' RSC slug records,
+and the models page Caps Reasoning bit, and generated into
+`src/catalog/classification.ts`;
 the runtime's reasoning metadata derives from it. Models with no evidence
 anywhere ship in the visible `classification pending` bucket and behave as
 non-reasoning until evidence arrives. Human input is limited to the
@@ -120,22 +129,22 @@ _Avoid_: reasoning set, hand classification, capability set
 
 **Capability facts**:
 The generated per-model capability data for the Snapshot rows — reasoning
-efforts and per-1M-token rates parsed from the models.md table (missing
-cells resolved through the ordered enrichment ladders, each row carrying
-its provenance), plus input modalities parsed from the command-code CLI
-bundle — bundled in `src/catalog/facts.ts` and regenerated via
-`npm run refresh:snapshot`. Classification is deliberately not a
+efforts, per-1M-token rates, and input modalities read from the catalog
+record (a missing `pricing` block resolved through the ordered enrichment
+ladders, each row carrying its provenance) — bundled in
+`src/catalog/facts.ts` and regenerated via `npm run refresh:snapshot`. Classification is deliberately not a
 capability fact: it is derived any-true-wins across three evidence
 channels (see Classification), not parsed from the npm package alone.
 _Avoid_: model metadata, feature flags, model config
 
 **Enrichment source**:
-The provider listing API, the docs' RSC slug records, the CLI bundle, and
-the Command Code models page: supportive data that fills gaps and confirms
-facts but never decides Snapshot membership, never wins a ship-bar field,
-and never gates the refresh. Missing enrichment degrades to a visible
-pending fallback (never a failure); a shipped row always traces to one
-row of the source-authority table (see ADR-0008).
+The docs' RSC slug records, the Command Code models page, and the plain
+listing endpoint (`/provider/v1/models`, the thin shape): supportive data
+that fills gaps and confirms facts but never decides which models ship,
+never wins a ship-bar field, and never gates the refresh. Missing
+enrichment degrades to a visible pending fallback (never a failure); a
+shipped row always traces to one row of the source-authority table (see
+ADR-0008, amended by ADR-0024).
 _Avoid_: fallback source, secondary catalog, metadata feed
 
 **Release**:

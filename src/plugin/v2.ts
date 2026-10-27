@@ -48,6 +48,12 @@ export const FIRST_RUN_DEFAULT_MODEL_ID = "gpt-5.6-terra"
 
 /** Rates & usage seams; Core never imports the slice (ADR-0004). */
 export interface V2SetupExtensions {
+  /**
+   * The catalog rows to register. Defaults to the bundled Snapshot; the
+   * entry point passes the merged bundle+cache view (ADR-0024) so a cached
+   * catalog fetched last session reaches the picker.
+   */
+  snapshot?: readonly CatalogModel[]
   /** Extra provider pass, replayed after Auto-registration. */
   enrichProvider?: (editor: V2ProviderEditor) => void
   /** Extra tools registered alongside the core set. */
@@ -74,7 +80,7 @@ export async function setupCommandCode(
   const specifier = `${AISDK_PREFIX}${resolveProviderNpm()}`
   await ctx.provider.transform((editor) => {
     registerProvider(editor, specifier)
-    registerModels(editor)
+    registerModels(editor, extensions.snapshot ?? MODEL_SNAPSHOT)
     extensions.enrichProvider?.(editor)
   })
   await ctx.model.transform((editor) => {
