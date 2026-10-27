@@ -905,15 +905,42 @@ run([
   [
     "renderPlanSummary shows plan info and per-model allowances",
     () => {
+      // The plan figures and the per-model allowance are upstream-owned: the
+      // refresh cron moves them, so they are derived from the generated
+      // catalogs here rather than re-typed (spec #108 — an upstream repricing
+      // surfaces as a refresh-PR diff, never as a red suite).
+      const info = PLAN_CATALOG.goat
       const out = renderPlanSummary("goat", MODEL_DEALS, PLAN_CATALOG)
-      assert(out.includes("GOAT"), "must name the plan")
-      assert(out.includes("$70"), "must show plan credits")
-      assert(out.includes("$14"), "must show 5h window")
-      assert(out.includes("$35"), "must show weekly window")
-      assert(out.includes("Qwen/Qwen3.8-27B"), "must list an allowed model")
-      assert(out.includes("23,972"), "must show the Qwen monthly request estimate")
-      assert(out.includes("| $70 |"), "must show the Qwen allowance")
-      assert(out.includes("50%"), "must show the Gemini discount")
+      assert(out.includes(info.display), "must name the plan")
+      assert(
+        out.includes(
+          `$${info.price}/mo buys $${info.credits} of credits; 5-hour window $${info.window5h}, weekly window $${info.windowWeek}.`,
+        ),
+        `must show the plan's price, credits and windows, got:\n${out}`,
+      )
+      const allowanceId = Object.entries(MODEL_DEALS).find(
+        ([, d]) => d.allowance?.goat !== undefined,
+      )?.[0]
+      assert(allowanceId, "the bundled deals must carry at least one GOAT allowance")
+      const allowance = MODEL_DEALS[allowanceId].allowance?.goat
+      assert(out.includes(allowanceId), "must list an allowed model")
+      assert(
+        out.includes(`| \`${allowanceId}\` | $${allowance} |`),
+        "must show that model's allowance",
+      )
+      // The ~requests/mo column is derived from the bundled cost row + the
+      // request profile, so assert its shape (a grouped number), not the value
+      // upstream pricing happens to produce this month.
+      const allowanceRow = out
+        .split("\n")
+        .find((line) => line.includes(`| \`${allowanceId}\` | $${allowance} |`))
+      assert(allowanceRow, "the allowance row must be rendered")
+      assert(
+        /\| [0-9][0-9,]* \|/.test(allowanceRow),
+        `the allowance row must carry a monthly request estimate, got: ${allowanceRow}`,
+      )
+      const discount = Object.values(MODEL_DEALS).find((d) => d.discount && !d.free)?.discount
+      if (discount) assert(out.includes(`${discount.pct}%`), "must show a model discount")
       assert(out.includes("free"), "must mention free models")
       assert(out.includes("pricing-limits"), "must link the pricing page")
     },
@@ -963,8 +990,18 @@ run([
         out.includes("$15/mo buys $30 of credits; 5-hour window $9, weekly window $18."),
         `must render the pre-reprice row, got:\n${out}`,
       )
-      assert(!out.includes("buys $80 of credits"), "must not claim the current Pro's pool")
-      assert(!out.includes("weekly window $40"), "must not claim the current Pro's windows")
+      // The pinned legacy row is this package's own figure, but the *current*
+      // Pro row is upstream-owned — derive it so a future repricing does not
+      // redden this test (spec #108).
+      const pro = PLAN_CATALOG.pro
+      assert(
+        !out.includes(`buys $${pro.credits} of credits`),
+        "must not claim the current Pro's pool",
+      )
+      assert(
+        !out.includes(`weekly window $${pro.windowWeek}`),
+        "must not claim the current Pro's windows",
+      )
       assert(
         out.includes("no per-model allowances"),
         "the docs allowances belong to the current Pro, not this SKU",

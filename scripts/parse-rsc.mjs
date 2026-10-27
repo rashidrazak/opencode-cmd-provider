@@ -154,9 +154,18 @@ function unescapeFlightText(text) {
   return text.startsWith("$$") ? text.slice(1) : text
 }
 
-// Parses a money cell ("$$10", "$$70 of usage") into a number. Anything
-// without a leading dollar amount is a shape change — a silent default here
-// would ship a wrong plan price (ADR-0008).
+// A money cell may qualify its figure with "Up to " — the 2026-10-27 capture
+// reads "Up to $100 of usage" / "Up to $20" for the repriced GOAT and Pro rows.
+// The qualifier rides on the same cell the plain "$70 of usage" did, so the
+// figure it introduces is the row's value either way. Any other prefix stays a
+// shape change: silently reading a differently-phrased cell would ship a wrong
+// plan price (ADR-0008).
+const PLAN_TABLE_MONEY_RE = /^(?:Up to )?\$([0-9][0-9,]*(?:\.[0-9]+)?)/
+
+// Parses a money cell ("$$10", "$$70 of usage", "Up to $100 of usage") into a
+// number. Anything without a (possibly "Up to "-qualified) leading dollar
+// amount is a shape change — a silent default here would ship a wrong plan
+// price (ADR-0008).
 function planTableMoney(value, planLabel, column) {
   if (typeof value !== "string") {
     throw new Error(
@@ -164,7 +173,7 @@ function planTableMoney(value, planLabel, column) {
         `(got ${JSON.stringify(value)})`,
     )
   }
-  const match = unescapeFlightText(value).match(/^\$([0-9][0-9,]*(?:\.[0-9]+)?)/)
+  const match = unescapeFlightText(value).match(PLAN_TABLE_MONEY_RE)
   if (!match) {
     throw new Error(
       `RSC plan table shape change: ${planLabel}'s "${column}" cell ` +
