@@ -1,3 +1,40 @@
+## 2.3.1 - 2026-10-28
+
+**Fixes — every Command Code model shows `[CMD]` on OpenCode v2, and Beam
+works on the Go plan.**
+
+### Fixes
+
+- **`[CMD]` on every model in the v2 picker**
+  ([#321](https://github.com/rashidrazak/opencode-cmd-provider/pull/321)):
+  models.dev now lists a `commandcode` provider, and OpenCode v2 adds its
+  models before the plugin runs. The plugin took those for user
+  declarations and left them alone, so 71 of 94 models kept models.dev's
+  names, limits, cost and modalities and showed without `[CMD]`. Every
+  Snapshot model now takes the plugin's entry. User config is applied after
+  plugins, so your own model names and settings still win, and routing is
+  unchanged. v1 was not affected.
+- **Reasoning replayed on the Go-plan wire**
+  ([#322](https://github.com/rashidrazak/opencode-cmd-provider/pull/322)):
+  the legacy `/alpha/generate` transport dropped earlier assistant
+  reasoning, and Beam 1.0 answers HTTP 400 for a turn when any earlier
+  assistant message omits it. Reasoning models now replay it as a
+  `{ type: "reasoning", text }` content part, the shape the official
+  command-code client sends. This applies to every reasoning model on the Go
+  plan, so those requests now carry earlier reasoning as input. Provider API
+  requests (GOAT and above) are unchanged.
+- **The repo's dev plugin no longer shadows the installed one**
+  ([#320](https://github.com/rashidrazak/opencode-cmd-provider/pull/320)):
+  the working-tree entry moved from `.opencode/plugins/` to
+  `dev/opencode-plugin/`, so `opencode plugin check` and `update` work again
+  from inside the repo. Contributors only; the published package is
+  unchanged.
+
+### Model catalog
+
+- No changes: the live catalog, reasoning classification and deals match
+  2.3.0.
+
 ## 2.3.0 - 2026-10-27
 
 **Highlight — new models reach you without a plugin update.** The plugin now
