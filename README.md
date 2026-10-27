@@ -200,8 +200,12 @@ rm -rf ~/.cache/opencode/packages/opencode-cmd-provider*
 The first start after an update takes a little longer because the plugin is
 downloaded again. You never need to sign in again.
 
-New Command Code models come with plugin updates, so if a model is missing from
-`/models`, updating is the fix.
+New Command Code models usually appear on their own: the plugin refreshes its
+model list in the background each time OpenCode starts, so a model launched
+after your installed version was published reaches `/models` on the next start.
+If one is still missing, the background refresh may be blocked by your network
+or disabled via `COMMANDCODE_DISABLE_CATALOG_SYNC`; updating the plugin is then
+the fix.
 
 ## Uninstall
 

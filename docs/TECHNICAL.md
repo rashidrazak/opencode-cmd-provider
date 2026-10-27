@@ -703,8 +703,19 @@ Both e2e scripts are excluded from `npm test`.
 
 ## Troubleshooting
 
-- **New models or a new release do not appear.** Stale plugin cache — see
+- **New models or a new release do not appear.** Two separate caches are in
+  play. A model Command Code added _after_ your installed version shipped should
+  arrive on its own via the [membership cache](#model-discovery-and-offline-behaviour);
+  if it does not, check `COMMANDCODE_DISABLE_CATALOG_SYNC` and whether the
+  catalog endpoint is reachable, then inspect
+  `$XDG_CACHE_HOME/opencode-cmd-provider/models.json`. A _new plugin release_
+  still needs the install cache refreshed — see
   [Installation mechanics and caching](#installation-mechanics-and-caching).
+- **`opencode models` shows nothing / proves nothing about the cache.** That
+  one-shot command exits in ~60 ms without activating plugins, so it exercises
+  the `config`-hook registration path only and never runs `setup()` — where the
+  background refresh is started. Use `opencode run`, or a served instance with
+  `POST /api/plugin/await-activation`, to exercise the v2 path.
 - **The provider fails loudly right after a local build.** The runtime provider
   is pinned to the package version; an unpublished version cannot be installed.
   Declare `provider.commandcode.npm` yourself
@@ -736,7 +747,6 @@ Both e2e scripts are excluded from `npm test`.
 | [0006](adr/0006-derived-reasoning-classification.md)           | Reasoning capability derived from generated classification                                         |
 | [0007](adr/0007-auto-release.md)                               | Auto-release on merged catalog-refresh PRs                                                         |
 | [0008](adr/0008-models-md-primary-catalog.md)                  | Source-authority table, ship-bar and ladders (membership half superseded by 0024)                  |
-| [0024](adr/0024-catalog-endpoint-membership.md)                | The catalog endpoint is membership; startup reads a disk cache, never the network                  |
 | [0009](adr/0009-version-pinned-provider-specifier.md)          | Runtime provider pinned to the plugin's exact version                                              |
 | [0010](adr/0010-dual-v1-v2-plugin-entrypoint.md)               | One package and entrypoint for OpenCode v1 and v2 (server and TUI halves)                          |
 | [0011](adr/0011-billing-derived-plan-identity.md)              | Plan identity from the billing subscription, never a default                                       |
@@ -752,3 +762,4 @@ Both e2e scripts are excluded from `npm test`.
 | [0021](adr/0021-usage-parallel-wave-progressive-merge.md)      | The usage refresh is one parallel wave, publishes progressively, and merges the last-good snapshot |
 | [0022](adr/0022-sidebar-segment-layout.md)                     | The sidebar segment layout is user state, persisted by each TUI host                               |
 | [0023](adr/0023-http-failures-surface-as-apicallerror.md)      | HTTP failures surface as AI SDK `APICallError`s (status, redacted body, retryable)                 |
+| [0024](adr/0024-catalog-endpoint-membership.md)                | The catalog endpoint is membership; startup reads a disk cache, never the network                  |

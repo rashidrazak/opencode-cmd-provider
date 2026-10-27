@@ -118,6 +118,28 @@ stays what issue #130 made it: an annotate-only divergence note. It agrees with
 the client view on ids; when it does not, that is a log line, never a gate and
 never a fallback. It is not a membership source.
 
+## Verified host behaviour (2026-10-27, opencode 2.1.4)
+
+Two findings from exercising the built plugin in a real v2 host, both of which
+shaped the implementation and neither of which a unit test had caught:
+
+- **`config` is a v1-only hook.** A v2 host never calls it, so the background
+  refresh must be started from `setup`. Starting it in `config` left the cache
+  permanently empty on every v2 install — the plugin worked, but only ever from
+  the bundled Snapshot.
+- **`opencode models` does not activate plugins.** The one-shot read exits in
+  ~60 ms without calling `setup`, so it exercises `config`-path registration
+  only and can never demonstrate the cache. `opencode run` and a served instance
+  (via `POST /api/plugin/await-activation`) are the paths that do. This is the
+  same activation race AGENTS.md records for the v2 e2e script.
+
+A third, design-level correction: the sync must **not** derive its URL from
+`COMMANDCODE_API_BASE`. That variable points the _transport_ at a mock or a
+compatible proxy, and no such server serves `?view=client` — so reusing it made
+every session with a custom transport base silently skip the refresh (a 404 in
+~1 ms, indistinguishable from "no cache yet"). The catalog endpoint defaults to
+the public catalog and is redirected only by `COMMANDCODE_CATALOG_URL`.
+
 ## Consequences
 
 - **A newly launched model ships on the next refresh, not the next package

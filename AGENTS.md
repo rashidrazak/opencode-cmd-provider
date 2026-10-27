@@ -114,6 +114,17 @@ fixtures (see `scripts/check-deals-coverage.mjs` and
   (`registerUsageRpc` → the `rpc` extension in `src/plugin/v2.ts`) is the one
   server↔TUI channel of the slice: `src/rates-usage/usage-rpc.ts` must stay free of
   runtime host imports so both bundles can load it (ADR-0020).
+- **Membership is layered at runtime (ADR-0024).** `src/plugin/catalog-sync.ts`
+  is the only module that may name the catalog endpoint, and it is fire-and-forget
+  from `setup()` (never `config` — that is the v1-only hook, so a sync started
+  there never runs on v2). Startup reads `src/catalog/catalog-cache.ts`
+  (XDG cache, ~1 ms) and merges it over `MODEL_SNAPSHOT` as a **union** — a
+  cached row may add or refresh, never remove, so a stale cache cannot hide a
+  shipped model. Any cache defect degrades silently to the bundle, and the sync
+  never rejects. Do not derive the catalog URL from `COMMANDCODE_API_BASE`
+  (that is the transport base — mocks and proxies serve no `?view=client`);
+  use `COMMANDCODE_CATALOG_URL`. `src/catalog/` must stay fetch-free.
+  `tests/api-demotion.test.ts` pins all of this.
 - **Never runtime-import `@opencode-ai/*` or `@opencode/*`.** `@opencode-ai/plugin`/`@opencode-ai/sdk`
   are optional peer deps: `opencode plugin <pkg>` installs them in `.opencode/`,
   not next to the plugin, so a runtime import fails to resolve at load and kills
