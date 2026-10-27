@@ -51,6 +51,16 @@ TUI host resolves each registered package's own `./tui` entrypoint itself, so no
 Sibling commands: `opencode plugin list`, `check`, `update [<target>]`, `remove
 <package>`.
 
+**v2 local plugin directories.** v2 also loads every directory under a
+project's `.opencode/plugins/`, without asking, for any session started there,
+next to whatever the global config lists. Plugin IDs must be unique: a local
+directory that re-exports this package (ID `commandcode`) next to the installed
+npm copy makes `opencode plugin check` report `check failed` and `update` fail
+with `Duplicate plugin ID: commandcode`. The repo's working-tree entry therefore
+lives at `dev/opencode-plugin/` and loads only when you swap it in for the npm
+entry by hand — see
+[CONTRIBUTING.md](../CONTRIBUTING.md#running-the-working-tree-in-opencode-v2).
+
 **Nothing updates by itself.** OpenCode reuses a cached copy on every startup
 without checking for a newer version, so a new release only appears after the
 cache entry is removed (v1) or after `opencode plugin update` (v2). A launch

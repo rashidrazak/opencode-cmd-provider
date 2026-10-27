@@ -42,6 +42,31 @@ declare `provider.commandcode.npm` yourself (for example as a `file://` URL to
 your built `dist/index.js`) to point the runtime at your working tree instead.
 See [ADR-0009](docs/adr/0009-version-pinned-provider-specifier.md).
 
+## Running the working tree in OpenCode v2
+
+`dev/opencode-plugin/` is a plugin directory that re-exports the built `dist/`
+bundle unchanged. OpenCode does not load it unless you configure it. To use it,
+run `npm run build`, then in `~/.config/opencode/opencode.json` replace the npm
+entry with the directory's absolute path (v2 accepts only a directory here, and
+`opencode plugin add` rejects local paths):
+
+```json
+{
+  "plugins": ["/absolute/path/to/opencode-cmd-provider/dev/opencode-plugin"]
+}
+```
+
+Restart the service (`opencode service restart`) and check that
+`opencode plugin list` shows one `commandcode` row with version `local`. Put the
+`"opencode-cmd-provider"` entry back when you are done.
+
+Keep the two entries mutually exclusive: both carry the plugin ID `commandcode`,
+so with both configured OpenCode loads two copies, and `opencode plugin check` /
+`update` fail with `Duplicate plugin ID: commandcode`. For the same reason, do
+not put this directory under `.opencode/plugins/`: OpenCode auto-loads
+everything there for any session started in this repo, next to your installed
+copy.
+
 ## End-to-end test
 
 `test:e2e` runs the real OpenCode CLI against a mock Command Code server through the built package. It requires `opencode` on `PATH` and is excluded from `npm test`:
