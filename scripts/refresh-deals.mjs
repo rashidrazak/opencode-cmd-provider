@@ -58,7 +58,7 @@ export const DEFAULT_OUT = resolve(import.meta.dirname, "..", "src", "rates-usag
 // records are already snapshot-keyed by extractPlanPageRsc, which applies
 // the slug-id alias). Since issue #132 the gate is a pending-report
 // primitive (missingSnapshotModels), never an abort: deals are a subset
-// of membership, a missing record ships the model core-only with a
+// of the shipped catalog, a missing record ships the model core-only with a
 // `deals pending` report, and `--allow-partial` remains an accepted no-op
 // for tooling that passed it historically (e.g. the release pipeline's
 // non-blocking deals check).
@@ -690,7 +690,7 @@ async function main() {
       goatRsc,
       proRsc,
     })
-    // Deals are a subset of membership (issue #132): a snapshot model with
+    // Deals are a subset of the shipped catalog (issue #132): a snapshot model with
     // no RSC record simply skips enrichment — the picker/sidebar keep the
     // core entry and the missing record is reported as a pending line,
     // NEVER an abort. (The old coverage gate exited 1 here; the parent

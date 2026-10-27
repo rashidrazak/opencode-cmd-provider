@@ -5,6 +5,14 @@ Status: accepted
 Supersedes the membership half of [ADR-0008](0008-models-md-primary-catalog.md).
 ADR-0008's source-authority table, ship-bar, ladder rules, and "only two loud
 failure classes" disposition all survive; its single membership source does not.
+
+**A note on the word "membership."** It means only _which models the catalog
+carries_ — a structural fact about set inclusion, never a subscription, plan, or
+account status (those are Plan identity and the Rates & usage slice). Because
+this package also models plans, the bare word invited exactly that misreading,
+so the living docs and code comments say **"which models ship"** and the on-disk
+cache is the **catalog cache**. ADR-0008 and this record keep "membership" where
+it names the concept; `CONTEXT.md` defines it with the disambiguation.
 The Deals catalog, reasoning classification, and modalities rules in ADR-0006 /
 ADR-0005 / ADR-0004 are unchanged.
 
@@ -46,7 +54,7 @@ disk cache rather than the network.**
 
 ### Membership authority
 
-`GET {apiBase}/provider/v1/models?view=client` is the sole membership authority.
+`GET {apiBase}/provider/v1/models?view=client` is the only source of which models ship.
 Every record with `hidden !== true` ships in the Snapshot with its ship-bar
 fields (id, name, exact `context_length`, costs, efforts). `hidden: true` is the
 catalog's own "do not offer this" marker — the free variants, retired aliases,
@@ -56,7 +64,7 @@ the refresh log (never a failure).
 The npm registry is still consulted, but only for the `command-code` `latest`
 dist-tag: `FACTS_PACKAGE_VERSION` feeds the `x-command-code-version` runtime
 header, which the legacy gateway version-gates (ADR-0003), and the
-version-pinned provider specifier (ADR-0009). It no longer decides membership.
+version-pinned provider specifier (ADR-0009). It no longer decides which models ship.
 
 `scripts/parse-facts.mjs` and `scripts/parse-modalities.mjs` are **deleted**
 with their tests and the `tests/fixtures/models.md` fixture. Their exported
@@ -64,7 +72,7 @@ helpers had no other consumer. The four things they fed were moved, not dropped:
 
 | Was                          | Now                                      |
 | ---------------------------- | ---------------------------------------- |
-| membership + context + costs | catalog record fields                    |
+| model list + context + costs | catalog record fields                    |
 | efforts (`MODEL_EFFORTS`)    | catalog `reasoningEfforts` (minus `off`) |
 | input modalities             | catalog `inputModalities`                |
 | `FACTS_PACKAGE_VERSION`      | npm dist-tag (unchanged)                 |

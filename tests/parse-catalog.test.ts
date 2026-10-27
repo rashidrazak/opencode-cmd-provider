@@ -1,7 +1,7 @@
 // tests/parse-catalog.test.ts — the catalog-payload parser (ADR-0024).
 //
 // The client-view catalog (`GET /provider/v1/models?view=client`) replaced the
-// npm package's `models.md` table as the Snapshot's membership authority: it is
+// npm package's `models.md` table as the source of which models ship: it is
 // the source the Command Code CLI resolves models from, so a model the CLI
 // offers is a model this plugin offers. These tests pin the *shape* contract
 // only — every value below is synthetic and test-owned, so an upstream price
@@ -29,7 +29,7 @@ function payload(data: unknown[], overrides: Record<string, unknown> = {}) {
 
 run([
   [
-    "parses a record into a membership row with catalog provenance",
+    "parses a record into a shipped row with catalog provenance",
     () => {
       const parsed = parseModelCatalog(payload([record()]))
       assertEqual(parsed.rows, [
@@ -50,7 +50,7 @@ run([
   ],
 
   [
-    "hidden records are excluded from membership and reported (never an error)",
+    "hidden records are never shipped and are reported (never an error)",
     () => {
       const parsed = parseModelCatalog(
         payload([

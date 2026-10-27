@@ -550,7 +550,7 @@ function removedSectionLines(beforeIndex, afterIndex) {
  * Normalizes a `SnapshotEnrichment` input: every list sorted + unique,
  * every missing field an empty list. Divergence is "known" when the
  * `apiDivergence` key is present at all (empty lists + skipped false =
- * the API matches membership); an absent key renders no section, so a
+ * the API agrees with the shipped catalog); an absent key renders no section, so a
  * refresh without captured enrichment stays backward compatible.
  *
  * @param {SnapshotEnrichment | undefined} enrichment
@@ -682,7 +682,7 @@ function costFallbackSectionLines(costFallbacks) {
 /**
  * The "API divergence" subsection (issue #134): the annotate-only
  * set-diff notes in both directions, or the matches line when the API
- * matches membership, or the skipped line when the API was unreachable.
+ * agrees with the shipped catalog, or the skipped line when the API was unreachable.
  * Null (unknown) renders nothing — a missing enrichment input stays
  * backward compatible.
  *
@@ -697,14 +697,14 @@ function apiDivergenceSectionLines(divergence) {
     return lines
   }
   if (divergence.inMembershipNotApi.length === 0 && divergence.inApiNotMembership.length === 0) {
-    lines.push("- Listing API matches package membership", "")
+    lines.push("- Listing API agrees with the shipped catalog", "")
     return lines
   }
   for (const id of divergence.inMembershipNotApi) {
-    lines.push(`- \`${id}\`: in package membership but not served by the listing API`)
+    lines.push(`- \`${id}\`: shipped, but the listing API does not serve it`)
   }
   for (const id of divergence.inApiNotMembership) {
-    lines.push(`- \`${id}\`: served by the listing API but not in package membership`)
+    lines.push(`- \`${id}\`: served by the listing API, but not shipped by the catalog`)
   }
   lines.push("")
   return lines

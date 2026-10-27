@@ -47,7 +47,7 @@ models` for this — v2 activates plugins asynchronously and the one-shot CLI
 (`scripts/refresh-snapshot.mjs`, `scripts/refresh-classification.mjs`,
 `scripts/refresh-deals.mjs`). Regenerate with `npm run refresh` — the snapshot
 comes from the Command Code model catalog's client view
-(`GET /provider/v1/models?view=client`, the sole membership authority since
+(`GET /provider/v1/models?view=client`, the only source of which models ship since
 ADR-0024; `hidden` records never ship, and the plain listing endpoint is
 annotate-only). The npm registry is still read for the `command-code` dist-tag
 (`FACTS_PACKAGE_VERSION` feeds the version-gated `x-command-code-version`
@@ -65,7 +65,7 @@ fixture fallback, 4xx fails loudly); offline-only:
 `npm run refresh:deals -- --fixtures` / `npm run refresh:classification --
 --fixtures`.
 Since issue #132 the enrichment coverage gates are **inverted to
-membership-superset-of-enrichment with pending reports**: deals records,
+shipped-superset-of-enrichment with pending reports**: deals records,
 classification entries, and modalities are asserted as subsets of the
 Snapshot, and a snapshot model missing enrichment ships core-only with a
 visible pending note — never an exit-1. `refresh:deals` and

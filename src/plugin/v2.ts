@@ -49,7 +49,7 @@ export const FIRST_RUN_DEFAULT_MODEL_ID = "gpt-5.6-terra"
 /** Rates & usage seams; Core never imports the slice (ADR-0004). */
 export interface V2SetupExtensions {
   /**
-   * The membership rows to register. Defaults to the bundled Snapshot; the
+   * The catalog rows to register. Defaults to the bundled Snapshot; the
    * entry point passes the merged bundle+cache view (ADR-0024) so a cached
    * catalog fetched last session reaches the picker.
    */

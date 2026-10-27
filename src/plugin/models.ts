@@ -141,7 +141,7 @@ export function augmentConfigCommandCodeModels(config: Config): void {
  * tables.
  *
  * Ship-bar fields come from the snapshot row itself (ADR-0024: the catalog
- * endpoint's client view is the membership authority):
+ * endpoint's client view decides which models ship):
  *  - contextLength null falls back to the OpenCode default context — never 0,
  *    never a fabricated value;
  *  - cost null advertises NO cost entry — missing never zero-fills (only an

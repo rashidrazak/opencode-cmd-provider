@@ -13,12 +13,12 @@ this skill is the manual, local, commit-ready version of the same work.
 
 ## What gets refreshed
 
-| File                                   | Source                                                                                  | Script                         |
-| -------------------------------------- | --------------------------------------------------------------------------------------- | ------------------------------ |
-| `src/catalog/snapshot.ts`              | catalog endpoint client view `?view=client` (membership authority) + enrichment ladders | `scripts/refresh-snapshot.mjs` |
-| `src/catalog/facts.ts`                 | same catalog payload (efforts, rates, modalities)                                       | `scripts/refresh-snapshot.mjs` |
-| `src/rates-usage/catalog.ts`           | docs pages / `tests/fixtures/*.html`                                                    | `scripts/refresh-deals.mjs`    |
-| `tests/fixtures/goat.html`, `pro.html` | live docs capture (deals source)                                                        | manual `fetch`                 |
+| File                                   | Source                                                                                       | Script                         |
+| -------------------------------------- | -------------------------------------------------------------------------------------------- | ------------------------------ |
+| `src/catalog/snapshot.ts`              | catalog endpoint client view `?view=client` (decides which models ship) + enrichment ladders | `scripts/refresh-snapshot.mjs` |
+| `src/catalog/facts.ts`                 | same catalog payload (efforts, rates, modalities)                                            | `scripts/refresh-snapshot.mjs` |
+| `src/rates-usage/catalog.ts`           | docs pages / `tests/fixtures/*.html`                                                         | `scripts/refresh-deals.mjs`    |
+| `tests/fixtures/goat.html`, `pro.html` | live docs capture (deals source)                                                             | manual `fetch`                 |
 
 `src/catalog/*.ts`, `src/rates-usage/catalog.ts` — **generated, never hand-edit**
 (AGENTS.md).
@@ -89,9 +89,9 @@ benchmarks) are stale, re-capture the fixtures (B), re-run
 - **`refresh:snapshot` fails** ("could not parse ... view=client", or an
   unshippable-row failure after the full ladders) — the catalog payload shape
   changed (`scripts/parse-catalog.mjs` needs updating), or a record has no
-  context/cost after every enrichment step. The catalog is **membership**, so
-  unlike enrichment sources a fetch failure is a real failure — there is no
-  fallback source for membership. Resolve on main, re-refresh.
+  context/cost after every enrichment step. The catalog **decides which models
+  ship**, so unlike enrichment sources a fetch failure is a real failure — there
+  is no fallback source for the model list. Resolve on main, re-refresh.
 - **Network down / docs changed shape** — offline still works:
   `npm run refresh:deals -- --fixtures` from the committed fixtures; only the
   fixture re-capture (B) needs the live docs.

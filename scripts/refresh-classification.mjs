@@ -8,7 +8,7 @@
 //      (plans/goat + plans/pro; slug-id aliasing applied, keyed by snapshot
 //      id — the same records the Deals generator consumes);
 //   2. a **reasoningEfforts** entry for the model (the snapshot rows; the
-//      catalog endpoint is the Snapshot membership authority since ADR-0024);
+//      catalog endpoint decides Snapshot membership since ADR-0024);
 //   3. the models page index Caps **Reasoning** bit for the model.
 //
 // A model is reasoning-capable when ANY channel says yes. Classification is
@@ -77,7 +77,7 @@ const SNAPSHOT_ENTRY_RE =
   /\{ id: "([^"]+)", name: "([^"]+)", contextLength: (?:null|[0-9]+),[\s\S]*?efforts: (null|\[[^\]]*\]),/g
 
 /**
- * Reads the snapshot module text and returns the membership ids + per-id
+ * Reads the snapshot module text and returns the shipped ids + per-id
  * efforts (the issue #132 efforts evidence channel). A snapshot row with a
  * non-null efforts array counts as "efforts evidence". Pure text parse (the
  * refresh runs under plain node; never a runtime import of a .ts file).
@@ -102,7 +102,7 @@ export function snapshotEvidenceFromText(snapshotText) {
  * Parses the models page HTML into the issue #132 page-evidence channel:
  * snapshot id → { reasoning } (the Caps Reasoning bit). A slug the pinned
  * TOTAL map does not know is dropped with a loud note (it is docs-ahead
- * skew; the page is enrichment — never membership, never a gate).
+ * skew; the page is enrichment — never decides what ships, never a gate).
  *
  * @param {string} html
  * @returns {{ pageById: Map<string, { reasoning: boolean }>, pending: string[] }}
@@ -158,7 +158,7 @@ export function deriveCapability(bySnapshotId, options = {}) {
   } = options
   validateClassificationOverrides(overrides)
   // snapshotIndex().byId is a Map (id → name); callers may pass a Set of
-  // ids. Normalize to a Set of ids for iteration + membership checks.
+  // ids. Normalize to a Set of ids for iteration + inclusion checks.
   const idSet =
     byId instanceof Set ? byId : new Set(byId instanceof Map ? byId.keys() : Object.keys(byId))
   const overrideIds = new Set(Object.keys(overrides))
@@ -365,7 +365,7 @@ async function main() {
     process.exit(1)
   }
 
-  // Efforts evidence: the snapshot module (membership + catalog efforts).
+  // Efforts evidence: the snapshot module (shipped rows + catalog efforts).
   const snapshotPath = argValue("--snapshot-path") ?? DEFAULT_SNAPSHOT_PATH
   let effortsById = {}
   try {

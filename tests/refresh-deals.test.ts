@@ -524,7 +524,7 @@ run([
       // Issue #132 inverts the old "fixtures cover every snapshot" gate: a
       // snapshot model with no RSC record is a PENDING report (it ships
       // core-only), never a red suite. The merged fixture source still
-      // covers the bulk of membership; `missing` must name precisely the
+      // covers the bulk of the shipped ids; `missing` must name precisely the
       // rest, and the emit must project every merged record without a
       // silent drop.
       const out = emitDealsModuleFromRsc({

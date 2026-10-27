@@ -82,7 +82,7 @@ const server: Plugin = async (input) => {
 }
 
 /**
- * The membership rows to register this session (ADR-0024): the bundled
+ * The catalog rows to register this session (ADR-0024): the bundled
  * Snapshot, with any catalog the background fetch cached last session merged
  * over it.
  *

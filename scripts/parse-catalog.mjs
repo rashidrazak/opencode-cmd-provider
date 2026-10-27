@@ -1,7 +1,7 @@
 // scripts/parse-catalog.mjs — parse the Command Code model catalog
-// (`GET /provider/v1/models?view=client`) into Snapshot membership rows.
+// (`GET /provider/v1/models?view=client`) into the rows the Snapshot ships.
 //
-// Since ADR-0024 this endpoint is the Snapshot's membership authority: it is
+// Since ADR-0024 this endpoint decides Snapshot membership: it is
 // what the Command Code CLI itself resolves models from, so a model the CLI
 // offers is a model this plugin offers. `models.md` — the previous authority —
 // is a rendering of this catalog's non-`hidden` rows, which is why it lagged
@@ -108,7 +108,7 @@ function parseModalities(value, id) {
 }
 
 /**
- * One catalog record → a membership row, or null when the record is `hidden`
+ * One catalog record → a shipped row, or null when the record is `hidden`
  * (the catalog's own "do not offer this" marker: free variants, retired
  * aliases, stealth previews).
  */
@@ -160,7 +160,7 @@ function parseRecord(record) {
 }
 
 /**
- * Parses a client-view catalog payload into Snapshot membership rows.
+ * Parses a client-view catalog payload into the rows the Snapshot ships.
  *
  * @returns {{
  *   rows: Array<{id: string, name: string, contextLength: number,

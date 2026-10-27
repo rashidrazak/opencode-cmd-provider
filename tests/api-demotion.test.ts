@@ -1,7 +1,7 @@
 // tests/api-demotion.test.ts — the plain listing endpoint is a divergence
 // reporter, and the runtime stays offline.
 //
-// ADR-0024 moved membership to the catalog endpoint's client view
+// ADR-0024 moved the model list to the catalog endpoint's client view
 // (`/provider/v1/models?view=client`). The *plain* listing endpoint
 // (`/provider/v1/models`, the thin shape) remains what it was after issue #130:
 // annotate-only — set-diff notes in both directions, zero gating power, zero
@@ -80,7 +80,7 @@ async function refreshWithPlainEndpoint(options: Record<string, unknown>) {
 
 run([
   [
-    "plain listing API 500 degrades to a skipped-divergence note; membership ships with exit 0",
+    "plain listing API 500 degrades to a skipped-divergence note; the model list ships with exit 0",
     async () => {
       const { result, out, dir } = await refreshWithPlainEndpoint({ modelsStatus: 500 })
       try {
@@ -101,7 +101,7 @@ run([
   ],
 
   [
-    "plain listing API non-JSON body degrades to a skipped-divergence note; membership ships",
+    "plain listing API non-JSON body degrades to a skipped-divergence note; the model list ships",
     async () => {
       const { result, out, dir } = await refreshWithPlainEndpoint({
         modelsRaw: "<html>not json</html>",
@@ -124,7 +124,7 @@ run([
   ],
 
   [
-    "plain listing API wrong-shape JSON degrades to a skipped-divergence note; membership ships",
+    "plain listing API wrong-shape JSON degrades to a skipped-divergence note; the model list ships",
     async () => {
       const { result, out, dir } = await refreshWithPlainEndpoint({
         models: { object: "not-a-list" },
@@ -184,7 +184,7 @@ run([
   ],
 
   [
-    "a membership failure aborts before the plain listing endpoint is contacted",
+    "a model-list failure aborts before the plain listing endpoint is contacted",
     async () => {
       const dir = await mkdtemp(join(tmpdir(), "cc-api-order-"))
       const out = join(dir, "snapshot.ts")
@@ -202,7 +202,7 @@ run([
         assertEqual(
           mock.hits.models,
           0,
-          "the plain endpoint must not be contacted when membership cannot be resolved",
+          "the plain endpoint must not be contacted when the model list cannot be resolved",
         )
       } finally {
         await mock.close()
@@ -256,7 +256,7 @@ run([
   [
     "runtime source reaches the catalog only from the background-sync module",
     () => {
-      // ADR-0024 changed this policy deliberately: membership may refresh at
+      // ADR-0024 changed this policy deliberately: the model list may refresh at
       // runtime, but ONLY from src/plugin/catalog-sync.ts, and only behind
       // registration (the entry point fires it unawaited, after the config hook
       // has already registered models from the cache/bundle).

@@ -1,4 +1,4 @@
-// tests/catalog-cache.test.ts — the membership disk tier (ADR-0024)
+// tests/catalog-cache.test.ts — the catalog disk tier (ADR-0024)
 //
 // The cache is what keeps the network off OpenCode's startup path: the host
 // awaits the plugin `config` hook before it reads `provider.config`, so a

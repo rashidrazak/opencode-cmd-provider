@@ -20,7 +20,7 @@ export interface MockCcOptions {
   modelsStatus?: number
   /** body served by GET /provider/v1/models as-is (e.g. non-JSON to exercise the note-only divergence path) */
   modelsRaw?: string
-  /** JSON body served at GET /provider/v1/models?view=client (the membership authority, ADR-0024) */
+  /** JSON body served at GET /provider/v1/models?view=client (decides which models ship, ADR-0024) */
   catalog?: unknown
   /** body served at GET /provider/v1/models?view=client as-is (shape-failure tests) */
   catalogRaw?: string
@@ -175,7 +175,7 @@ export function startMockCc(
     req.on("end", () => {
       if (req.url === "/provider/v1/models?view=client") {
         hits.catalog++
-        // The client-view catalog is the Snapshot membership authority
+        // The client-view catalog decides which models ship
         // (ADR-0024). `catalogRaw`/`catalogStatus` let tests drive the shape
         // failures the refresh must treat as loud (a usable body, a broken one).
         if (options.catalogRaw !== undefined) {
@@ -206,7 +206,7 @@ export function startMockCc(
         // The listing API is annotate-only for the refresh pipeline
         // (issue #133): the mock can serve failure modes (status / raw
         // body) so tests can pin that the refresh degrades to a note and
-        // still ships membership with exit 0.
+        // still ships the model list with exit 0.
         if (options.modelsRaw !== undefined) {
           res.writeHead(options.modelsStatus ?? 200, { "content-type": "text/plain" })
           res.end(options.modelsRaw)
@@ -430,7 +430,7 @@ export function startMockCc(
       if (req.url === "/cli.mjs" && req.method === "GET") {
         // `cliStatus` lets tests exercise the enrichment-outage degrade
         // (issue #133: the CLI bundle is modalities enrichment, never a
-        // membership gate — an outage must fall back, not exit non-zero).
+        // ship gate — an outage must fall back, not exit non-zero).
         if (options.cliStatus !== undefined && options.cliStatus >= 400) {
           res.writeHead(options.cliStatus, { "content-type": "text/javascript" })
           res.end("")

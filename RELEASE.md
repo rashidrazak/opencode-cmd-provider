@@ -36,14 +36,14 @@ fixtures with the release.
 
 The refresh fails loudly on a catalog payload shape change, on a record with
 no context or cost after its full fallback ladder (an unshippable row), or on
-an unreachable catalog — membership has no fallback source, so a failed fetch
+an unreachable catalog — the model list has no fallback source, so a failed fetch
 is a failed refresh rather than a silently smaller catalog. Enrichment sources
 (RSC pages, models page, detail pages) degrade to the next ladder step with a
 note; a 4xx from the docs site fails loudly, while 5xx/network falls back to
 the committed fixtures.
 
 The snapshot this generates is the _bundled floor_. Published installs also
-keep a runtime membership cache (ADR-0024), so a model that launches between
+keep a runtime catalog cache (ADR-0024), so a model that launches between
 releases reaches users without a new version — but shipping a fresh snapshot
 is still what makes it work offline and on a cold cache.
 

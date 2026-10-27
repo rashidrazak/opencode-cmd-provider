@@ -69,17 +69,19 @@ export function parseRefreshLog(logText) {
       .map((id) => id.trim())
       .filter((id) => id.length > 0)
   for (const line of text.split(/\r?\n/)) {
-    let match = line.match(/in package membership but not served by the listing API:\s*(.+)$/)
+    let match = line.match(/shipped models the plain listing endpoint does not serve:\s*(.+)$/)
     if (match) {
       out.inMembershipNotApi.push(...splitIds(match[1]))
       continue
     }
-    match = line.match(/served by the listing API but not in package membership:\s*(.+)$/)
+    match = line.match(
+      /served by the plain listing endpoint but not shipped by the catalog:\s*(.+)$/,
+    )
     if (match) {
       out.inApiNotMembership.push(...splitIds(match[1]))
       continue
     }
-    if (/listing API matches package membership/.test(line)) {
+    if (/plain listing endpoint agrees with the shipped catalog/.test(line)) {
       out.matched = true
       continue
     }
@@ -239,7 +241,7 @@ export function buildEnrichment({
     // Pinned-slug-map drift (spec #108 pending report). Kept as one object so
     // the renderer can omit the section wholesale when nothing drifted, and
     // report "not evaluated" (null) vs "clean" (empty array) per class: the
-    // value class is membership-relative (always evaluated), the two key
+    // value class is relative to the shipped ids (always evaluated), the two key
     // classes need page evidence, which only some refreshes fetch.
     slugMapPins: {
       stale: log.slugMapStalePins,

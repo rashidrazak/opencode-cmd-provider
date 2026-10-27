@@ -1,6 +1,6 @@
 // tests/catalog-sync.test.ts — the background catalog fetch (ADR-0024)
 //
-// This is the network half of the membership design, and its contract is
+// This is the network half of the catalog design, and its contract is
 // narrow on purpose: it runs *behind* startup, it never rejects, and every
 // failure mode leaves the previous cache (or the bundle) in place. Nothing here
 // may ever surface as a plugin error or empty the model picker.

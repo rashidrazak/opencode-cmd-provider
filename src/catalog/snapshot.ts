@@ -3,7 +3,7 @@
 // A copy of the Command Code model catalog bundled in the package so the
 // plugin can auto-register every model without network access at runtime.
 // Since ADR-0024 the catalog endpoint's client view
-// (`GET /provider/v1/models?view=client`) is the membership authority — the
+// (`GET /provider/v1/models?view=client`) decides which models ship — the
 // same source the Command Code CLI resolves models from — so every
 // selectable (non-`hidden`) record ships here with its ship-bar fields
 // (id, name, exact context length, costs, efforts). A record whose ship-bar

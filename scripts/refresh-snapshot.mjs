@@ -8,7 +8,7 @@
 // (`models.md` is a rendering of that catalog's non-hidden rows, so it
 // lags every catalog change by a package release). Every selectable
 // (non-`hidden`) record ships in the Snapshot. The API is no longer
-// demoted to a note: it decides membership, context, costs, efforts and
+// demoted to a note: it decides which models ship, plus context, costs, efforts and
 // input modalities directly, so `scripts/parse-facts.mjs` and
 // `scripts/parse-modalities.mjs` are gone.
 //
@@ -16,7 +16,7 @@
 // dist-tag: FACTS_PACKAGE_VERSION feeds the `x-command-code-version`
 // runtime header, which the legacy gateway version-gates, and the
 // version-pinned provider specifier (ADR-0009) reads it. It no longer
-// decides membership.
+// decides which models ship.
 //
 // Ship-bar (issue #129): id + name + context + cost. A row missing any of
 // the four from the catalog record fails the refresh loudly. The ordered
@@ -37,7 +37,7 @@
 //
 // The RSC goat/pro pages and the models page index are enrichment-only:
 // they are consulted lazily (only when a record actually needs a ladder
-// step), never as membership. Detail pages are live-fetch-only on
+// step), never as the model list. Detail pages are live-fetch-only on
 // cost-ladder use and are never pinned (issue #129). Only two loud
 // failure classes survive: an unshippable row after the full ladder, and
 // a parser shape change in any source.
@@ -150,7 +150,7 @@ async function fetchEnrichmentText(url, headers) {
 /**
  * Reads the listing API purely for its divergence note (issue #130: the
  * API "decides nothing, wins no field, and gates nothing"). Any failure
- * here is a note-only failure — never a membership or ship-bar gate.
+ * here is a note-only failure — never a ship-bar gate.
  * @returns {{ apiIds: string[] } | null} null when the API did not serve
  *   a usable model list (the note just says so).
  */
@@ -219,7 +219,7 @@ function renderSnapshot(rows) {
     "// A copy of the Command Code model catalog bundled in the package so the",
     "// plugin can auto-register every model without network access at runtime.",
     "// Since ADR-0024 the catalog endpoint's client view",
-    "// (`GET /provider/v1/models?view=client`) is the membership authority — the",
+    "// (`GET /provider/v1/models?view=client`) decides which models ship — the",
     "// same source the Command Code CLI resolves models from — so every",
     "// selectable (non-`hidden`) record ships here with its ship-bar fields",
     "// (id, name, exact context length, costs, efforts). A record whose ship-bar",
@@ -320,7 +320,7 @@ const latest = registry?.["dist-tags"]?.latest
 if (typeof latest !== "string" || latest.length === 0) {
   fail(`could not resolve latest command-code version from ${registryUrl}`)
 }
-// The package version no longer decides membership; it feeds the runtime
+// The package version no longer decides which models ship; it feeds the runtime
 // `x-command-code-version` header (the legacy gateway version-gates it) and
 // the version-pinned provider specifier (ADR-0009).
 const apiBase = process.env.COMMANDCODE_API_BASE ?? DEFAULT_API_BASE
@@ -443,7 +443,7 @@ async function provideModelsPage() {
     } catch {
       // A slug the pinned map doesn't know is *pin drift*, not a shape
       // change: upstream is ahead of the pin, and the page is enrichment —
-      // never membership, never a gate (issue #132). Skipping the row costs
+      // never decides what ships, never a gate (issue #132). Skipping the row costs
       // that model its models-page rung and nothing else; the drift is
       // reported with the other pin classes below, and the ladder carries
       // on. (This used to `fail()` here, which aborted the whole refresh —
@@ -585,7 +585,7 @@ async function resolveRowLadders(row, { previousSnapshot, rscSlugRecords, models
 }
 
 // Modalities: the catalog record's `inputModalities` is authoritative and
-// arrives with membership, so no CLI-bundle scrape is needed any more (that
+// arrives with the model list, so no CLI-bundle scrape is needed any more (that
 // 3.3 MB regex read is retired with ADR-0024). A record advertising nothing
 // still walks the #132 modalities ladder — catalog → models page Caps Vision
 // → text-only fallback — which only matters for an upstream gap.
@@ -644,9 +644,9 @@ for (const id of missingModalities) {
 // Annotate-only divergence notes (issue #130: API demoted to enrichment).
 // Note-only: the plain listing endpoint (`/provider/v1/models`, the thin
 // shape) is a different resource from the client view that decides
-// membership. It should agree on ids; when it does not, that is worth a line
+// the model list. It should agree on ids; when it does not, that is worth a line
 // in the refresh log but never a gate (ADR-0024: the client view is
-// membership, the plain view is neither authority nor fallback).
+// model list, the plain view is neither authority nor fallback).
 const apiIds = await fetchApiModelIds()
 if (apiIds !== null) {
   const apiSet = new Set(apiIds)
@@ -654,17 +654,17 @@ if (apiIds !== null) {
   const inApiNotCatalog = apiIds.filter((id) => !packageIds.has(id))
   if (inCatalogNotApi.length > 0) {
     console.log(
-      `refresh-snapshot: divergence note — in catalog membership but not served by the plain listing endpoint: ${inCatalogNotApi.join(", ")}`,
+      `refresh-snapshot: divergence note — shipped models the plain listing endpoint does not serve: ${inCatalogNotApi.join(", ")}`,
     )
   }
   if (inApiNotCatalog.length > 0) {
     console.log(
-      `refresh-snapshot: divergence note — served by the plain listing endpoint but not in catalog membership: ${inApiNotCatalog.join(", ")}`,
+      `refresh-snapshot: divergence note — served by the plain listing endpoint but not shipped by the catalog: ${inApiNotCatalog.join(", ")}`,
     )
   }
   if (inCatalogNotApi.length === 0 && inApiNotCatalog.length === 0) {
     console.log(
-      "refresh-snapshot: divergence note — plain listing endpoint matches catalog membership",
+      "refresh-snapshot: divergence note — plain listing endpoint agrees with the shipped catalog",
     )
   }
 }

@@ -1,10 +1,10 @@
 // tests/refresh-snapshot.test.ts — refresh script integration (issue #16 seam 3,
-// ADR-0024: catalog-primary Snapshot membership + ship-bar)
+// ADR-0024: catalog-primary model list + ship-bar)
 //
 // Membership now comes from the Command Code model catalog's client view
 // (`GET /provider/v1/models?view=client`), the same source the CLI resolves
 // models from. These tests drive the refresh end to end against the mock and
-// assert the *contracts* — membership shape, loud shape failures, ladder
+// assert the *contracts* — row shape, loud shape failures, ladder
 // provenance — never upstream values (spec #108).
 import { mkdtemp, readFile, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
@@ -77,7 +77,7 @@ function scriptEnv(mock: { url: string }) {
 
 run([
   [
-    "membership comes from the catalog endpoint, and the plain listing API is note-only",
+    "the model list comes from the catalog endpoint, and the plain listing API is note-only",
     async () => {
       const dir = await mkdtemp(join(tmpdir(), "cc-refresh-"))
       const out = join(dir, "snapshot.ts")
@@ -176,7 +176,7 @@ run([
   ],
 
   [
-    "hidden catalog records never reach membership; they are reported, not failed",
+    "hidden catalog records are never shipped; they are reported, not failed",
     async () => {
       const dir = await mkdtemp(join(tmpdir(), "cc-hidden-"))
       const out = join(dir, "snapshot.ts")
@@ -495,9 +495,9 @@ run([
   ],
 
   [
-    "an unreachable catalog fails loudly (membership has no fallback source)",
+    "an unreachable catalog fails loudly (the model list has no fallback source)",
     async () => {
-      // ADR-0024: the catalog is membership. There is no second membership
+      // ADR-0024: the catalog decides what ships. There is no second
       // source — a failed fetch is a failed refresh, never a silent
       // smaller catalog and never a carried-forward model list.
       const dir = await mkdtemp(join(tmpdir(), "cc-catalog-down-"))
@@ -523,7 +523,7 @@ run([
         } catch {
           wrote = false
         }
-        assert(!wrote, "no module may be written when membership cannot be read")
+        assert(!wrote, "no module may be written when the model list cannot be read")
       } finally {
         await mock.close()
         await rm(dir, { recursive: true, force: true })

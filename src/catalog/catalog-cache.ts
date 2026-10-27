@@ -1,4 +1,4 @@
-// src/catalog/catalog-cache.ts — the disk tier of model membership (ADR-0024)
+// src/catalog/catalog-cache.ts — the disk tier of the model list (ADR-0024)
 //
 // Membership has three tiers, in precedence order:
 //
@@ -28,7 +28,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSyn
 import { homedir } from "node:os"
 import { basename, join } from "node:path"
 
-/** One cached membership row. Mirrors the Snapshot's ship-bar fields. */
+/** One cached catalog row. Mirrors the Snapshot's ship-bar fields. */
 export interface CachedCatalogRow {
   id: string
   name: string

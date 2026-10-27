@@ -28,7 +28,7 @@ const CATALOG_PATH = "/provider/v1/models?view=client"
 /**
  * The catalog endpoint is deliberately **not** derived from
  * `COMMANDCODE_API_BASE`. That variable points the *transport* at a mock or a
- * compatible proxy during tests; the membership catalog is a different concern,
+ * compatible proxy during tests; the model catalog is a different concern,
  * and reusing it meant a test-shaped base URL silently disabled the refresh for
  * the whole session (no mock serves `?view=client`, so every fetch 404'd in
  * ~1 ms and the cache never populated).

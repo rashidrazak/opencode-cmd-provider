@@ -163,12 +163,12 @@ run([
       // 5. API divergence (both directions).
       assert(md1.includes("### API divergence"), `missing divergence section, got: ${md1}`)
       assert(
-        hasBullet(md1, "not served by the listing API", "`vendor/keep`"),
-        `missing membership-not-API bullet: ${md1}`,
+        hasBullet(md1, "shipped, but the listing API does not serve it", "`vendor/keep`"),
+        `missing shipped-not-API bullet: ${md1}`,
       )
       assert(
-        hasBullet(md1, "not in package membership", "`api/only`"),
-        `missing API-not-membership bullet: ${md1}`,
+        hasBullet(md1, "served by the listing API, but not shipped by the catalog", "`api/only`"),
+        `missing API-not-shipped bullet: ${md1}`,
       )
       // 6. Banded-pricing notes.
       assert(md1.includes("### Banded pricing (1)"), `missing banded section, got: ${md1}`)
@@ -248,7 +248,7 @@ run([
         },
       })
       assert(
-        matched.includes("matches package membership"),
+        matched.includes("agrees with the shipped catalog"),
         `must render the matches line, got: ${matched}`,
       )
       const skipped = diffCatalogs({
@@ -284,8 +284,8 @@ run([
     () => {
       const log = [
         "refresh-snapshot: wrote 3 models to /tmp/snapshot.ts",
-        "refresh-snapshot: divergence note — in package membership but not served by the listing API: vendor/keep, vendor/alpha",
-        "refresh-snapshot: divergence note — served by the listing API but not in package membership: api/only",
+        "refresh-snapshot: divergence note — shipped models the plain listing endpoint does not serve: vendor/keep, vendor/alpha",
+        "refresh-snapshot: divergence note — served by the plain listing endpoint but not shipped by the catalog: api/only",
         "refresh-snapshot: modalities pending — CLI bundle omits 1 package models: vendor/beta",
         "refresh-snapshot: modalities pending — vendor/beta: CLI omits and no Caps Vision evidence; text-only fallback",
         "refresh-snapshot: models-page: Gamma — banded pricing (2 context price bands); base rate shipped, verify against RSC",
@@ -304,7 +304,7 @@ run([
     "parseRefreshLog: matches and skipped states degrade deterministically",
     () => {
       const matched = parseRefreshLog(
-        "refresh-snapshot: divergence note — listing API matches package membership",
+        "refresh-snapshot: divergence note — plain listing endpoint agrees with the shipped catalog",
       )
       assertEqual(matched.matched, true)
       assertEqual(matched.skipped, false)
@@ -327,7 +327,7 @@ run([
   [
     "parseRefreshLog: pinned-slug-map drift parses from every log shape the refresh scripts emit",
     () => {
-      // The three shapes: the membership-relative value, the page-relative
+      // The three shapes: the shipped-ids-relative value, the page-relative
       // dangling key, the docs-ahead per-slug line from refresh-snapshot,
       // and refresh-classification's aggregate prose line for the same
       // docs-ahead class (both scripts report it; dedupe keeps one entry).
@@ -392,7 +392,7 @@ run([
         classificationAfter: { MODEL_REASONING_PENDING: ["vendor/alpha"] },
         dealsAfter: { MODEL_DEALS: { "vendor/gamma": { tier: "premium", free: false } } },
         refreshLogText: [
-          "refresh-snapshot: divergence note — in package membership but not served by the listing API: vendor/alpha",
+          "refresh-snapshot: divergence note — shipped models the plain listing endpoint does not serve: vendor/alpha",
           "refresh-snapshot: modalities pending — CLI bundle omits 1 package models: vendor/beta",
         ].join("\n"),
       })
@@ -431,7 +431,7 @@ run([
             classificationAfter: { MODEL_REASONING_PENDING: ["vendor/alpha"] },
             dealsAfter: { MODEL_DEALS: { "vendor/gamma": { tier: "premium", free: false } } },
             refreshLogText: [
-              "refresh-snapshot: divergence note — in package membership but not served by the listing API: vendor/alpha",
+              "refresh-snapshot: divergence note — shipped models the plain listing endpoint does not serve: vendor/alpha",
               "refresh-snapshot: modalities pending — CLI bundle omits 1 package models: vendor/beta",
             ].join("\n"),
           }),
@@ -504,7 +504,7 @@ run([
           `CLI must render the pending section, got: ${stdout}`,
         )
         assert(
-          stdout.includes("matches package membership"),
+          stdout.includes("agrees with the shipped catalog"),
           `CLI must render the divergence matches line, got: ${stdout}`,
         )
         // A missing enrichment file degrades to no subsections, never a failure.
