@@ -27,8 +27,9 @@ decisions in `docs/adr/`.
   `npm test`. Its headless `opencode run` leg deliberately skips — upstream
   opencode bug (anomalyco/opencode #14956, #5674). Don't "fix" the skip.
 - `npm run test:e2e:v2` is the v2 counterpart: it installs the build at
-  `.opencode/plugins/commandcode/` (v2 only accepts a **directory** as a
-  configured local plugin path), runs a headless `opencode run`, and asserts the
+  `.opencode/plugins/commandcode/` inside a throwaway temp project (v2 only
+  accepts a **directory** as a configured local plugin path), runs a headless
+  `opencode run`, and asserts the
   provider, all Snapshot models, and the integration as the host reports them
   back. Its `run` leg skips on the same upstream hang. Don't use `opencode
 models` for this — v2 activates plugins asynchronously and the one-shot CLI
@@ -39,6 +40,12 @@ models` for this — v2 activates plugins asynchronously and the one-shot CLI
   `npm install --prefix <dir> opencode-ai@1.18.30`, run that package's
   `postinstall.mjs` if npm skipped it (it fetches the platform binary), then
   `OPENCODE_BIN=<dir>/node_modules/.bin/opencode npm run test:e2e`.
+- To run the working tree in your own v2 host, use `dev/opencode-plugin/` (it
+  re-exports `dist/`): swap its absolute path in for the npm entry in the global
+  `plugins` list, as CONTRIBUTING.md describes. **Never put a plugin under this
+  repo's `.opencode/plugins/`.** v2 auto-loads that directory for every session
+  started in the repo, and a second `commandcode` ID next to the installed npm
+  copy makes `opencode plugin check`/`update` fail with "Duplicate plugin ID".
 
 ## Generated files — do not hand-edit
 
