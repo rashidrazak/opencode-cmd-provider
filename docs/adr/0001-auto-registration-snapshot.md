@@ -11,6 +11,12 @@ Status: accepted
 > prefix, and the `COMMANDCODE_API_KEY` env declaration. This ADR keeps
 > its original text so the decision history stays readable.
 
+> **Status note (models.dev entry).** The premise below that `commandcode` is
+> not in the models.dev catalog no longer holds: models.dev now lists it, with
+> most Snapshot ids under its own names. The OpenCode v2 half claims that entry
+> — provider routing and every Snapshot model's Display name, limits, and
+> variants — and user config still wins after it (ADR-0010).
+
 > **Status note (issue #152).** The registered `npm` value is now
 > **version-pinned** — the package's own name plus the exact version from the
 > shipped `package.json` — see

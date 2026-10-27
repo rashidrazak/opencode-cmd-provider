@@ -224,6 +224,7 @@ The provider and models this plugin registered disappear with it.
 | What you see                                       | What to try                                                                                                                                       |
 | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
 | No `[CMD]` models in `/models`                     | Check that your API key is set (or that `/connect` succeeded), restart OpenCode, and update the plugin if your install is old.                    |
+| Some Command Code models in `/models` lack `[CMD]` | Update the plugin. On OpenCode v2, older versions kept models.dev's own names for the models it also lists.                                       |
 | The sidebar has no **Command Code** section        | Make sure the session uses a `[CMD]` model, and press `ctrl+x b` — the sidebar may be hidden.                                                     |
 | Browser sign-in fails (v1)                         | Run `/connect` again and pick **Command Code API key** to paste one, or set `COMMANDCODE_API_KEY` and restart OpenCode.                           |
 | A model shows `$0` cost                            | No published price for that model, so the estimate is `0`. See [Command Code pricing](https://commandcode.ai/docs/resources/pricing-limits).      |
