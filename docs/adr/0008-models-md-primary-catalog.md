@@ -1,6 +1,17 @@
 # ADR-0008: models.md-primary Model catalog with enrichment-only sources
 
-Status: accepted
+Status: accepted — **membership half superseded by [ADR-0024](0024-catalog-endpoint-membership.md)**
+
+> **Superseded (membership only), 2026-10-27.** Command Code 1.83.0 replaced
+> `models.md` as the CLI's model source with a live catalog endpoint
+> (`GET /provider/v1/models?view=client`), and `models.md` became a rendering of
+> that catalog's non-`hidden` rows — accurate but frozen at package build time.
+> Membership therefore comes from the endpoint now (ADR-0024), and
+> `models.md` / `parse-facts.mjs` are gone. Everything else below still holds:
+> the ship-bar, the ordered enrichment ladders, the "the API wins no field
+> except membership" disposition, the parser-shape discipline, and the
+> "only two loud failure classes" rule. Read the endpoint where this text says
+> "models.md".
 
 The plugin used to decide which Command Code models exist from the provider listing API: when the API lagged the published npm package catalog (models.md) or the Command Code models page, the Snapshot dropped the model entirely — auto-registration never emitted it, enrichment for it was discarded, and coverage gates failed or silently hid it. Availability — the primary objective — was held hostage by the least-fresh source. The decision: **the npm package models.md table is the sole membership authority for the Snapshot** (every row ships its id, name, context, costs, efforts), and the listing API, the docs' RSC slug records, the CLI bundle, and the models page are **enrichment sources** — supportive data that fills gaps and confirms facts but never decides membership, never wins a ship-bar field, and never gates the refresh. This supersedes the membership halves of ADR-0001 (the API-shaped snapshot assumption), ADR-0005 (the "fails loudly when a snapshot model has no RSC record" coverage gate), ADR-0006 (the "total-coverage gate" and "RSC-only derivation" halves), and the ADR-0003 facts-amendment gate ("fails if an API snapshot model is absent from the CLI modality catalog"); those ADRs keep their original text with forward supersede-notes so the history stays readable.
 

@@ -218,7 +218,7 @@ export function buildEnrichment({
     .sort((a, b) => a.id.localeCompare(b.id))
 
   const costFallbacks = rows
-    .filter((row) => typeof row.costSource === "string" && row.costSource !== "models.md")
+    .filter((row) => typeof row.costSource === "string" && row.costSource !== "catalog")
     .map((row) => ({ id: String(row.id), source: String(row.costSource) }))
     .sort((a, b) => a.id.localeCompare(b.id))
 

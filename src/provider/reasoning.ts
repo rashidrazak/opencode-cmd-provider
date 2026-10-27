@@ -19,7 +19,7 @@ import { MODEL_REASONING_CAPABILITY } from "../catalog/classification.js"
 // local `CommandCodeReasoningEffort` union ("minimal" | "low" | ... | "max"),
 // so a literal `export { MODEL_EFFORTS }` fails typecheck where
 // `ThinkingMetadata` uses the union. The cast assumes every effort string the
-// generated catalog emits is a valid `PiThinkingLevel` (the models.md Efforts
+// generated catalog emits is a valid `PiThinkingLevel` (the catalog's reasoning
 // column is constrained to those levels; the release gate catches drift). Do
 // NOT "simplify" this back to a direct re-export — it breaks the build.
 export const MODEL_EFFORTS: Readonly<Record<string, readonly CommandCodeReasoningEffort[]>> =

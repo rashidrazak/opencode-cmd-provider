@@ -12,6 +12,13 @@ import { getApiBase } from "../env.js"
 import { augmentConfigCommandCodeModels, autoRegister } from "./models.js"
 import { resolveProviderNpm } from "./version.js"
 import {
+  mergeCachedCatalog,
+  readCatalogCache,
+  type CachedCatalogRow,
+} from "../catalog/catalog-cache.js"
+import { startCatalogSync } from "./catalog-sync.js"
+import type { CatalogModel } from "../catalog/snapshot.js"
+import {
   enrichCommandCodeModels,
   enrichCommandCodeModelsV2,
   planSummaryTool,
@@ -28,7 +35,7 @@ import type { V2SetupContext } from "./v2-types.js"
 const server: Plugin = async (input) => {
   return {
     config: async (config) => {
-      autoRegister(config as Config, MODEL_SNAPSHOT, {
+      autoRegister(config as Config, runtimeSnapshot(), {
         // Version-pinned on purpose (issue #152): opencode's package cache is
         // keyed by the exact specifier and never refreshed, so a bare name would
         // let the runtime provider drift away from the plugin that registered it.
@@ -38,6 +45,10 @@ const server: Plugin = async (input) => {
       })
       augmentConfigCommandCodeModels(config as Config)
       enrichCommandCodeModels(config as Config)
+      // Membership refresh runs *behind* registration (ADR-0024): the models
+      // above came from the disk cache or the bundle, so the host never waits on
+      // the network. The fetch primes the cache for the next start.
+      void startCatalogSync()
     },
     auth: {
       provider: "commandcode",
@@ -75,6 +86,56 @@ const server: Plugin = async (input) => {
 }
 
 /**
+ * The membership rows to register this session (ADR-0024): the bundled
+ * Snapshot, with any catalog the background fetch cached last session merged
+ * over it.
+ *
+ * The merge is a union — a cached row can add a model the bundle does not have
+ * and can refresh the fields of one it does, but it can never remove a bundled
+ * model. So a stale cache (or one written by an older package) cannot hide a
+ * model this build ships.
+ *
+ * The disk read is deliberate and cheap (~1 ms): it is what keeps the network
+ * off the startup path, since the host awaits `config` before reading
+ * `provider.config`. Any cache defect degrades to the bundle.
+ */
+export function runtimeSnapshot(cachePath?: string): readonly CatalogModel[] {
+  const cached = readCatalogCache(cachePath)
+  if (cached === undefined) return MODEL_SNAPSHOT
+  return snapshotWithCache(MODEL_SNAPSHOT, cached.rows)
+}
+
+/**
+ * Merges cached rows over the bundled Snapshot rows.
+ *
+ * A cached row's provenance is reported as `"catalog"` — it *is* a catalog
+ * observation, just a live one rather than a build-time one, and
+ * `contextSource`/`costSource` only feed the refresh diff, never the runtime.
+ */
+export function snapshotWithCache(
+  bundled: readonly CatalogModel[],
+  cached: readonly CachedCatalogRow[],
+): readonly CatalogModel[] {
+  const toCatalogModel = (row: CachedCatalogRow): CatalogModel => ({
+    id: row.id,
+    name: row.name,
+    contextLength: row.contextLength,
+    contextSource: "catalog",
+    efforts: row.efforts,
+    cost: row.cost,
+    // A cached row always carries a registered cost (`catalogCache` only ships
+    // rows the provider can price); the null branch is unreachable but keeps the
+    // generated type honest.
+    costSource: "catalog",
+  })
+  return mergeCachedCatalog(
+    bundled,
+    { catalogVersion: "", fetchedAt: "", rows: [...cached] },
+    toCatalogModel,
+  )
+}
+
+/**
  * v2 host: the same three capabilities through the transform API. The Rates &
  * usage seams — the provider enrichment pass, the `cmd_plan_summary`
  * tool and the usage RPC bridge — are supplied here, so deleting `src/rates-usage/`
@@ -84,6 +145,7 @@ const server: Plugin = async (input) => {
  */
 const setup = async (ctx: V2SetupContext): Promise<void> =>
   setupCommandCode(ctx, {
+    snapshot: runtimeSnapshot(),
     enrichProvider: enrichCommandCodeModelsV2,
     tools: [planSummaryV2Tool({ hostCredential: hostCredentialFromV2(ctx) })],
     rpc: (rpcCtx) => registerUsageRpc(rpcCtx, hostCredentialFromV2(rpcCtx)),

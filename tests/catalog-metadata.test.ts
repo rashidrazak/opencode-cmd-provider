@@ -69,10 +69,10 @@ run([
   ],
 
   [
-    "muse-spark pricing is covered by the synthetic parser fixture, not pinned here",
+    "muse-spark pricing is covered by the synthetic catalog parser fixture, not pinned here",
     () => {
-      // Upstream *values* moved to tests/parse-facts.test.ts over the
-      // synthetic models.md fixture (spec #108 story 8): a real upstream
+      // Upstream *values* moved to tests/parse-catalog.test.ts over the
+      // synthetic catalog payload (spec #108 story 8): a real upstream
       // price change must surface as a refresh-PR diff, never as a red
       // test. Here only the relation is asserted: the ids used to be pinned
       // stay resolvable from the generated facts as long as upstream lists

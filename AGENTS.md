@@ -45,9 +45,14 @@ models` for this — v2 activates plugins asynchronously and the one-shot CLI
 `src/catalog/snapshot.ts`, `src/catalog/facts.ts`,
 `src/catalog/classification.ts`, and `src/rates-usage/catalog.ts` are generated
 (`scripts/refresh-snapshot.mjs`, `scripts/refresh-classification.mjs`,
-`scripts/refresh-deals.mjs`). Regenerate with `npm run refresh` — the
-snapshot comes from the npm package's bundled models.md table (the sole
-membership authority since #130; the listing API is annotate-only); the
+`scripts/refresh-deals.mjs`). Regenerate with `npm run refresh` — the snapshot
+comes from the Command Code model catalog's client view
+(`GET /provider/v1/models?view=client`, the sole membership authority since
+ADR-0024; `hidden` records never ship, and the plain listing endpoint is
+annotate-only). The npm registry is still read for the `command-code` dist-tag
+(`FACTS_PACKAGE_VERSION` feeds the version-gated `x-command-code-version`
+header). `models.md` is no longer read at all — `scripts/parse-facts.mjs`,
+`scripts/parse-modalities.mjs` and their fixtures/tests are gone. The
 RSC fixtures (`tests/fixtures/rsc-*.txt`) and the models-page index fixture
 (`tests/fixtures/models-page.html`, issue #131) are re-captured from the
 live docs pages (`scripts/capture-rsc-fixtures.mjs`, all-or-nothing, loud on

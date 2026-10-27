@@ -1,5 +1,11 @@
 // tests/refresh-snapshot.test.ts — refresh script integration (issue #16 seam 3,
-// issue #130: models.md-primary Snapshot membership + ship-bar)
+// ADR-0024: catalog-primary Snapshot membership + ship-bar)
+//
+// Membership now comes from the Command Code model catalog's client view
+// (`GET /provider/v1/models?view=client`), the same source the CLI resolves
+// models from. These tests drive the refresh end to end against the mock and
+// assert the *contracts* — membership shape, loud shape failures, ladder
+// provenance — never upstream values (spec #108).
 import { mkdtemp, readFile, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -7,50 +13,37 @@ import { spawn } from "node:child_process"
 import { startMockCc } from "./helpers/mock-cc.js"
 import { assert, assertEqual, run } from "./harness.js"
 
-// The mock models payload no longer decides Snapshot membership (issue
-// #130): the API listing is annotate-only. It exists so tests can drive
-// the divergence note.
+/**
+ * A client-view catalog record. Every value here is synthetic and test-owned:
+ * an upstream price or context change must move the committed Snapshot, never
+ * this suite.
+ */
+function record(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "claude-sonnet-5",
+    name: "Claude Sonnet 5",
+    context_length: 1_000_000,
+    reasoningEfforts: ["low", "medium", "high", "xhigh", "max"],
+    inputModalities: ["text", "image"],
+    pricing: { inputCost: 2, outputCost: 10, cacheReadCost: 0.2, cacheWriteCost: 2.5 },
+    ...overrides,
+  }
+}
+
+/** A client-view catalog payload wrapping the given records. */
+function catalog(data: unknown[], overrides: Record<string, unknown> = {}) {
+  return { catalogVersion: "test-catalog", data, refreshInterval: 900, ...overrides }
+}
+
+// The plain listing endpoint (`/provider/v1/models`, thin shape) is a separate
+// resource consulted only for the divergence note.
 const API_MODELS = {
   object: "list",
   data: [
     { id: "claude-sonnet-5", name: "Claude Sonnet 5", context_length: 200000 },
-    {
-      id: "deepseek/deepseek-v4-flash",
-      name: "DeepSeek V4 Flash (latest)",
-      context_length: 1000000,
-    },
-    // Deliberately diverges from the package table in one direction (in
-    // API but not membership) and is missing another (membership ahead).
+    { id: "api-only/model", name: "API Only", context_length: 12345 },
   ],
 }
-
-const PACKAGE_MD =
-  "## Open Source\n\n" +
-  "| Id (use EXACTLY this) | Name | Context | Efforts | $/1M in/out · cache read | Min plan | Best for |\n" +
-  "|---|---|---|---|---|---|---|\n" +
-  "| `claude-sonnet-5` | Claude Sonnet 5 | 1M | low, medium, high, xhigh, max | $2/$10 · cache $0.2 (write $2.5) | Pro and above | best |\n" +
-  "| `gpt-6-astra` | GPT-6 Astra | 1.05M | low, medium, high, xhigh, max | $10/$50 · cache $1 (write $12.5) | Max | best |\n"
-
-const PACKAGE_MD_FREE =
-  "## Open Source\n\n" +
-  "| Id (use EXACTLY this) | Name | Context | Efforts | $/1M in/out · cache read | Min plan | Best for |\n" +
-  "|---|---|---|---|---|---|---|\n" +
-  "| `poolside/laguna-s-2.1-free` | Laguna S 2.1 | 256K | — | $0/$0 · cache $0 | Go and above | best |\n"
-
-const PACKAGE_MD_WITH_OFF =
-  "## Open Source\n\n" +
-  "| Id (use EXACTLY this) | Name | Context | Efforts | $/1M in/out · cache read | Min plan | Best for |\n" +
-  "|---|---|---|---|---|---|---|\n" +
-  "| `claude-sonnet-5` | Claude Sonnet 5 | 1M | off, high, max | $2/$10 · cache $0.2 (write $2.5) | Pro and above | best |\n"
-
-// ASTRA deliberately carries the upstream `file` modality (as
-// command-code@1.81.0 reports for meta/muse-wonder-1.0): the parser accepts
-// it, and the generated facts must stay in the runtime text + image
-// vocabulary (see the first test's MODEL_INPUT_MODALITIES assertion).
-const CLI_BUNDLE =
-  'const models={SONNET:{name:"Claude Sonnet 5",id:"claude-sonnet-5",inputModalities:["text","image"],contextWindow:2e5},' +
-  'FLASH:{name:"DeepSeek V4 Flash (latest)",id:"deepseek/deepseek-v4-flash",inputModalities:["text"],contextWindow:1e6},' +
-  'ASTRA:{name:"GPT-6 Astra",id:"gpt-6-astra",inputModalities:["text","image","file"],contextWindow:105e4}}'
 
 // Async spawn: the in-process mock server must keep serving while the child
 // process fetches the catalog, so the parent event loop cannot be blocked.
@@ -74,8 +67,7 @@ function scriptEnv(mock: { url: string }) {
     ...process.env,
     COMMANDCODE_API_BASE: mock.url,
     COMMANDCODE_REGISTRY_URL: `${mock.url}/registry`,
-    COMMANDCODE_FACTS_URL: `${mock.url}/models.md`,
-    COMMANDCODE_MODALITIES_URL: `${mock.url}/cli.mjs`,
+    COMMANDCODE_CATALOG_URL: `${mock.url}/provider/v1/models?view=client`,
     COMMANDCODE_RSC_GOAT_URL: `${mock.url}/docs/plans/goat`,
     COMMANDCODE_RSC_PRO_URL: `${mock.url}/docs/plans/pro`,
     COMMANDCODE_MODELS_PAGE_URL: `${mock.url}/models-page.html`,
@@ -85,70 +77,50 @@ function scriptEnv(mock: { url: string }) {
 
 run([
   [
-    "membership comes from the package models.md, not the listing API; API divergence is note-only",
+    "membership comes from the catalog endpoint, and the plain listing API is note-only",
     async () => {
       const dir = await mkdtemp(join(tmpdir(), "cc-refresh-"))
       const out = join(dir, "snapshot.ts")
+      const factsOut = join(dir, "facts.ts")
       const mock = await startMockCc({
         models: API_MODELS,
         registry: { "dist-tags": { latest: "1.49.1" } },
-        factsMd: PACKAGE_MD,
-        modalitiesBundle: CLI_BUNDLE,
+        catalog: catalog([
+          record(),
+          record({
+            id: "gpt-6-astra",
+            name: "GPT-6 Astra",
+            context_length: 1_050_000,
+            pricing: { inputCost: 10, outputCost: 50, cacheReadCost: 1, cacheWriteCost: 12.5 },
+          }),
+        ]),
       })
       try {
         const result = await runScript(
-          ["scripts/refresh-snapshot.mjs", "--out", out, "--facts-out", join(dir, "facts.ts")],
+          ["scripts/refresh-snapshot.mjs", "--out", out, "--facts-out", factsOut],
           scriptEnv(mock),
         )
         assert(result.status === 0, result.stderr || result.stdout)
-        assertEqual(mock.hits.models, 1)
-        // gpt-6-astra is a package row the API does not serve: it must
-        // ship (day-1 membership) and the divergence must be a note.
-        assert(
-          result.stdout.includes("gpt-6-astra"),
-          `expected divergence note naming gpt-6-astra, got stdout: ${result.stdout}`,
-        )
-        const contents = await readFile(out, "utf-8")
-        assert(
-          contents.includes("GENERATED by scripts/refresh-snapshot.mjs"),
-          "missing generated header",
-        )
+        assertEqual(mock.hits.catalog, 1)
+        // Both catalog records ship. `api-only/model` is served by the thin
+        // listing endpoint but is NOT in the catalog, so it must not ship —
+        // the divergence note names it instead.
         const mod = await import(out)
-        assertEqual(mod.MODEL_SNAPSHOT, [
-          {
-            id: "claude-sonnet-5",
-            name: "Claude Sonnet 5",
-            contextLength: 1000000,
-            contextSource: "models.md",
-            efforts: ["low", "medium", "high", "xhigh", "max"],
-            cost: { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 },
-            costSource: "models.md",
-          },
-          {
-            id: "gpt-6-astra",
-            name: "GPT-6 Astra",
-            contextLength: 1050000,
-            contextSource: "models.md",
-            efforts: ["low", "medium", "high", "xhigh", "max"],
-            cost: { input: 10, output: 50, cacheRead: 1, cacheWrite: 12.5 },
-            costSource: "models.md",
-          },
-        ])
-        // The facts shim derives the maps from the package rows.
-        const factsMod = await import(join(dir, "facts.ts"))
-        assertEqual(factsMod.MODEL_COSTS, {
-          "claude-sonnet-5": { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 },
-          "gpt-6-astra": { input: 10, output: 50, cacheRead: 1, cacheWrite: 12.5 },
-        })
-        assertEqual(factsMod.MODEL_EFFORTS, {
-          "claude-sonnet-5": ["low", "medium", "high", "xhigh", "max"],
-          "gpt-6-astra": ["low", "medium", "high", "xhigh", "max"],
-        })
-        // The `file` modality on ASTRA's CLI entry is normalized away: the
-        // facts map advertises the runtime vocabulary only.
-        const astra = mod.MODEL_SNAPSHOT.find((m) => m.id === "gpt-6-astra")
-        assert(astra, "gpt-6-astra must ship")
-        assertEqual(factsMod.MODEL_INPUT_MODALITIES[astra.id], ["text", "image"])
+        assertEqual(
+          mod.MODEL_SNAPSHOT.map((m) => m.id),
+          ["claude-sonnet-5", "gpt-6-astra"],
+        )
+        assert(
+          result.stdout.includes("api-only/model"),
+          `expected the divergence note to name the API-only model, got: ${result.stdout}`,
+        )
+        assert(
+          result.stdout.includes("test-catalog"),
+          `expected the catalog version in the log, got: ${result.stdout}`,
+        )
+        const factsMod = await import(factsOut)
+        assertEqual(factsMod.FACTS_CATALOG_VERSION, "test-catalog")
+        assertEqual(factsMod.FACTS_PACKAGE_VERSION, "1.49.1")
       } finally {
         await mock.close()
         await rm(dir, { recursive: true, force: true })
@@ -157,36 +129,80 @@ run([
   ],
 
   [
-    "a package-ahead row (day-1 model) is the ship case: ships with decimal-parsed context, costs, efforts",
+    "a newly launched model (catalog-ahead of any package release) ships on the next refresh",
     async () => {
-      const dir = await mkdtemp(join(tmpdir(), "cc-facts-ahead-"))
+      // The bug ADR-0024 fixed: gpt-6.1-terra was live on the catalog and in
+      // the CLI, but absent from that release's models.md, so the plugin
+      // silently withheld it until a package shipped.
+      const dir = await mkdtemp(join(tmpdir(), "cc-catalog-ahead-"))
       const out = join(dir, "snapshot.ts")
-      const factsOut = join(dir, "facts.ts")
       const mock = await startMockCc({
-        models: {
-          object: "list",
-          data: [{ id: "claude-sonnet-5", name: "Claude Sonnet 5", context_length: 200000 }],
-        },
+        models: { object: "list", data: [] },
         registry: { "dist-tags": { latest: "1.49.1" } },
-        factsMd: PACKAGE_MD,
-        modalitiesBundle: CLI_BUNDLE,
+        catalog: catalog([
+          record({
+            id: "gpt-6.1-terra",
+            name: "GPT-6.1 Terra",
+            context_length: 1_050_000,
+            reasoningEfforts: ["low", "medium", "high", "xhigh", "max"],
+            inputModalities: ["text", "image"],
+            pricing: { inputCost: 1, outputCost: 5, cacheReadCost: 0.05, cacheWriteCost: 1.25 },
+          }),
+        ]),
       })
       try {
         const result = await runScript(
-          ["scripts/refresh-snapshot.mjs", "--out", out, "--facts-out", factsOut],
+          ["scripts/refresh-snapshot.mjs", "--out", out, "--facts-out", join(dir, "facts.ts")],
           scriptEnv(mock),
         )
         assert(result.status === 0, result.stderr || result.stdout)
-        assert(
-          result.stdout.includes("gpt-6-astra"),
-          `expected the divergence note to name the day-1 model, got: ${result.stdout}`,
-        )
         const mod = await import(out)
-        const astra = mod.MODEL_SNAPSHOT.find((m) => m.id === "gpt-6-astra")
-        assert(astra, "gpt-6-astra must ship even when the listing API omits it")
-        assertEqual(astra.contextLength, 1050000)
-        assertEqual(astra.cost, { input: 10, output: 50, cacheRead: 1, cacheWrite: 12.5 })
-        assertEqual(astra.efforts, ["low", "medium", "high", "xhigh", "max"])
+        assertEqual(mod.MODEL_SNAPSHOT, [
+          {
+            id: "gpt-6.1-terra",
+            name: "GPT-6.1 Terra",
+            contextLength: 1050000,
+            contextSource: "catalog",
+            efforts: ["low", "medium", "high", "xhigh", "max"],
+            cost: { input: 1, output: 5, cacheRead: 0.05, cacheWrite: 1.25 },
+            costSource: "catalog",
+          },
+        ])
+      } finally {
+        await mock.close()
+        await rm(dir, { recursive: true, force: true })
+      }
+    },
+  ],
+
+  [
+    "hidden catalog records never reach membership; they are reported, not failed",
+    async () => {
+      const dir = await mkdtemp(join(tmpdir(), "cc-hidden-"))
+      const out = join(dir, "snapshot.ts")
+      const mock = await startMockCc({
+        models: { object: "list", data: [] },
+        registry: { "dist-tags": { latest: "1.49.1" } },
+        catalog: catalog([
+          record({ id: "vendor/visible" }),
+          record({ id: "vendor/free-variant", hidden: true }),
+        ]),
+      })
+      try {
+        const result = await runScript(
+          ["scripts/refresh-snapshot.mjs", "--out", out, "--facts-out", join(dir, "facts.ts")],
+          scriptEnv(mock),
+        )
+        assert(result.status === 0, result.stderr || result.stdout)
+        const mod = await import(out)
+        assertEqual(
+          mod.MODEL_SNAPSHOT.map((m) => m.id),
+          ["vendor/visible"],
+        )
+        assert(
+          result.stdout.includes("hidden") && result.stdout.includes("vendor/free-variant"),
+          `expected the hidden record to be reported, got: ${result.stdout}`,
+        )
       } finally {
         await mock.close()
         await rm(dir, { recursive: true, force: true })
@@ -201,10 +217,9 @@ run([
       const out = join(dir, "snapshot.ts")
       const factsOut = join(dir, "facts.ts")
       const mock = await startMockCc({
-        models: API_MODELS,
+        models: { object: "list", data: [] },
         registry: { "dist-tags": { latest: "1.49.1" } },
-        factsMd: PACKAGE_MD_WITH_OFF,
-        modalitiesBundle: CLI_BUNDLE,
+        catalog: catalog([record({ reasoningEfforts: ["off", "high", "max"] })]),
       })
       try {
         const result = await runScript(
@@ -213,9 +228,7 @@ run([
         )
         assert(result.status === 0, result.stderr || result.stdout)
         const mod = await import(out)
-        const sonnet = mod.MODEL_SNAPSHOT.find((m) => m.id === "claude-sonnet-5")
-        assert(sonnet, "claude-sonnet-5 must ship")
-        assertEqual(sonnet.efforts, ["high", "max"])
+        assertEqual(mod.MODEL_SNAPSHOT[0].efforts, ["high", "max"])
         const factsMod = await import(factsOut)
         assertEqual(factsMod.MODEL_EFFORTS, { "claude-sonnet-5": ["high", "max"] })
       } finally {
@@ -226,21 +239,16 @@ run([
   ],
 
   [
-    "the listing API never adds membership: an API-only model is absent from the snapshot",
+    "exact context_length ships verbatim (no decimal rounding)",
     async () => {
-      const dir = await mkdtemp(join(tmpdir(), "cc-api-ahead-"))
+      // models.md's coarse "1.05M" cell became 1050000; the catalog carries
+      // the true 1048576 and the Snapshot must use it.
+      const dir = await mkdtemp(join(tmpdir(), "cc-exact-ctx-"))
       const out = join(dir, "snapshot.ts")
       const mock = await startMockCc({
-        models: {
-          object: "list",
-          data: [
-            { id: "claude-sonnet-5", name: "Claude Sonnet 5", context_length: 200000 },
-            { id: "api-only/model", name: "API Only", context_length: 12345 },
-          ],
-        },
+        models: { object: "list", data: [] },
         registry: { "dist-tags": { latest: "1.49.1" } },
-        factsMd: PACKAGE_MD,
-        modalitiesBundle: CLI_BUNDLE,
+        catalog: catalog([record({ context_length: 1_048_576 })]),
       })
       try {
         const result = await runScript(
@@ -248,16 +256,8 @@ run([
           scriptEnv(mock),
         )
         assert(result.status === 0, result.stderr || result.stdout)
-        assert(
-          result.stdout.includes("api-only/model"),
-          `expected divergence note naming the API-only model, got stdout: ${result.stdout}`,
-        )
         const mod = await import(out)
-        assertEqual(
-          mod.MODEL_SNAPSHOT.some((m) => m.id === "api-only/model"),
-          false,
-          "an API-only model must never enter Snapshot membership",
-        )
+        assertEqual(mod.MODEL_SNAPSHOT[0].contextLength, 1_048_576)
       } finally {
         await mock.close()
         await rm(dir, { recursive: true, force: true })
@@ -266,17 +266,57 @@ run([
   ],
 
   [
-    "an explicitly free package row keeps all-zero costs (free ≠ missing) and reaches the facts map",
+    "modalities come from the catalog record, not a CLI scrape",
+    async () => {
+      const dir = await mkdtemp(join(tmpdir(), "cc-modalities-"))
+      const out = join(dir, "snapshot.ts")
+      const factsOut = join(dir, "facts.ts")
+      const mock = await startMockCc({
+        models: { object: "list", data: [] },
+        registry: { "dist-tags": { latest: "1.49.1" } },
+        catalog: catalog([
+          record({ inputModalities: ["text"] }),
+          record({
+            id: "vision/model",
+            name: "Vision Model",
+            inputModalities: ["text", "image"],
+          }),
+        ]),
+      })
+      try {
+        const result = await runScript(
+          ["scripts/refresh-snapshot.mjs", "--out", out, "--facts-out", factsOut],
+          scriptEnv(mock),
+        )
+        assert(result.status === 0, result.stderr || result.stdout)
+        const factsMod = await import(factsOut)
+        // text-only is omitted by convention (the runtime falls back to text)
+        assertEqual(factsMod.MODEL_INPUT_MODALITIES, { "vision/model": ["text", "image"] })
+      } finally {
+        await mock.close()
+        await rm(dir, { recursive: true, force: true })
+      }
+    },
+  ],
+
+  [
+    "an explicitly free record keeps all-zero costs (free ≠ missing)",
     async () => {
       const dir = await mkdtemp(join(tmpdir(), "cc-free-"))
       const out = join(dir, "snapshot.ts")
       const factsOut = join(dir, "facts.ts")
       const mock = await startMockCc({
-        models: API_MODELS,
+        models: { object: "list", data: [] },
         registry: { "dist-tags": { latest: "1.49.1" } },
-        factsMd: PACKAGE_MD_FREE,
-        modalitiesBundle:
-          'const models={FREE:{name:"Laguna S 2.1",id:"poolside/laguna-s-2.1-free",inputModalities:["text"],contextWindow:256e3}}',
+        catalog: catalog([
+          record({
+            id: "poolside/laguna-s-2.1-free",
+            name: "Laguna S 2.1",
+            context_length: 262_144,
+            inputModalities: ["text"],
+            pricing: { inputCost: 0, outputCost: 0, cacheReadCost: 0, cacheWriteCost: 0 },
+          }),
+        ]),
       })
       try {
         const result = await runScript(
@@ -285,14 +325,9 @@ run([
         )
         assert(result.status === 0, result.stderr || result.stdout)
         const mod = await import(out)
-        const free = mod.MODEL_SNAPSHOT.find((m) => m.id === "poolside/laguna-s-2.1-free")
-        assert(free, "free row must ship")
-        assertEqual(free.contextLength, 256000)
+        const free = mod.MODEL_SNAPSHOT[0]
         assertEqual(free.cost, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 })
         const factsMod = await import(factsOut)
-        // The facts map must carry the row's cost — derived from the row
-        // id (no literal pin; the lint gate forbids literal catalog-index
-        // access to a real generated id).
         assertEqual(factsMod.MODEL_COSTS[free.id], free.cost)
       } finally {
         await mock.close()
@@ -302,24 +337,37 @@ run([
   ],
 
   [
-    "a missing Context cell resolves through the ordered ladder: models.md (—) → CLI contextWindow, with per-step annotation",
+    "an absent context_length resolves through the ladder: catalog → RSC contextWindow",
     async () => {
-      // Issue #132: a row whose models.md Context cell is "—" is no longer
-      // pending — the ordered ladder resolves it. Here the RSC pages are
-      // unavailable (mock 404s degrade to notes), so the CLI bundle's
-      // contextWindow (200000) resolves the row and the log names the step.
       const dir = await mkdtemp(join(tmpdir(), "cc-ctx-ladder-"))
       const out = join(dir, "snapshot.ts")
+      const slugPayload = (records) => `2:${JSON.stringify(records)}\n`
+      const rscRecord = {
+        slug: "ctx-ladder",
+        id: "ctx/ladder",
+        name: "Ctx Ladder",
+        vendor: "ctx",
+        category: "opensource",
+        minPlanName: "Go",
+        contextWindow: 333_000,
+        tiers: [],
+        caps: {},
+        reasoning: false,
+      }
       const mock = await startMockCc({
-        models: API_MODELS,
+        models: { object: "list", data: [] },
         registry: { "dist-tags": { latest: "1.49.1" } },
-        factsMd:
-          "## Open Source\n\n" +
-          "| Id (use EXACTLY this) | Name | Context | Efforts | $/1M in/out · cache read | Min plan | Best for |\n" +
-          "|---|---|---|---|---|---|---|\n" +
-          "| `zai-org/GLM-5.1` | GLM-5.1 | — | — | $1.4/$4.4 · cache $0.26 | Go and above | best |\n",
-        modalitiesBundle:
-          'const models={GLM51:{name:"GLM-5.1",id:"zai-org/GLM-5.1",inputModalities:["text"],contextWindow:2e5}}',
+        catalog: catalog([
+          (() => {
+            const { context_length: _drop, ...withoutContext } = record({
+              id: "ctx/ladder",
+              name: "Ctx Ladder",
+            })
+            return withoutContext
+          })(),
+        ]),
+        rscGoat: slugPayload([rscRecord]),
+        rscPro: slugPayload([rscRecord]),
       })
       try {
         const result = await runScript(
@@ -328,19 +376,12 @@ run([
         )
         assert(result.status === 0, result.stderr || result.stdout)
         assert(
-          result.stdout.includes("context zai-org/GLM-5.1: 200000 (from CLI contextWindow)"),
-          `expected a per-step context annotation naming the CLI source, got stdout: ${result.stdout}`,
+          result.stdout.includes("context ctx/ladder: 333000 (from RSC contextWindow)"),
+          `expected the per-step context annotation, got: ${result.stdout}`,
         )
         const mod = await import(out)
-        assertEqual(mod.MODEL_SNAPSHOT[0].contextLength, 200000)
-        assertEqual(mod.MODEL_SNAPSHOT[0].contextSource, "cli")
-        assertEqual(mod.MODEL_SNAPSHOT[0].name, "GLM-5.1")
-        assertEqual(mod.MODEL_SNAPSHOT[0].cost, {
-          input: 1.4,
-          output: 4.4,
-          cacheRead: 0.26,
-          cacheWrite: 0,
-        })
+        assertEqual(mod.MODEL_SNAPSHOT[0].contextLength, 333_000)
+        assertEqual(mod.MODEL_SNAPSHOT[0].contextSource, "rsc")
       } finally {
         await mock.close()
         await rm(dir, { recursive: true, force: true })
@@ -349,24 +390,19 @@ run([
   ],
 
   [
-    "a missing price cell fails loudly after the full cost ladder when no source has rates (costs never carry forward)",
+    "an absent pricing block fails loudly after the full cost ladder (costs never carry forward)",
     async () => {
-      // Issue #132 cost ladder: models.md (—) → models page index → detail
-      // page → RSC rates. With none of the enrichment sources configured the
-      // row is unshippable — a LOUD failure naming it, never a zero-fill and
-      // never a pending note. Missing must never read as free.
       const dir = await mkdtemp(join(tmpdir(), "cc-cost-ladder-fail-"))
       const out = join(dir, "snapshot.ts")
       const mock = await startMockCc({
-        models: API_MODELS,
+        models: { object: "list", data: [] },
         registry: { "dist-tags": { latest: "1.49.1" } },
-        factsMd:
-          "## Open Source\n\n" +
-          "| Id (use EXACTLY this) | Name | Context | Efforts | $/1M in/out · cache read | Min plan | Best for |\n" +
-          "|---|---|---|---|---|---|---|\n" +
-          "| `a/model` | A Model | 1M | low | — | Go and above | best |\n",
-        modalitiesBundle:
-          'const models={A:{name:"A Model",id:"a/model",inputModalities:["text"],contextWindow:1e6}}',
+        catalog: catalog([
+          (() => {
+            const { pricing: _drop, ...withoutPricing } = record({ id: "a/model", name: "A Model" })
+            return withoutPricing
+          })(),
+        ]),
       })
       try {
         const result = await runScript(
@@ -377,7 +413,7 @@ run([
         assert(
           result.stderr.includes("a/model") &&
             result.stderr.includes("no cost after the full fallback ladder"),
-          `expected a loud unshippable-row failure naming the model, got stderr: ${result.stderr}`,
+          `expected a loud unshippable-row failure naming the model, got: ${result.stderr}`,
         )
         assert(
           /costs never carry forward/i.test(result.stderr),
@@ -398,19 +434,14 @@ run([
   ],
 
   [
-    "an unknown Context token in the package table fails loudly (pinned decimal table)",
+    "a catalog shape change fails loudly and writes nothing",
     async () => {
-      const dir = await mkdtemp(join(tmpdir(), "cc-ctx-unknown-"))
+      const dir = await mkdtemp(join(tmpdir(), "cc-catalog-shape-"))
       const out = join(dir, "snapshot.ts")
       const mock = await startMockCc({
-        models: API_MODELS,
+        models: { object: "list", data: [] },
         registry: { "dist-tags": { latest: "1.49.1" } },
-        factsMd:
-          "## Open Source\n\n" +
-          "| Id (use EXACTLY this) | Name | Context | Efforts | $/1M in/out · cache read | Min plan | Best for |\n" +
-          "|---|---|---|---|---|---|---|\n" +
-          "| `a/model` | A Model | 1.5G | low | $1/$2 · cache $0.1 | Go and above | best |\n",
-        modalitiesBundle: CLI_BUNDLE,
+        catalog: catalog([record({ context_length: "1M" })]),
       })
       try {
         const result = await runScript(
@@ -419,41 +450,16 @@ run([
         )
         assert(result.status !== 0, `expected non-zero exit, got ${result.status}`)
         assert(
-          result.stderr.includes("could not parse context cell"),
-          `expected loud context-token failure, got stderr: ${result.stderr}`,
+          result.stderr.includes("context_length"),
+          `expected the shape failure to name the field, got: ${result.stderr}`,
         )
-      } finally {
-        await mock.close()
-        await rm(dir, { recursive: true, force: true })
-      }
-    },
-  ],
-
-  [
-    "an unparseable price cell fails loudly (missing uses an em dash)",
-    async () => {
-      const dir = await mkdtemp(join(tmpdir(), "cc-price-parse-"))
-      const out = join(dir, "snapshot.ts")
-      const mock = await startMockCc({
-        models: API_MODELS,
-        registry: { "dist-tags": { latest: "1.49.1" } },
-        factsMd:
-          "## Open Source\n\n" +
-          "| Id (use EXACTLY this) | Name | Context | Efforts | $/1M in/out · cache read | Min plan | Best for |\n" +
-          "|---|---|---|---|---|---|---|\n" +
-          "| `a/model` | A Model | 1M | low | $nope/$2 · cache $0.1 | Go and above | best |\n",
-        modalitiesBundle: CLI_BUNDLE,
-      })
-      try {
-        const result = await runScript(
-          ["scripts/refresh-snapshot.mjs", "--out", out, "--facts-out", join(dir, "facts.ts")],
-          scriptEnv(mock),
-        )
-        assert(result.status !== 0, `expected non-zero exit, got ${result.status}`)
-        assert(
-          result.stderr.includes("could not parse price cell"),
-          `expected loud price failure, got stderr: ${result.stderr}`,
-        )
+        let wrote = true
+        try {
+          await readFile(out, "utf-8")
+        } catch {
+          wrote = false
+        }
+        assert(!wrote, "no module may be written on a shape change")
       } finally {
         await mock.close()
         await rm(dir, { recursive: true, force: true })
@@ -467,10 +473,9 @@ run([
       const dir = await mkdtemp(join(tmpdir(), "cc-registry-parse-"))
       const out = join(dir, "snapshot.ts")
       const mock = await startMockCc({
-        models: API_MODELS,
+        models: { object: "list", data: [] },
         registryRaw: "<html>not json</html>",
-        factsMd: PACKAGE_MD,
-        modalitiesBundle: CLI_BUNDLE,
+        catalog: catalog([record()]),
       })
       try {
         const result = await runScript(
@@ -490,20 +495,51 @@ run([
   ],
 
   [
-    "a CLI bundle omitting a package model logs a modalities-pending note, not a failure (issue #132 moves it to a pending-report)",
+    "an unreachable catalog fails loudly (membership has no fallback source)",
+    async () => {
+      // ADR-0024: the catalog is membership. There is no second membership
+      // source — a failed fetch is a failed refresh, never a silent
+      // smaller catalog and never a carried-forward model list.
+      const dir = await mkdtemp(join(tmpdir(), "cc-catalog-down-"))
+      const out = join(dir, "snapshot.ts")
+      const mock = await startMockCc({
+        models: { object: "list", data: [] },
+        registry: { "dist-tags": { latest: "1.49.1" } },
+        catalogStatus: 500,
+      })
+      try {
+        const result = await runScript(
+          ["scripts/refresh-snapshot.mjs", "--out", out, "--facts-out", join(dir, "facts.ts")],
+          scriptEnv(mock),
+        )
+        assert(result.status !== 0, `expected non-zero exit, got ${result.status}`)
+        assert(
+          result.stderr.includes("could not fetch") || result.stderr.includes("failed to fetch"),
+          `expected a loud fetch failure, got: ${result.stderr}`,
+        )
+        let wrote = true
+        try {
+          await readFile(out, "utf-8")
+        } catch {
+          wrote = false
+        }
+        assert(!wrote, "no module may be written when membership cannot be read")
+      } finally {
+        await mock.close()
+        await rm(dir, { recursive: true, force: true })
+      }
+    },
+  ],
+
+  [
+    "a record advertising no modalities logs a pending note, not a failure",
     async () => {
       const dir = await mkdtemp(join(tmpdir(), "cc-modalities-pending-"))
       const out = join(dir, "snapshot.ts")
       const mock = await startMockCc({
-        models: API_MODELS,
+        models: { object: "list", data: [] },
         registry: { "dist-tags": { latest: "1.49.1" } },
-        factsMd:
-          "## Open Source\n\n" +
-          "| Id (use EXACTLY this) | Name | Context | Efforts | $/1M in/out · cache read | Min plan | Best for |\n" +
-          "|---|---|---|---|---|---|---|\n" +
-          "| `claude-sonnet-5` | Claude Sonnet 5 | 1M | low, medium, high, xhigh, max | $2/$10 · cache $0.2 (write $2.5) | Pro and above | best |\n" +
-          "| `no-cli/model` | No CLI | 1M | low | $1/$2 · cache $0.1 | Go and above | best |\n",
-        modalitiesBundle: CLI_BUNDLE,
+        catalog: catalog([record({ inputModalities: null })]),
       })
       try {
         const result = await runScript(
@@ -515,76 +551,13 @@ run([
           `expected success with a pending note, got stderr: ${result.stderr}`,
         )
         assert(
-          result.stdout.includes("modalities pending") && result.stdout.includes("no-cli/model"),
-          `expected modalities-pending note, got stdout: ${result.stdout}`,
+          result.stdout.includes("modalities pending") && result.stdout.includes("claude-sonnet-5"),
+          `expected a modalities-pending note, got stdout: ${result.stdout}`,
         )
         const mod = await import(out)
         assert(
-          mod.MODEL_SNAPSHOT.some((m) => m.id === "no-cli/model"),
-          "a package row must still ship when the CLI bundle omits it",
-        )
-      } finally {
-        await mock.close()
-        await rm(dir, { recursive: true, force: true })
-      }
-    },
-  ],
-
-  [
-    "a double-missing row (Context AND price cells missing) resolves context via RSC and fails loudly on cost when no source has rates",
-    async () => {
-      // The context ladder resolves the missing Context cell via the RSC
-      // slug records (the RSC step precedes CLI/LKG). The cost ladder finds
-      // no rates anywhere (page/detail/RSC absent) and fails loudly —
-      // unshippable row, never zero-filled.
-      const dir = await mkdtemp(join(tmpdir(), "cc-double-missing-"))
-      const out = join(dir, "snapshot.ts")
-      const factsOut = join(dir, "facts.ts")
-      const slugPayload = (records) => `2:${JSON.stringify(records)}\n`
-      const rscRecord = {
-        slug: "double-missing",
-        id: "double/missing",
-        name: "Double Missing",
-        vendor: "double",
-        category: "opensource",
-        minPlanName: "Go",
-        contextWindow: 333000,
-        tiers: [],
-        caps: {},
-        reasoning: false,
-      }
-      const mock = await startMockCc({
-        models: API_MODELS,
-        registry: { "dist-tags": { latest: "1.49.1" } },
-        factsMd:
-          "## Open Source\n\n" +
-          "| Id (use EXACTLY this) | Name | Context | Efforts | $/1M in/out · cache read | Min plan | Best for |\n" +
-          "|---|---|---|---|---|---|---|\n" +
-          "| `double/missing` | Double Missing | — | — | — | Go and above | best |\n",
-        modalitiesBundle:
-          'const models={DM:{name:"Double Missing",id:"double/missing",inputModalities:["text"],contextWindow:1e6}}',
-        rscGoat: slugPayload([rscRecord]),
-        rscPro: slugPayload([rscRecord]),
-      })
-      try {
-        const env = {
-          ...scriptEnv(mock),
-          COMMANDCODE_RSC_GOAT_URL: `${mock.url}/docs/plans/goat`,
-          COMMANDCODE_RSC_PRO_URL: `${mock.url}/docs/plans/pro`,
-        }
-        const result = await runScript(
-          ["scripts/refresh-snapshot.mjs", "--out", out, "--facts-out", factsOut],
-          env,
-        )
-        assert(result.status !== 0, `expected non-zero exit, got ${result.status}`)
-        assert(
-          result.stdout.includes("context double/missing: 333000 (from RSC contextWindow)"),
-          `expected the RSC context step to resolve first, got stdout: ${result.stdout}`,
-        )
-        assert(
-          result.stderr.includes("double/missing") &&
-            result.stderr.includes("no cost after the full fallback ladder"),
-          `expected a loud cost failure naming the row, got stderr: ${result.stderr}`,
+          mod.MODEL_SNAPSHOT.some((m) => m.id === "claude-sonnet-5"),
+          "the row must ship",
         )
       } finally {
         await mock.close()

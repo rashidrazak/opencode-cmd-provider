@@ -91,7 +91,7 @@ import { readFile } from "node:fs/promises"
  * @property {string[]} [pendingDeals]           Snapshot ids with no MODEL_DEALS record.
  * @property {string[]} [pendingModalities]      Snapshot ids with a modalities-pending log report.
  * @property {Array<{id: string, contextLength: number}>} [carriedForward]  Rows whose contextSource is "carried-forward".
- * @property {Array<{id: string, source: string}>} [costFallbacks]  Rows whose costSource is not "models.md".
+ * @property {Array<{id: string, source: string}>} [costFallbacks]  Rows whose costSource is not "catalog".
  * @property {{ inMembershipNotApi?: string[], inApiNotMembership?: string[], skipped?: boolean }} [apiDivergence]  The annotate-only divergence notes (both directions, or the skipped/matches state).
  * @property {string[]} [bandedNotes]            The models-page verification notes.
  * @property {{ stale?: Array<{slug: string, id: string}>, danglingKeys?: string[], unmappedKeys?: string[] }} [slugMapPins]  Pinned slug-map drift (spec #108 pending report): stale map values, dangling map keys, and docs-ahead page slugs.
@@ -664,7 +664,7 @@ function carriedForwardSectionLines(carriedForward) {
 
 /**
  * The "Cost-fallback provenance" subsection (issue #134): one bullet per
- * row whose cost ladder resolved past the models.md cell.
+ * row whose cost ladder resolved past the catalog's own `pricing` block.
  *
  * @param {Array<{id: string, source: string}>} costFallbacks
  * @returns {string[]}

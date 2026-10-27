@@ -20,6 +20,12 @@ export interface MockCcOptions {
   modelsStatus?: number
   /** body served by GET /provider/v1/models as-is (e.g. non-JSON to exercise the note-only divergence path) */
   modelsRaw?: string
+  /** JSON body served at GET /provider/v1/models?view=client (the membership authority, ADR-0024) */
+  catalog?: unknown
+  /** body served at GET /provider/v1/models?view=client as-is (shape-failure tests) */
+  catalogRaw?: string
+  /** status for GET /provider/v1/models?view=client (unreachable-catalog tests) */
+  catalogStatus?: number
   /** events to emit for POST /alpha/generate; last event wins for infinite repetition */
   stream?: MockEvents
   status?: number
@@ -110,6 +116,7 @@ export interface MockCcOptions {
 export interface MockCcHits {
   generate: number
   models: number
+  catalog: number
   chatCompletions: number
   messages: number
   whoami: number
@@ -127,6 +134,7 @@ export function startMockCc(
   const hits: MockCcHits = {
     generate: 0,
     models: 0,
+    catalog: 0,
     chatCompletions: 0,
     messages: 0,
     whoami: 0,
@@ -165,6 +173,34 @@ export function startMockCc(
     let body = ""
     req.on("data", (c) => (body += c))
     req.on("end", () => {
+      if (req.url === "/provider/v1/models?view=client") {
+        hits.catalog++
+        // The client-view catalog is the Snapshot membership authority
+        // (ADR-0024). `catalogRaw`/`catalogStatus` let tests drive the shape
+        // failures the refresh must treat as loud (a usable body, a broken one).
+        if (options.catalogRaw !== undefined) {
+          res.writeHead(options.catalogStatus ?? 200, { "content-type": "text/plain" })
+          res.end(options.catalogRaw)
+          return
+        }
+        if (options.catalogStatus !== undefined && options.catalogStatus >= 400) {
+          res.writeHead(options.catalogStatus, { "content-type": "application/json" })
+          res.end(JSON.stringify({ error: { message: "mock catalog error" } }))
+          return
+        }
+        res.writeHead(200, { "content-type": "application/json" })
+        res.end(
+          JSON.stringify(
+            options.catalog ?? {
+              catalogVersion: "mock-catalog",
+              schemaVersion: 1,
+              refreshAfterSeconds: 900,
+              data: [],
+            },
+          ),
+        )
+        return
+      }
       if (req.url === "/provider/v1/models") {
         hits.models++
         // The listing API is annotate-only for the refresh pipeline

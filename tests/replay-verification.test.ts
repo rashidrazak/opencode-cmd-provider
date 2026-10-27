@@ -86,32 +86,28 @@ function snapshotWorldIds({ retireFreeVariant }: WorldOptions): [string, string]
   return entries
 }
 
-/** The models.md facts input. Efforts promotions flip the Efforts cell. */
-function modelsMd(world: WorldOptions): string {
-  const rows = snapshotWorldIds(world).map(([id, name]) => {
-    let efforts = "low, medium, high"
+/**
+ * The catalog payload the Snapshot is generated from (ADR-0024). Efforts
+ * promotions flip a record's `reasoningEfforts` list, which is the evidence
+ * the classification pass reads.
+ */
+function catalogWorld(world: WorldOptions): unknown {
+  const data = snapshotWorldIds(world).map(([id, name]) => {
+    let efforts = ["low", "medium", "high"]
     if (EFFORTS_PROMOTIONS.has(id)) {
-      efforts = world.effortsPromoted ? (EFFORTS_PROMOTIONS.get(id) as string) : "—"
+      const promoted = world.effortsPromoted ? (EFFORTS_PROMOTIONS.get(id) as string) : undefined
+      efforts = promoted === undefined ? [] : promoted.split(",").map((e) => e.trim())
     }
-    return `| \`${id}\` | ${name} | 1M | ${efforts} | $2/$10 · cache $0.2 (write $2.5) | Go | best |`
+    return {
+      id,
+      name,
+      context_length: 1_000_000,
+      reasoningEfforts: efforts.length > 0 ? efforts : null,
+      inputModalities: ["text"],
+      pricing: { inputCost: 2, outputCost: 10, cacheReadCost: 0.2, cacheWriteCost: 2.5 },
+    }
   })
-  return [
-    "## Open Source",
-    "",
-    "| Id | Name | Context | Efforts | $/1M in/out · cache read | Min plan | Best for |",
-    "|---|---|---|---|---|---|---|",
-    ...rows,
-    "",
-  ].join("\n")
-}
-
-/** The CLI bundle (modalities input) covering every snapshot-world model. */
-function modalitiesBundle(world: WorldOptions): string {
-  const entries = snapshotWorldIds(world).map(
-    ([id, name]) =>
-      `${JSON.stringify(id)}:{id:${JSON.stringify(id)},name:${JSON.stringify(name)},inputModalities:["text"],contextWindow:1e6}`,
-  )
-  return `const models={${entries.join(",")}}`
+  return { catalogVersion: "replay-catalog", data }
 }
 
 /**
@@ -226,8 +222,7 @@ async function runLadder(world: WorldOptions, ws: string): Promise<void> {
   const mock = await startMockCc({
     models: apiModelsPayload(world),
     registry: { "dist-tags": { latest: "1.39.2" } },
-    factsMd: modelsMd(world),
-    modalitiesBundle: modalitiesBundle(world),
+    catalog: catalogWorld(world),
     rscPricing: rsc.pricing,
     rscGoat: rsc.goat,
     rscPro: rsc.pro,
@@ -237,8 +232,7 @@ async function runLadder(world: WorldOptions, ws: string): Promise<void> {
     ...process.env,
     COMMANDCODE_API_BASE: mock.url,
     COMMANDCODE_REGISTRY_URL: `${mock.url}/registry`,
-    COMMANDCODE_FACTS_URL: `${mock.url}/models.md`,
-    COMMANDCODE_MODALITIES_URL: `${mock.url}/cli.mjs`,
+    COMMANDCODE_CATALOG_URL: `${mock.url}/provider/v1/models?view=client`,
     COMMANDCODE_RSC_PRICING_URL: `${mock.url}/docs/resources/pricing-limits`,
     COMMANDCODE_RSC_GOAT_URL: `${mock.url}/docs/plans/goat`,
     COMMANDCODE_RSC_PRO_URL: `${mock.url}/docs/plans/pro`,
