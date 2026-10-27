@@ -1479,6 +1479,58 @@ run([
     },
   ],
   [
+    "transport: the legacy wire carries assistant reasoning as a reasoning part (Go plan)",
+    async () => {
+      // Beam 1.0 (and DeepSeek V4.x tool continuations) require every earlier
+      // assistant turn's reasoning on the legacy gateway too. The CLI wire
+      // spells it as a `{ type: "reasoning", text }` content part; a
+      // message-level `reasoning_content` is ignored there.
+      let legacyBody: Record<string, unknown> | undefined
+      const mock = await startMockCc({
+        stream: [textDelta("hi"), finishEvent()],
+        onGenerate: (body) => {
+          legacyBody = body
+        },
+      })
+      try {
+        await withEnvVars(
+          { COMMANDCODE_PLAN: "go", COMMANDCODE_API_KEY: "k", COMMANDCODE_API_BASE: mock.url },
+          async () => {
+            const provider = createCommandCode({ apiKey: "k", baseURL: mock.url })
+            const parts = await collect(provider.languageModel("reflection/beam:free"), [
+              { role: "user", content: [{ type: "text", text: "Hello" }] },
+              {
+                role: "assistant",
+                content: [
+                  { type: "reasoning", text: "Greet the user." },
+                  { type: "text", text: "Hello!" },
+                ],
+              },
+              { role: "user", content: [{ type: "text", text: "Tell me more" }] },
+            ])
+            assertEqual(mock.hits.generate, 1, "go pin → legacy only")
+            assertEqual(mock.hits.chatCompletions, 0, "no Provider API hit")
+            assert(
+              parts.some((p) => p.type === "text-delta"),
+              "legacy delta emitted",
+            )
+            const params = legacyBody?.params as Record<string, unknown> | undefined
+            const messages = params?.messages as Array<Record<string, unknown>> | undefined
+            assertEqual(messages?.[1], {
+              role: "assistant",
+              content: [
+                { type: "reasoning", text: "Greet the user." },
+                { type: "text", text: "Hello!" },
+              ],
+            })
+          },
+        )
+      } finally {
+        await mock.close()
+      }
+    },
+  ],
+  [
     "transport: a Go account flips on the live /provider/v1/messages 403 (permission_error, no code) (issue #175)",
     async () => {
       // The Anthropic endpoint answers the plan refusal in the Anthropic

@@ -591,7 +591,7 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
       skills: null,
       params: {
         model: this.modelId,
-        messages: messagesToCC(options.prompt, { allowImages }),
+        messages: messagesToCC(options.prompt, { allowImages, model: this.modelId }),
         tools: toolsToJson(
           (options.tools ?? [])
             .filter((tool) => tool.type === "function")
