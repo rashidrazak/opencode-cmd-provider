@@ -45,10 +45,6 @@ const server: Plugin = async (input) => {
       })
       augmentConfigCommandCodeModels(config as Config)
       enrichCommandCodeModels(config as Config)
-      // Membership refresh runs *behind* registration (ADR-0024): the models
-      // above came from the disk cache or the bundle, so the host never waits on
-      // the network. The fetch primes the cache for the next start.
-      void startCatalogSync()
     },
     auth: {
       provider: "commandcode",
@@ -143,12 +139,21 @@ export function snapshotWithCache(
  * the bridge are handed the credential getter for the Host's active
  * connection, which is the only credential the session streams with (ADR-0015).
  */
-const setup = async (ctx: V2SetupContext): Promise<void> =>
-  setupCommandCode(ctx, {
+const setup = async (ctx: V2SetupContext): Promise<void> => {
+  // Membership refresh runs *behind* registration (ADR-0024): the models the
+  // transform registers come from the disk cache or the bundle, so the host
+  // never waits on the network. The fetch primes the cache for the next start.
+  //
+  // It is started here, not in `config`, because `config` is the v1 hook — a v2
+  // host never calls it, so firing the sync there left the cache permanently
+  // empty on every v2 install (found by testing this against opencode 2.1.4).
+  void startCatalogSync()
+  await setupCommandCode(ctx, {
     snapshot: runtimeSnapshot(),
     enrichProvider: enrichCommandCodeModelsV2,
     tools: [planSummaryV2Tool({ hostCredential: hostCredentialFromV2(ctx) })],
     rpc: (rpcCtx) => registerUsageRpc(rpcCtx, hostCredentialFromV2(rpcCtx)),
   })
+}
 
 export default { id: "commandcode", server, setup }

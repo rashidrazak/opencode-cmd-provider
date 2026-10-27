@@ -239,7 +239,61 @@ run([
   ],
 
   [
-    "the request targets the client view of the configured API base",
+    "the request targets the public catalog by default",
+    async () => {
+      const { dir, path } = tempPath()
+      try {
+        const { impl, calls } = fetchReturning(payload())
+        await refreshCatalogCache({ cachePath: path, fetch: impl, env: {} })
+        assertEqual(calls, ["https://api.commandcode.ai/provider/v1/models?view=client"])
+      } finally {
+        rmSync(dir, { recursive: true, force: true })
+      }
+    },
+  ],
+
+  [
+    "COMMANDCODE_API_BASE does NOT redirect the catalog (it is the transport base)",
+    async () => {
+      // Regression: the sync originally derived its URL from COMMANDCODE_API_BASE,
+      // so any session pointed at a mock/compatible proxy (no ?view=client there)
+      // silently disabled the refresh — every fetch 404'd in ~1 ms and the cache
+      // never populated. The two concerns must stay separate.
+      const { dir, path } = tempPath()
+      try {
+        const { impl, calls } = fetchReturning(payload())
+        await refreshCatalogCache({
+          cachePath: path,
+          fetch: impl,
+          env: { COMMANDCODE_API_BASE: "http://127.0.0.1:9" },
+        })
+        assertEqual(calls, ["https://api.commandcode.ai/provider/v1/models?view=client"])
+      } finally {
+        rmSync(dir, { recursive: true, force: true })
+      }
+    },
+  ],
+
+  [
+    "COMMANDCODE_CATALOG_URL overrides the catalog endpoint explicitly",
+    async () => {
+      const { dir, path } = tempPath()
+      try {
+        const { impl, calls } = fetchReturning(payload())
+        await refreshCatalogCache({
+          cachePath: path,
+          fetch: impl,
+          env: { COMMANDCODE_CATALOG_URL: "https://proxy.test/catalog" },
+        })
+        assertEqual(calls, ["https://proxy.test/catalog"])
+      } finally {
+        rmSync(dir, { recursive: true, force: true })
+      }
+    },
+  ],
+
+  [
+    "an explicit baseURL still targets that base's client view",
     async () => {
       const { dir, path } = tempPath()
       try {

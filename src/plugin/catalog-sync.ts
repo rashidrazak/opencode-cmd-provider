@@ -16,7 +16,6 @@
 // Every failure is swallowed on purpose. This is an accelerator: a captive
 // portal, a 500, an unparseable body, a read-only home — none of them may
 // surface as a plugin error or affect the models a user gets this session.
-import { getApiBase } from "../env.js"
 import {
   writeCatalogCache,
   type CachedCatalog,
@@ -25,6 +24,19 @@ import {
 
 /** The catalog client view: the same resource the Command Code CLI resolves. */
 const CATALOG_PATH = "/provider/v1/models?view=client"
+
+/**
+ * The catalog endpoint is deliberately **not** derived from
+ * `COMMANDCODE_API_BASE`. That variable points the *transport* at a mock or a
+ * compatible proxy during tests; the membership catalog is a different concern,
+ * and reusing it meant a test-shaped base URL silently disabled the refresh for
+ * the whole session (no mock serves `?view=client`, so every fetch 404'd in
+ * ~1 ms and the cache never populated).
+ *
+ * `COMMANDCODE_CATALOG_URL` overrides it explicitly when a test or a proxy
+ * really does serve a catalog.
+ */
+const DEFAULT_CATALOG_URL = "https://api.commandcode.ai/provider/v1/models?view=client"
 
 /**
  * How long the background fetch may take before it is abandoned. Deliberately
@@ -155,7 +167,10 @@ export async function refreshCatalogCache(options: CatalogSyncOptions = {}): Pro
   if (env[DISABLE_SYNC_ENV] === "1") return false
   const fetchImpl = options.fetch ?? globalThis.fetch
   if (typeof fetchImpl !== "function") return false
-  const url = options.catalogURL ?? `${options.baseURL ?? getApiBase(env)}${CATALOG_PATH}`
+  const url =
+    options.catalogURL ??
+    env.COMMANDCODE_CATALOG_URL ??
+    (options.baseURL === undefined ? DEFAULT_CATALOG_URL : `${options.baseURL}${CATALOG_PATH}`)
   try {
     const response = await fetchImpl(url, {
       headers: { accept: "application/json" },
