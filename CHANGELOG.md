@@ -1,3 +1,89 @@
+## 2.3.0 - 2026-10-27
+
+**Highlight — new models reach you without a plugin update.** The plugin now
+takes its model list from the Command Code model catalog's client view
+(`GET /provider/v1/models?view=client`) instead of the `command-code`
+package's `models.md`, and keeps a cached copy that a background fetch
+refreshes on every start
+([#318](https://github.com/rashidrazak/opencode-cmd-provider/pull/318),
+ADR-0024, addresses
+[#140](https://github.com/rashidrazak/opencode-cmd-provider/issues/140)).
+`models.md` had become a frozen rendering of that catalog, which is why
+`gpt-6.1-terra` and `moonshotai/Kimi-K3.1-Pro` were live in the CLI but
+missing here; both now ship. The release also lands the 2026-10-27 catalog
+refresh, which follows Command Code's GOAT and Pro repricing.
+
+### Features
+
+- **Model list from the catalog endpoint, cached at startup**
+  ([#318](https://github.com/rashidrazak/opencode-cmd-provider/pull/318)):
+  every catalog record that is not `hidden` ships; hidden records are
+  reported by the refresh, never shipped. Startup never waits on the
+  network: it reads the cache at
+  `$XDG_CACHE_HOME/opencode-cmd-provider/models.json` (~1 ms) and merges it
+  over the bundled Snapshot as a union — a cached row may add or refresh a
+  model, never remove one, so a stale cache cannot hide a shipped model. A
+  background fetch, started from both the v1 `config` hook and the v2
+  `setup()`, primes the cache for the next start. Any cache defect falls
+  back to the bundled Snapshot, and a failed fetch never surfaces as an
+  error. `COMMANDCODE_CATALOG_URL` overrides the endpoint;
+  `COMMANDCODE_DISABLE_CATALOG_SYNC=1` turns the fetch off.
+
+### Fixes
+
+- **The catalog fetch runs on both hosts**: it was first started only from
+  the v1 `config` hook, which a v2 host never calls, and then only from
+  `setup()`, which a v1 host never calls. Each startup path now has a test
+  that fails if its call is dropped.
+- **The catalog fetch stays off the transport base URL**: it no longer
+  derives its URL from `COMMANDCODE_API_BASE`, so a session pointed at a
+  mock or a compatible proxy still refreshes the cache instead of silently
+  getting a 404.
+- **Exact context lengths**: 22 models' context lengths come from the
+  catalog's exact value (for example `1048576`) instead of a decimal parse
+  of `1.05M`.
+- **The slug-map drift report always runs**: it ran before the enrichment
+  ladders and silently skipped whenever no record needed the models page.
+
+### Model catalog
+
+- Membership 92 → 94, sourced from the catalog endpoint
+  (FACTS_PACKAGE_VERSION stays `1.88.0`; it still feeds the
+  `x-command-code-version` header).
+- `scripts/parse-facts.mjs`, `scripts/parse-modalities.mjs`, their tests and
+  `tests/fixtures/models.md` are removed. Context, costs, efforts and input
+  modalities now come from the catalog record.
+
+| Model                      | Change | Before | After                                        |
+| -------------------------- | ------ | ------ | -------------------------------------------- |
+| `gpt-6.1-terra`            | added  | —      | GPT-6.1 Terra · 1050000 ctx · $1 / $5 per M  |
+| `moonshotai/Kimi-K3.1-Pro` | added  | —      | Kimi K3.1 Pro · 1048576 ctx · $2 / $10 per M |
+
+### Reasoning classification
+
+- Both new models are classified; all 94 Snapshot models are covered.
+
+### Deals catalog
+
+- Upstream repriced the plans: GOAT is $10/mo for up to $100 of usage
+  ($20 per 5 hours, $50 weekly), was $70 ($14 / $35); Pro is $20/mo for up to
+  $110 ($22 / $55), was $80 ($16 / $40).
+- The docs reworded those money cells from "$70 of usage" to "Up to $100 of
+  usage"; the RSC parser accepts the "Up to " qualifier, and any other
+  phrasing stays a shape change.
+- Deals records added for `gpt-6.1-terra` (premium, with standard and
+  long-context bands) and `moonshotai/Kimi-K3.1-Pro` (open source).
+- The plan-summary test derives plan figures from the generated catalogs, so
+  a repricing surfaces as a refresh diff instead of a red suite (spec #108).
+
+### Dependencies
+
+- `@ai-sdk/provider` 4.0.27 → 4.0.31, `@opentui/core` and `@opentui/solid`
+  0.6.4 → 0.6.6, `@opencode-ai/plugin` (dev) 1.19.0 → 1.19.3
+  ([#315](https://github.com/rashidrazak/opencode-cmd-provider/pull/315));
+  `fast-uri` 3.1.7 → 3.1.9
+  ([#317](https://github.com/rashidrazak/opencode-cmd-provider/pull/317)).
+
 ## 2.2.14 - 2026-10-24
 
 **Chore — the catalog is refreshed to `command-code@1.88.0`.** The package
