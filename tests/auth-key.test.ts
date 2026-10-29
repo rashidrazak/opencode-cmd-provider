@@ -2,8 +2,9 @@
 // the provenance-returning sibling (issue #205).
 import { mkdir, mkdtemp, writeFile, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 import {
+  apiKeySourceLabel,
   missingApiKeyMessage,
   resolveApiKey,
   resolveApiKeyWithSource,
@@ -120,20 +121,27 @@ run([
   ],
 
   [
-    "the file label names the store, never the account (issue #205)",
+    "the file label names the store, never the account (issue #205, #327)",
     async () => {
-      // A default path under the home directory reads back as `~/.commandcode/…`,
-      // the way the docs spell it — no OS user name, no account identifier.
-      const dir = await mkdtemp(join(tmpdir(), "cc-home-"))
-      try {
-        await mkdir(join(dir, ".commandcode"), { recursive: true })
-        await writeFile(join(dir, ".commandcode", "auth.json"), JSON.stringify({ apiKey: "k" }))
-        assertEqual(resolveApiKeyWithSource({ env: {}, homeDir: () => dir }), {
-          key: "k",
-          source: { kind: "file", label: join("~", ".commandcode", "auth.json") },
-        })
-      } finally {
-        await rm(dir, { recursive: true, force: true })
+      // Every default store under the home directory reads back as `~/…`, the
+      // way the docs spell it — no OS user name, no account identifier.
+      for (const relative of [
+        ".commandcode/auth.json",
+        ".omp/agent/auth.json",
+        ".pi/agent/auth.json",
+      ]) {
+        const dir = await mkdtemp(join(tmpdir(), "cc-home-"))
+        try {
+          const file = join(dir, relative)
+          await mkdir(dirname(file), { recursive: true })
+          await writeFile(file, JSON.stringify({ apiKey: "k" }))
+          assertEqual(resolveApiKeyWithSource({ env: {}, homeDir: () => dir }), {
+            key: "k",
+            source: { kind: "file", label: join("~", relative) },
+          })
+        } finally {
+          await rm(dir, { recursive: true, force: true })
+        }
       }
     },
   ],
@@ -180,6 +188,20 @@ run([
         hinted.includes("COMMAND_CODE_API_KEY is set, but this plugin reads COMMANDCODE_API_KEY"),
         hinted,
       )
+    },
+  ],
+
+  [
+    "apiKeySourceLabel renders the rung without a key (issue #327)",
+    () => {
+      assertEqual(apiKeySourceLabel({ kind: "option" }), "Host connection")
+      assertEqual(apiKeySourceLabel({ kind: "environment" }), "COMMANDCODE_API_KEY")
+      assertEqual(
+        apiKeySourceLabel({ kind: "file", label: "~/.commandcode/auth.json" }),
+        "legacy file ~/.commandcode/auth.json",
+      )
+      // A store's path is display text like any other: it cannot break the line.
+      assertEqual(apiKeySourceLabel({ kind: "file", label: "a\nb" }), "legacy file a b")
     },
   ],
 ])

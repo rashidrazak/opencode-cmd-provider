@@ -17,7 +17,12 @@ import type {
   LanguageModelV3StreamPart,
   ModelCallOptions,
 } from "./aisdk-types.js"
-import { missingApiKeyMessage, resolveApiKey } from "./auth-key.js"
+import {
+  apiKeySourceLabel,
+  missingApiKeyMessage,
+  resolveApiKey,
+  resolveApiKeyWithSource,
+} from "./auth-key.js"
 import {
   messagesToCC,
   messagesToAnthropic,
@@ -179,6 +184,16 @@ function headersRecord(headers: Headers): Record<string, string> {
     record[key] = value
   })
   return record
+}
+
+/**
+ * The request half of an HTTP failure message: the URL always, and the
+ * display-only credential rung on a 401 (issue #327). A 403 is a plan or
+ * version gate, never a credential verdict, so it carries no rung.
+ */
+function requestFacts(url: string, status: number, credentialLabel: string | undefined): string {
+  const credential = status === 401 && credentialLabel ? `, credential: ${credentialLabel}` : ""
+  return `POST ${displayRequestUrl(url)}${credential}`
 }
 
 /**
@@ -359,6 +374,12 @@ class VersionGateError extends HttpTransportFailureError {
 interface TransportRequest {
   bodyStr: string
   headers: Record<string, string>
+  /** Display-only label for the rung that supplied the Authorization header
+   * (issue #327); never a key. Resolved with the headers, in the same pass, so
+   * a rotated credential cannot leave the label naming the previous rung.
+   * Absent when a caller-supplied Authorization overlay wins, because the
+   * ladder no longer describes what was sent. */
+  credentialLabel?: string
 }
 
 /** One transport pass: endpoint, request builder, event mapper, and whether the
@@ -620,6 +641,39 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
   }
 
   /**
+   * The credential headers and the display-only rung that supplied them. One
+   * resolution per request, so the Authorization header and the label cannot
+   * disagree (issue #327); both transport header builders call it once per
+   * attempt, so a credential rotated mid-ladder keeps them in step too
+   * (issue #171).
+   *
+   * A Host-supplied key is the `option` rung even when the Host itself read it
+   * from an env connection: that provenance exists only behind the Host's tool
+   * seam (ADR-0015), so this seam honestly reports the level it knows. A
+   * caller-supplied Authorization overlay outranks the ladder header, so the
+   * label is dropped rather than naming a rung that did not send the request.
+   */
+  private authHeaders(
+    options: ModelCallOptions,
+  ): Pick<TransportRequest, "headers" | "credentialLabel"> {
+    const resolved = resolveApiKeyWithSource({
+      apiKey: this.options.apiKey,
+      authPaths: this.options.authPaths,
+    })
+    const callerOwnsAuth = [this.options.headers, options.headers].some((headers) =>
+      Object.keys(headers ?? {}).some((key) => key.toLowerCase() === "authorization"),
+    )
+    return {
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${resolved?.key ?? ""}`,
+      },
+      credentialLabel:
+        callerOwnsAuth || resolved === undefined ? undefined : apiKeySourceLabel(resolved.source),
+    }
+  }
+
+  /**
    * The legacy `/alpha/generate` headers, rebuilt per attempt off the
    * descriptor (issue #171). `x-co-flag` was dropped in #173: it does not
    * exist anywhere in `command-code@1.54.0` and is inert (identical responses
@@ -627,20 +681,24 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
    * out on purpose — there is no session channel inside `doStream`, and their
    * effect is unobservable.
    */
-  private headersFor(options: ModelCallOptions): Record<string, string> {
-    const apiKey = resolveApiKey({
-      apiKey: this.options.apiKey,
-      authPaths: this.options.authPaths,
-    })
+  private headersFor(
+    options: ModelCallOptions,
+  ): Pick<TransportRequest, "headers" | "credentialLabel"> {
+    const auth = this.authHeaders(options)
     return {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey ?? ""}`,
-      "x-command-code-version": COMMAND_CODE_CLI_VERSION,
-      "x-cli-environment": "production",
-      "x-project-slug": projectSlugFromPath(process.cwd()),
-      "x-taste-learning": "true",
-      ...this.options.headers,
-      ...(options.headers ?? {}),
+      headers: {
+        ...auth.headers,
+        "x-command-code-version": COMMAND_CODE_CLI_VERSION,
+        "x-cli-environment": "production",
+        "x-project-slug": projectSlugFromPath(process.cwd()),
+        "x-taste-learning": "true",
+        ...this.options.headers,
+        // The AI SDK spells a call-option header as `string | undefined`. The
+        // request path has always forwarded the overlay as-is; this diagnostic
+        // change must not alter which credential wins (issue #327).
+        ...(options.headers as Record<string, string> | undefined),
+      },
+      credentialLabel: auth.credentialLabel,
     }
   }
 
@@ -690,16 +748,16 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
     )
   }
 
-  private providerHeadersFor(options: ModelCallOptions): Record<string, string> {
-    const apiKey = resolveApiKey({
-      apiKey: this.options.apiKey,
-      authPaths: this.options.authPaths,
-    })
+  private providerHeadersFor(
+    options: ModelCallOptions,
+  ): Pick<TransportRequest, "headers" | "credentialLabel"> {
+    const auth = this.authHeaders(options)
     const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey ?? ""}`,
+      ...auth.headers,
       ...this.options.headers,
-      ...(options.headers ?? {}),
+      // Same overlay contract as headersFor: forwarded as-is, not filtered
+      // (issue #327 keeps this change diagnostic-only).
+      ...(options.headers as Record<string, string> | undefined),
     }
     // ZDR passthrough (issue #57): the Provider API honours the CLI's own
     // opt-in — CMD_ZDR=1 → every Provider API request carries x-cmd-zdr: 1
@@ -714,7 +772,7 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
       if (key.toLowerCase() === "x-cmd-zdr") delete headers[key]
     }
     if (getCmdZdr()) headers["x-cmd-zdr"] = "1"
-    return headers
+    return { headers, credentialLabel: auth.credentialLabel }
   }
 
   /**
@@ -731,7 +789,7 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
     const bodyStr = JSON.stringify(this.bodyFor(options))
     return {
       url: `${this.apiBase()}/alpha/generate`,
-      requestFor: () => ({ bodyStr, headers: this.headersFor(options) }),
+      requestFor: () => ({ bodyStr, ...this.headersFor(options) }),
       createParser: () => statelessParser(ccEventToStreamPart),
       isTerminalEvent: ccEventIsTerminal,
       flipOnUpgradeRequired: false,
@@ -758,7 +816,7 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
         // #188).
         requestFor: (pausedTurn) => ({
           bodyStr: JSON.stringify(this.providerBodyFor(options, isClaude, pausedTurn)),
-          headers: this.providerHeadersFor(options),
+          ...this.providerHeadersFor(options),
         }),
         // Per-stream stateful parsers complete tool calls whose arguments
         // arrive across multiple SSE events (issue #55 tool-call parity); the
@@ -1097,14 +1155,15 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
                     const detail = redactCommandCodeErrorText(
                       errorDetail ?? (safeBody || "Provider returned an error"),
                     )
-                    // The requested URL is part of the message because that is
-                    // what the host renders: a doubled `/provider/v1` or a proxy
-                    // path is invisible in the status and body (issue #326).
-                    const requestUrl = displayRequestUrl(t.url)
+                    const requestDescription = requestFacts(
+                      t.url,
+                      response.status,
+                      request.credentialLabel,
+                    )
                     throw new HttpTransportFailureError(
                       failure.kind === "retry-after-cap"
-                        ? `Command Code API error ${response.status}: Retry-After delay exceeds max retry delay (POST ${requestUrl})`
-                        : `Command Code API error ${response.status}: ${detail} (POST ${requestUrl})`,
+                        ? `Command Code API error ${response.status}: Retry-After delay exceeds max retry delay (${requestDescription})`
+                        : `Command Code API error ${response.status}: ${detail} (${requestDescription})`,
                       failure,
                       facts,
                     )
