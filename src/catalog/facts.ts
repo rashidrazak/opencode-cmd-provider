@@ -9,8 +9,8 @@
 
 export const FACTS_SOURCE_URL = "https://api.commandcode.ai/provider/v1/models?view=client"
 export const FACTS_CATALOG_VERSION = "7f405e24044e414ddf7d5b73eb3b80016c7274e86a98299ef61cefaf4efce7b9"
-export const FACTS_PACKAGE_VERSION = "1.88.0"
-export const FACTS_LAST_REFRESHED = "2026-10-27"
+export const FACTS_PACKAGE_VERSION = "1.88.2"
+export const FACTS_LAST_REFRESHED = "2026-10-29"
 
 export const MODEL_EFFORTS: Readonly<Record<string, readonly string[]>> = {
   "claude-sonnet-5-5": ["low","medium","high","xhigh","max"],
