@@ -3,8 +3,12 @@
 import { mkdir, mkdtemp, writeFile, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { resolveApiKey, resolveApiKeyWithSource } from "../src/provider/auth-key.js"
-import { assertEqual, run } from "./harness.js"
+import {
+  missingApiKeyMessage,
+  resolveApiKey,
+  resolveApiKeyWithSource,
+} from "../src/provider/auth-key.js"
+import { assert, assertEqual, run } from "./harness.js"
 
 run([
   [
@@ -140,6 +144,42 @@ run([
       const options = { env: { COMMANDCODE_API_KEY: "env_key" }, authPaths: [] } as const
       assertEqual(resolveApiKey(options), resolveApiKeyWithSource(options)?.key)
       assertEqual(resolveApiKey({ env: {}, authPaths: [] }), undefined)
+    },
+  ],
+
+  [
+    "the official CLI variable is not a credential (issue #326)",
+    () => {
+      // The name difference is deliberate: two supported names with different
+      // values would need an arbitrary precedence rule. The official variable
+      // is only ever named in the missing-key message.
+      assertEqual(
+        resolveApiKey({ env: { COMMAND_CODE_API_KEY: "user_short" }, authPaths: [] }),
+        undefined,
+      )
+    },
+  ],
+
+  [
+    "the missing-key message explains an ignored official variable (issue #326)",
+    () => {
+      const base =
+        "No Command Code API key. Run /connect and select Command Code, set the COMMANDCODE_API_KEY env var, or configure an auth file."
+      assertEqual(missingApiKeyMessage({}), base)
+      assertEqual(missingApiKeyMessage({ COMMANDCODE_API_KEY: "user_env" }), base)
+      assertEqual(
+        missingApiKeyMessage({
+          COMMANDCODE_API_KEY: "user_env",
+          COMMAND_CODE_API_KEY: "user_short",
+        }),
+        base,
+        "our variable resolves, so there is no near-miss to report",
+      )
+      const hinted = missingApiKeyMessage({ COMMAND_CODE_API_KEY: "user_short" })
+      assert(
+        hinted.includes("COMMAND_CODE_API_KEY is set, but this plugin reads COMMANDCODE_API_KEY"),
+        hinted,
+      )
     },
   ],
 ])

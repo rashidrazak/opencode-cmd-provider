@@ -1,5 +1,6 @@
 // tests/redact.test.ts — credential redaction (PLAN #3 Part B, port of pi tests)
 import {
+  displayRequestUrl,
   redactCommandCodeErrorText,
   commandCodeErrorMessage,
   isUpgradeRequiredError,
@@ -30,6 +31,23 @@ run([
     () => {
       assertEqual(redactCommandCodeErrorText("key user_abcdefgh1234"), "key [redacted]")
       assertEqual(redactCommandCodeErrorText("key cc_abcdefgh1234"), "key [redacted]")
+    },
+  ],
+
+  [
+    "displayRequestUrl strips embedded credentials only",
+    () => {
+      // A proxy base URL may carry userinfo; the message must not. A plain URL
+      // is returned byte-for-byte so the diagnostic names the request exactly.
+      assertEqual(
+        displayRequestUrl("https://user:secret@x/provider/v1/chat/completions"),
+        "https://x/provider/v1/chat/completions",
+      )
+      assertEqual(
+        displayRequestUrl("https://x/provider/v1/chat/completions"),
+        "https://x/provider/v1/chat/completions",
+      )
+      assertEqual(displayRequestUrl("not a url"), "not a url")
     },
   ],
 

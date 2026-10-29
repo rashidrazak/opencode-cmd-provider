@@ -141,6 +141,10 @@ run([
       )
       assert(error.message.includes("Command Code API error 400"), error.message)
       assert(
+        error.message.includes("(POST https://x/provider/v1/chat/completions)"),
+        `message names the request URL (issue #326): ${error.message}`,
+      )
+      assert(
         error.message.includes("invalid request error trace_id"),
         `message unchanged in wording: ${error.message}`,
       )

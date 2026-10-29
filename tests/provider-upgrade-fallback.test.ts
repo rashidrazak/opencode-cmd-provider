@@ -348,7 +348,10 @@ run([
       const parts = await collect(provider.languageModel("gpt-5.6-terra"))
       const err = parts.find((p) => p.type === "error") as { error?: Error }
       assert(err, "error part surfaced")
-      assertEqual(err.error!.message, "Command Code API error 403: forbidden")
+      assertEqual(
+        err.error!.message,
+        "Command Code API error 403: forbidden (POST https://x/provider/v1/chat/completions)",
+      )
       assertEqual(providerCalls(calls).length, 1)
       assertEqual(legacyCalls(calls).length, 0, "plain 403 is not a flip signal")
     },

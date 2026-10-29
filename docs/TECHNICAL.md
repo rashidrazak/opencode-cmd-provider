@@ -664,15 +664,21 @@ Credentials:
 | `COMMANDCODE_PLAN`    | Pin the plan for `cmd_plan_summary`, skipping the billing lookup. |
 | `CMD_ZDR`             | `1` opts into zero data retention (sends `x-cmd-zdr: 1`).         |
 
+`COMMAND_CODE_API_KEY` (the official CLI's variable) and `CMD_API_KEY`
+(models.dev's) are not read. A host resolves the environment before the plugin
+sees it, so two supported names with different values would need an arbitrary
+precedence rule; the missing-key message names the official variable when it is
+set but cannot be used.
+
 Test, mock, and compatible-endpoint overrides:
 
-| Variable                      | Purpose                                    |
-| ----------------------------- | ------------------------------------------ |
-| `COMMANDCODE_API_BASE`        | Override the Command Code API base URL     |
-| `COMMANDCODE_CATALOG_URL`     | Override the model-catalog endpoint URL    |
-| `COMMANDCODE_RSC_PRICING_URL` | Override the `pricing-limits` RSC page URL |
-| `COMMANDCODE_RSC_GOAT_URL`    | Override the `plans/goat` RSC page URL     |
-| `COMMANDCODE_RSC_PRO_URL`     | Override the `plans/pro` RSC page URL      |
+| Variable                      | Purpose                                                                          |
+| ----------------------------- | -------------------------------------------------------------------------------- |
+| `COMMANDCODE_API_BASE`        | Override the Command Code API base URL (the server root, without `/provider/v1`) |
+| `COMMANDCODE_CATALOG_URL`     | Override the model-catalog endpoint URL                                          |
+| `COMMANDCODE_RSC_PRICING_URL` | Override the `pricing-limits` RSC page URL                                       |
+| `COMMANDCODE_RSC_GOAT_URL`    | Override the `plans/goat` RSC page URL                                           |
+| `COMMANDCODE_RSC_PRO_URL`     | Override the `plans/pro` RSC page URL                                            |
 
 Runtime behaviour:
 

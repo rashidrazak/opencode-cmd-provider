@@ -29,6 +29,24 @@ export function redactCommandCodeErrorText(value: string): string {
     .replace(STANDALONE_SECRET_PATTERN, "[redacted]")
 }
 
+/**
+ * A request URL safe to print in an error message. Userinfo is stripped, so a
+ * proxy base URL that embedded a credential cannot leak it through the message
+ * (the URL also reaches the host as `APICallError.url`, where it is a field
+ * rather than prose). A URL without userinfo is returned untouched.
+ */
+export function displayRequestUrl(url: string): string {
+  try {
+    const parsed = new URL(url)
+    if (!parsed.username && !parsed.password) return url
+    parsed.username = ""
+    parsed.password = ""
+    return parsed.toString()
+  } catch {
+    return url
+  }
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null
 }

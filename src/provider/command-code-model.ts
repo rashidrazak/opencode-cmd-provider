@@ -17,7 +17,7 @@ import type {
   LanguageModelV3StreamPart,
   ModelCallOptions,
 } from "./aisdk-types.js"
-import { resolveApiKey } from "./auth-key.js"
+import { missingApiKeyMessage, resolveApiKey } from "./auth-key.js"
 import {
   messagesToCC,
   messagesToAnthropic,
@@ -43,7 +43,12 @@ import {
 } from "./stream.js"
 import { getApiBase, getCmdZdr } from "../env.js"
 import { normalizePlan } from "../catalog/plans.js"
-import { redactCommandCodeErrorText, commandCodeErrorMessage, readGate } from "./redact.js"
+import {
+  displayRequestUrl,
+  redactCommandCodeErrorText,
+  commandCodeErrorMessage,
+  readGate,
+} from "./redact.js"
 import { withResumedAssistantTurn } from "./resume.js"
 import {
   mappedReasoningEffort,
@@ -533,9 +538,7 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
     if (!apiKey) {
       return {
         parts: [],
-        error: new Error(
-          "No Command Code API key. Run /connect and select Command Code, set the COMMANDCODE_API_KEY env var, or configure an auth file.",
-        ),
+        error: new Error(missingApiKeyMessage()),
       }
     }
     const parts: LanguageModelV3StreamPart[] = []
@@ -858,9 +861,7 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
           authPaths: this.options.authPaths,
         })
         if (!key) {
-          fail(
-            "No Command Code API key. Run /connect and select Command Code, set the COMMANDCODE_API_KEY env var, or configure an auth file.",
-          )
+          fail(missingApiKeyMessage())
           return
         }
 
@@ -1096,10 +1097,14 @@ export class CommandCodeLanguageModel implements LanguageModelV3 {
                     const detail = redactCommandCodeErrorText(
                       errorDetail ?? (safeBody || "Provider returned an error"),
                     )
+                    // The requested URL is part of the message because that is
+                    // what the host renders: a doubled `/provider/v1` or a proxy
+                    // path is invisible in the status and body (issue #326).
+                    const requestUrl = displayRequestUrl(t.url)
                     throw new HttpTransportFailureError(
                       failure.kind === "retry-after-cap"
-                        ? `Command Code API error ${response.status}: Retry-After delay exceeds max retry delay`
-                        : `Command Code API error ${response.status}: ${detail}`,
+                        ? `Command Code API error ${response.status}: Retry-After delay exceeds max retry delay (POST ${requestUrl})`
+                        : `Command Code API error ${response.status}: ${detail} (POST ${requestUrl})`,
                       failure,
                       facts,
                     )
