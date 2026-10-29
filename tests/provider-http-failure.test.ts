@@ -22,10 +22,13 @@
 //   - a version-gate 403 carries the same response facts;
 //   - the internal `transportError` / `failure` markers stay on the instance.
 import { APICallError } from "@ai-sdk/provider"
+import { mkdtemp, rm, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { createCommandCode, type CommandCodeModelOptions } from "../src/provider/index.js"
 import { headersToRecord, versionGateBody } from "./helpers/mock-cc.js"
 import type { LanguageModelV3Prompt } from "../src/provider/aisdk-types.js"
-import { assert, assertEqual, run } from "./harness.js"
+import { assert, assertEqual, run, withEnvVars } from "./harness.js"
 
 type Model = ReturnType<ReturnType<typeof createCommandCode>["languageModel"]>
 
@@ -143,6 +146,10 @@ run([
       assert(
         error.message.includes("(POST https://x/provider/v1/chat/completions)"),
         `message names the request URL (issue #326): ${error.message}`,
+      )
+      assert(
+        !error.message.includes("credential:"),
+        `a non-auth failure names no credential (issue #327): ${error.message}`,
       )
       assert(
         error.message.includes("invalid request error trace_id"),
@@ -280,6 +287,143 @@ run([
       )
       assert(error.message.includes("opencode-cmd-provider"), error.message)
       assertEqual(error.failure?.kind, "fatal-status")
+    },
+  ],
+
+  [
+    "http: a 401 names the host credential, never the key (issue #327)",
+    async () => {
+      const sentinel = "host-key-sentinel"
+      const { fetch } = spyFetch(() => errorResponse(401, { error: { message: "unauthorized" } }))
+      const provider = providerFor(fetch, { apiKey: sentinel })
+      const error = surfacedErrorOf(await collect(provider.languageModel(PROVIDER_MODEL)))
+      assert(
+        error.message.includes(
+          "(POST https://x/provider/v1/chat/completions, credential: Host connection)",
+        ),
+        error.message,
+      )
+      assert(!error.message.includes(sentinel), `message leaked the key: ${error.message}`)
+    },
+  ],
+
+  [
+    "http: a 401 from the env var names COMMANDCODE_API_KEY (issue #327)",
+    async () => {
+      const sentinel = "env-key-sentinel"
+      const { fetch } = spyFetch(() => errorResponse(401, { error: { message: "unauthorized" } }))
+      await withEnvVars({ COMMANDCODE_API_KEY: sentinel }, async () => {
+        const provider = createCommandCode({
+          baseURL: "https://x",
+          plan: "goat",
+          maxRetryDelayMs: 0,
+          fetch,
+          authPaths: [],
+        })
+        const error = surfacedErrorOf(await collect(provider.languageModel(PROVIDER_MODEL)))
+        assert(error.message.includes("credential: COMMANDCODE_API_KEY"), error.message)
+        assert(!error.message.includes(sentinel), `message leaked the key: ${error.message}`)
+      })
+    },
+  ],
+
+  [
+    "http: a 401 on the legacy transport names a legacy-file credential (issue #327)",
+    async () => {
+      const sentinel = "file-key-sentinel"
+      const dir = await mkdtemp(join(tmpdir(), "cc-cred-"))
+      try {
+        const authPath = join(dir, "auth.json")
+        await writeFile(authPath, JSON.stringify({ apiKey: sentinel }))
+        const { fetch } = spyFetch(() => errorResponse(401, { error: { message: "unauthorized" } }))
+        const provider = createCommandCode({
+          baseURL: "https://x",
+          plan: "go",
+          maxRetryDelayMs: 0,
+          fetch,
+          authPaths: [authPath],
+        })
+        const error = surfacedErrorOf(await collect(provider.languageModel("claude-sonnet-5")))
+        assert(
+          error.message.includes(
+            `(POST https://x/alpha/generate, credential: legacy file ${authPath})`,
+          ),
+          error.message,
+        )
+        assert(!error.message.includes(sentinel), `message leaked the key: ${error.message}`)
+      } finally {
+        await rm(dir, { recursive: true, force: true })
+      }
+    },
+  ],
+
+  [
+    "http: a 401 on the Provider API names a legacy-file credential (issue #327)",
+    async () => {
+      const sentinel = "file-key-sentinel"
+      const dir = await mkdtemp(join(tmpdir(), "cc-cred-"))
+      try {
+        const authPath = join(dir, "auth.json")
+        await writeFile(authPath, JSON.stringify({ apiKey: sentinel }))
+        const { fetch } = spyFetch(() => errorResponse(401, { error: { message: "unauthorized" } }))
+        const provider = createCommandCode({
+          baseURL: "https://x",
+          plan: "goat",
+          maxRetryDelayMs: 0,
+          fetch,
+          authPaths: [authPath],
+        })
+        const error = surfacedErrorOf(await collect(provider.languageModel(PROVIDER_MODEL)))
+        assert(
+          error.message.includes(
+            `(POST https://x/provider/v1/chat/completions, credential: legacy file ${authPath})`,
+          ),
+          error.message,
+        )
+        assert(!error.message.includes(sentinel), `message leaked the key: ${error.message}`)
+      } finally {
+        await rm(dir, { recursive: true, force: true })
+      }
+    },
+  ],
+
+  [
+    "http: a 401 on the legacy transport names COMMANDCODE_API_KEY (issue #327)",
+    async () => {
+      const sentinel = "env-key-sentinel"
+      const { fetch } = spyFetch(() => errorResponse(401, { error: { message: "unauthorized" } }))
+      await withEnvVars({ COMMANDCODE_API_KEY: sentinel }, async () => {
+        const provider = createCommandCode({
+          baseURL: "https://x",
+          plan: "go",
+          maxRetryDelayMs: 0,
+          fetch,
+          authPaths: [],
+        })
+        const error = surfacedErrorOf(await collect(provider.languageModel("claude-sonnet-5")))
+        assert(
+          error.message.includes(
+            "(POST https://x/alpha/generate, credential: COMMANDCODE_API_KEY)",
+          ),
+          error.message,
+        )
+        assert(!error.message.includes(sentinel), `message leaked the key: ${error.message}`)
+      })
+    },
+  ],
+
+  [
+    "http: a caller Authorization overlay suppresses the credential label (issue #327)",
+    async () => {
+      // The ladder header is overridden, so naming its rung would be a lie.
+      const { fetch } = spyFetch(() => errorResponse(401, { error: { message: "unauthorized" } }))
+      const provider = providerFor(fetch, { headers: { Authorization: "Bearer other-key" } })
+      const error = surfacedErrorOf(await collect(provider.languageModel(PROVIDER_MODEL)))
+      assert(
+        !error.message.includes("credential:"),
+        `overridden auth names no rung: ${error.message}`,
+      )
+      assert(error.message.includes("(POST https://x/provider/v1/chat/completions)"), error.message)
     },
   ],
 ])

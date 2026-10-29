@@ -996,8 +996,8 @@ run([
         // The URL is transport-specific and now part of the message (#326), so
         // parity is compared on the provider wording alone.
         assert(
-          message.includes(`(POST https://x${url})`),
-          `message names the request URL (${url}): ${message}`,
+          message.includes(`(POST https://x${url}, credential: Host connection)`),
+          `message names the request URL and credential (${url}): ${message}`,
         )
         return message
       }

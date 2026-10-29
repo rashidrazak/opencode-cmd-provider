@@ -137,6 +137,27 @@ export interface ResolvedApiKey {
 }
 
 /**
+ * Display-only label for the rung that supplied a key. Never a key: the file
+ * rung carries the store's label, and the label is flattened so a path cannot
+ * break an error message's line. `option` reads as Host connection — every
+ * `option` key reaches the transport from a Host (v1's provider record, v2's
+ * connection); the plan summary keeps its own "explicit `apiKey`" wording for
+ * the ladder it drives itself.
+ */
+export function apiKeySourceLabel(source: ApiKeySource): string {
+  switch (source.kind) {
+    case "option":
+      return "Host connection"
+    case "environment":
+      return API_KEY_ENV
+    case "file": {
+      const label = source.label.replace(/\s+/g, " ").trim()
+      return label ? `legacy file ${label}` : "legacy file"
+    }
+  }
+}
+
+/**
  * The ladder above, returning where the key came from. Callers that only need
  * the key call `resolveApiKey`; callers that render provenance (the plan
  * summary, issue #205) need the rung, because "a legacy file of another
