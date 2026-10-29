@@ -65,6 +65,41 @@ export interface AuthKeyOptions {
   homeDir?: () => string
 }
 
+/** This package's API-key variable. */
+export const API_KEY_ENV = "COMMANDCODE_API_KEY"
+
+/**
+ * The official Command Code CLI's own variable (`command-code` 0.26.12+). This
+ * package deliberately does not read it: two supported names with different
+ * values would need an arbitrary precedence rule, and the host resolves the
+ * environment before the plugin sees it. It is named in the missing-key message
+ * instead, so a user who followed the CLI docs learns which name to use.
+ */
+export const OFFICIAL_CLI_API_KEY_ENV = "COMMAND_CODE_API_KEY"
+
+/**
+ * The official variable when it is set but cannot be used: our own variable is
+ * absent (if it were set, a key would have resolved) and the official one
+ * carries a value. Returns `undefined` when there is nothing to warn about.
+ */
+export function ignoredOfficialApiKeyEnv(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  if (env[API_KEY_ENV]) return undefined
+  return env[OFFICIAL_CLI_API_KEY_ENV] ? OFFICIAL_CLI_API_KEY_ENV : undefined
+}
+
+/**
+ * The no-credential error every transport path emits. The hint fires only when
+ * nothing resolved, so it never changes which key is sent — it just names the
+ * near-miss that would otherwise look like a working setup (#326).
+ */
+export function missingApiKeyMessage(env: NodeJS.ProcessEnv = process.env): string {
+  const base = `No Command Code API key. Run /connect and select Command Code, set the ${API_KEY_ENV} env var, or configure an auth file.`
+  const ignored = ignoredOfficialApiKeyEnv(env)
+  return ignored === undefined
+    ? base
+    : `${base} (${ignored} is set, but this plugin reads ${API_KEY_ENV}.)`
+}
+
 /**
  * Where a Host got the credential it resolved for the provider. Provenance for
  * display only — never a key. `"host"` means the Host's own store (a v2
@@ -110,8 +145,8 @@ export interface ResolvedApiKey {
 export function resolveApiKeyWithSource(options: AuthKeyOptions = {}): ResolvedApiKey | undefined {
   if (options.apiKey) return { key: options.apiKey, source: { kind: "option" } }
   const env = options.env ?? process.env
-  if (env.COMMANDCODE_API_KEY) {
-    return { key: env.COMMANDCODE_API_KEY, source: { kind: "environment" } }
+  if (env[API_KEY_ENV]) {
+    return { key: env[API_KEY_ENV], source: { kind: "environment" } }
   }
 
   const home = options.homeDir?.() ?? homedir()

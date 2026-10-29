@@ -102,8 +102,12 @@ Or run `/connect` inside OpenCode and paste the key when asked.
 
 ### Already signed in with the Command Code CLI?
 
-OpenCode reuses an existing Command Code CLI login automatically, so you may not
-need to connect at all.
+If you ran `cmd login`, OpenCode reuses that login automatically, so you may not
+need to connect at all. The plugin reads it from `~/.commandcode/auth.json`.
+
+This does not cover `COMMAND_CODE_API_KEY`, the variable the Command Code CLI
+documents for CI and headless use. This plugin reads `COMMANDCODE_API_KEY`
+instead. Set that one, or run `/connect`.
 
 ## Start using it
 
@@ -227,6 +231,8 @@ The provider and models this plugin registered disappear with it.
 | Some Command Code models in `/models` lack `[CMD]` | Update the plugin. On OpenCode v2, older versions kept models.dev's own names for the models it also lists.                                       |
 | The sidebar has no **Command Code** section        | Make sure the session uses a `[CMD]` model, and press `ctrl+x b` — the sidebar may be hidden.                                                     |
 | Browser sign-in fails (v1)                         | Run `/connect` again and pick **Command Code API key** to paste one, or set `COMMANDCODE_API_KEY` and restart OpenCode.                           |
+| `HTTP 404` on every request                        | Check `provider.commandcode.options.baseURL`. Set it to `https://api.commandcode.ai` — the plugin appends `/provider/v1/…` itself — or remove it. |
+| `Your API key has expired`, but the key works      | The plugin may be using an old CLI login from `~/.commandcode/auth.json`. Run `cmd_plan_summary` to see which credential was used, or reconnect.  |
 | A model shows `$0` cost                            | No published price for that model, so the estimate is `0`. See [Command Code pricing](https://commandcode.ai/docs/resources/pricing-limits).      |
 | `Command Code rejected this plugin as out of date` | Command Code refuses the version your install reports. Update the plugin — see [Keep it up to date](#keep-it-up-to-date).                         |
 | Something else                                     | See the [technical reference](docs/TECHNICAL.md#troubleshooting) or [open an issue](https://github.com/rashidrazak/opencode-cmd-provider/issues). |

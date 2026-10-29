@@ -993,14 +993,21 @@ run([
         assert(!message.includes(secret), `no user token leak (${url})`)
         assert(!message.includes(sk), `no sk leak (${url})`)
         assert(message.includes("[redacted]"), `redacted marker (${url})`)
+        // The URL is transport-specific and now part of the message (#326), so
+        // parity is compared on the provider wording alone.
+        assert(
+          message.includes(`(POST https://x${url})`),
+          `message names the request URL (${url}): ${message}`,
+        )
         return message
       }
+      const withoutUrl = (message: string) => message.replace(/ \(POST [^)]*\)$/, "")
       const legacyMsg = await errorPartOf("/alpha/generate", "go")
       await withEnvVars({ COMMANDCODE_PLAN: "goat" }, async () => {
         const oaMsg = await errorPartOf("/provider/v1/chat/completions", undefined)
         const antMsg = await errorPartOf("/provider/v1/messages", undefined)
-        assertEqual(oaMsg, legacyMsg)
-        assertEqual(antMsg, legacyMsg)
+        assertEqual(withoutUrl(oaMsg), withoutUrl(legacyMsg))
+        assertEqual(withoutUrl(antMsg), withoutUrl(legacyMsg))
       })
     },
   ],
@@ -1080,10 +1087,16 @@ run([
       }
       const legacy = await runOnce("/alpha/generate", "go")
       assertEqual(legacy.calls, 1)
+      assert(legacy.message.includes("(POST https://x/alpha/generate)"), legacy.message)
       await withEnvVars({ COMMANDCODE_PLAN: "goat" }, async () => {
         const providerResult = await runOnce("/provider/v1/chat/completions", undefined)
         assertEqual(providerResult.calls, 1)
-        assertEqual(providerResult.message, legacy.message)
+        assert(
+          providerResult.message.includes("(POST https://x/provider/v1/chat/completions)"),
+          providerResult.message,
+        )
+        const withoutUrl = (message: string) => message.replace(/ \(POST [^)]*\)$/, "")
+        assertEqual(withoutUrl(providerResult.message), withoutUrl(legacy.message))
       })
     },
   ],
