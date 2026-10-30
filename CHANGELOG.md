@@ -1,3 +1,51 @@
+## 2.3.2 - 2026-10-30
+
+**Fixes — HTTP failures now say which URL the request reached and which
+credential it used.** A base URL that already ended in `/provider/v1` produced
+an unexplained `404`, and a `401` from a stale CLI login looked exactly like a
+bad key. Every HTTP failure now prints `(POST <url>)`, and a `401` adds the
+credential's display-only source — never the key.
+
+### Fixes
+
+- **The request URL in every HTTP error, and the ignored CLI variable in the
+  missing-key error**
+  ([#326](https://github.com/rashidrazak/opencode-cmd-provider/issues/326),
+  [#328](https://github.com/rashidrazak/opencode-cmd-provider/pull/328)): every
+  HTTP failure now ends with `(POST <url>)`, with userinfo stripped so a proxy
+  URL that embeds a credential cannot leak it through the message. A `404` from
+  a `baseURL` that already ends in `/provider/v1` is now self-explanatory. When
+  no key resolves and `COMMAND_CODE_API_KEY` is set, the missing-key error
+  names it and says this plugin reads `COMMANDCODE_API_KEY`. The official
+  variable is diagnosed, never read, so credential precedence is unchanged.
+- **A `401` names the credential that was used**
+  ([#327](https://github.com/rashidrazak/opencode-cmd-provider/issues/327),
+  [#329](https://github.com/rashidrazak/opencode-cmd-provider/pull/329)): a
+  `401` now appends `, credential: Host connection`,
+  `, credential: COMMANDCODE_API_KEY` or `, credential: legacy file <path>`, so
+  a stale `~/.commandcode/auth.json` no longer looks like a rejected key. The
+  credential and its label are resolved in the same pass that builds the
+  `Authorization` header, so a mid-ladder rotation cannot leave them
+  disagreeing. Only a `401` names a credential — a `403` remains a plan or
+  version gate — and a caller-supplied `Authorization` overlay suppresses the
+  label, since the ladder no longer describes what was sent.
+- **README and technical reference**: CLI-login reuse is scoped to `cmd login`
+  (`~/.commandcode/auth.json`), `COMMAND_CODE_API_KEY` is documented as not
+  read, `COMMANDCODE_API_BASE` is documented as the server root without
+  `/provider/v1`, and troubleshooting gains rows for the double-`/provider/v1`
+  `404` and a stale legacy-file `401`.
+
+### Model catalog
+
+- Refreshed to `command-code@1.88.2`; membership, costs, modalities,
+  classification and deals are unchanged from 2.3.1 — only the refresh stamps
+  moved.
+- The models-page slug map is re-pinned: five pins whose Snapshot ids no longer
+  ship are pruned, and sixteen shipped models the live models page now carries
+  are pinned (`gpt-6.1-sol`, `gpt-6.1-terra`, `claude-sonnet-5-5`,
+  `claude-haiku-5-5`, `kimi-k3-1-pro`, `mistral-large-4`, …). `jev/jev-1-14-0`
+  stays unpinned until the catalog ships them.
+
 ## 2.3.1 - 2026-10-28
 
 **Fixes — every Command Code model shows `[CMD]` on OpenCode v2, and Beam
