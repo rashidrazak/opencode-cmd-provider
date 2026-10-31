@@ -65,7 +65,7 @@ export const MODEL_DEALS: Readonly<Record<string, ModelDeals>> = {
   "deepseek/deepseek-v4-flash-fast": { tier: "opensource", free: false, allowance: {"goat":20,"pro":30} },
   "deepseek/deepseek-v4-flash-vision-exp": { tier: "opensource", benchmark: {"intelligence":34.8}, peakOffPeak: {"peak":{"input":0.3,"output":1.2,"cacheRead":0.006,"cacheWrite":0},"offPeak":{"input":0.15,"output":0.6,"cacheRead":0.003,"cacheWrite":0},"windows":"01–04 & 06–10 UTC, Mon–Fri"}, free: false, allowance: {"goat":20,"pro":30} },
   "deepseek/deepseek-v4-pro": { tier: "opensource", benchmark: {"intelligence":36}, peakOffPeak: {"peak":{"input":1.32,"output":3.96,"cacheRead":0.044,"cacheWrite":0},"offPeak":{"input":0.66,"output":1.98,"cacheRead":0.022,"cacheWrite":0},"windows":"01–04 & 06–10 UTC, Mon–Fri"}, free: false, allowance: {"goat":20,"pro":30} },
-  "deepseek/deepseek-v4.1-flash": { tier: "opensource", benchmark: {"intelligence":39.5}, peakOffPeak: {"peak":{"input":0.3,"output":1.2,"cacheRead":0.006,"cacheWrite":0},"offPeak":{"input":0.15,"output":0.6,"cacheRead":0.003,"cacheWrite":0},"windows":"01–04 & 06–10 UTC, Mon–Fri"}, free: false, allowance: {"goat":80,"pro":90} },
+  "deepseek/deepseek-v4.1-flash": { tier: "opensource", benchmark: {"intelligence":39.5}, peakOffPeak: {"peak":{"input":0.3,"output":1.2,"cacheRead":0.006,"cacheWrite":0},"offPeak":{"input":0.15,"output":0.6,"cacheRead":0.003,"cacheWrite":0},"windows":"01–04 & 06–10 UTC, Mon–Fri"}, free: false, allowance: {"goat":100,"pro":110} },
   "deepseek/deepseek-v4.1-flash-fast": { tier: "opensource", peakOffPeak: {"peak":{"input":0.32,"output":1.16,"cacheRead":0.032,"cacheWrite":0},"offPeak":{"input":0.16,"output":0.58,"cacheRead":0.016,"cacheWrite":0},"windows":"01–04 & 06–10 UTC, Mon–Fri"}, free: false, allowance: {"goat":60,"pro":70} },
   "google/gemini-3.1-flash-lite": { tier: "premium", benchmark: {"intelligence":15.6}, free: false, allowance: {"goat":20,"pro":20} },
   "google/gemini-3.5-flash": { tier: "premium", benchmark: {"intelligence":32.6}, free: false, allowance: {"goat":20,"pro":20} },
@@ -87,6 +87,7 @@ export const MODEL_DEALS: Readonly<Record<string, ModelDeals>> = {
   "gpt-6.1-sol": { tier: "premium", benchmark: {"intelligence":51.8}, contextTiers: [{"label":"Standard","context":"≤ 272K","rates":{"input":2,"output":10,"cacheRead":0.1,"cacheWrite":2.5}},{"label":"Long context","context":"> 272K","rates":{"input":4,"output":15,"cacheRead":0.2,"cacheWrite":5}}], free: false, allowance: {"goat":20,"pro":20} },
   "gpt-6.1-terra": { tier: "premium", contextTiers: [{"label":"Standard","context":"≤ 272K","rates":{"input":1,"output":5,"cacheRead":0.05,"cacheWrite":1.25}},{"label":"Long context","context":"> 272K","rates":{"input":2,"output":7.5,"cacheRead":0.1,"cacheWrite":2.5}}], free: false, allowance: {"goat":20,"pro":20} },
   "inclusionai/ling-3.1-flash": { tier: "opensource", benchmark: {"intelligence":41.1}, free: false, allowance: {"goat":100,"pro":110} },
+  "inclusionai/ling-3.1-flash-1019:free": { tier: "opensource", free: true },
   "meituan/LongCat-2.0": { tier: "opensource", benchmark: {"intelligence":19.1}, free: false, allowance: {"goat":50,"pro":60} },
   "meta/muse-spark-1.1": { tier: "premium", benchmark: {"intelligence":33.7}, free: false, allowance: {"goat":20,"pro":20} },
   "meta/muse-spark-1.2": { tier: "opensource", benchmark: {"intelligence":39.6}, free: false, allowance: {"goat":20,"pro":30} },
@@ -137,7 +138,7 @@ export const MODEL_DEALS: Readonly<Record<string, ModelDeals>> = {
   "xiaomi/mimo-v2.6-flash": { tier: "opensource", benchmark: {"intelligence":37.9}, free: false, allowance: {"goat":20,"pro":30} },
   "xiaomi/mimo-v2.6-pro": { tier: "opensource", benchmark: {"intelligence":46.3}, free: false, allowance: {"goat":20,"pro":30} },
   "xiaomi/mimo-v2.6-pro-ultraspeed": { tier: "opensource", free: false, allowance: {"goat":10,"pro":20} },
-  "z-ai/glm-5.3-flash": { tier: "opensource", benchmark: {"intelligence":41.8}, free: false, allowance: {"goat":80,"pro":90} },
+  "z-ai/glm-5.3-flash": { tier: "opensource", benchmark: {"intelligence":41.8}, free: false, allowance: {"goat":100,"pro":110} },
   "z-ai/glm-5.3-flashx": { tier: "opensource", free: false, allowance: {"goat":20,"pro":30} },
   "zai-org/GLM-5": { tier: "opensource", benchmark: {"intelligence":27.9}, free: false, allowance: {"goat":20,"pro":30} },
   "zai-org/GLM-5.1": { tier: "opensource", benchmark: {"intelligence":26.1}, free: false, allowance: {"goat":20,"pro":30} },
@@ -167,5 +168,5 @@ export const PLAN_CATALOG: Readonly<Record<PlanId, PlanInfo>> = {
 }
 
 export const DEAL_SOURCE_URL = "https://commandcode.ai/docs/resources/pricing-limits"
-export const DEAL_LAST_REFRESHED = "2026-10-29"
+export const DEAL_LAST_REFRESHED = "2026-10-31"
 export const DEAL_PACKAGE_VERSION = "docs"
