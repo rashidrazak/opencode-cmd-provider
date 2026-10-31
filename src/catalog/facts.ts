@@ -8,9 +8,9 @@
 // `npm run refresh:snapshot`.
 
 export const FACTS_SOURCE_URL = "https://api.commandcode.ai/provider/v1/models?view=client"
-export const FACTS_CATALOG_VERSION = "7f405e24044e414ddf7d5b73eb3b80016c7274e86a98299ef61cefaf4efce7b9"
+export const FACTS_CATALOG_VERSION = "f3a513559e29f5b054c4f3eb840b885b9579cf34d7af5b92ee22a1573fa379a4"
 export const FACTS_PACKAGE_VERSION = "1.88.2"
-export const FACTS_LAST_REFRESHED = "2026-10-29"
+export const FACTS_LAST_REFRESHED = "2026-10-31"
 
 export const MODEL_EFFORTS: Readonly<Record<string, readonly string[]>> = {
   "claude-sonnet-5-5": ["low","medium","high","xhigh","max"],
@@ -69,6 +69,7 @@ export const MODEL_EFFORTS: Readonly<Record<string, readonly string[]>> = {
   "stealth/glyph-cluster:free": ["low","medium","high","xhigh"],
   "reflection/beam:free": ["low","medium","high","xhigh","max"],
   "inclusionai/ling-3.1-flash": ["low","medium","high"],
+  "inclusionai/ling-3.1-flash-1019:free": ["low","medium","high"],
   "meta/muse-spark-1.1": ["low","medium","high","xhigh"],
   "meta/muse-spark-1.2": ["low","medium","high","xhigh"],
   "meta/muse-spark-1.2-contributor": ["low","medium","high","xhigh"],
@@ -168,6 +169,7 @@ export const MODEL_COSTS: Readonly<
   "reflection/beam:free": { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
   "poolside/laguna-s-2.1-free": { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
   "inclusionai/ling-3.1-flash": { input: 0.3, output: 0.9, cacheRead: 0.06, cacheWrite: 0 },
+  "inclusionai/ling-3.1-flash-1019:free": { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
   "meta/muse-spark-1.1": { input: 1.25, output: 4.25, cacheRead: 0.15, cacheWrite: 0 },
   "meta/muse-spark-1.2": { input: 1.25, output: 4.25, cacheRead: 0.15, cacheWrite: 0 },
   "meta/muse-spark-1.2-contributor": { input: 0.1, output: 0.2, cacheRead: 0.002, cacheWrite: 0 },
