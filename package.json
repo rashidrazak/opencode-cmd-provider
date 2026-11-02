@@ -50,7 +50,7 @@
     "@ai-sdk/provider": "^4.0.7",
     "@opentui/core": "^0.8.0",
     "@opentui/solid": "^0.8.0",
-    "solid-js": "1.9.12",
+    "solid-js": "^1.9.18",
     "zod": "4.1.8"
   },
   "devDependencies": {
