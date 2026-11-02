@@ -321,14 +321,76 @@ run([
       assertEqual(assistant.content, null)
       assert(Array.isArray(assistant.tool_calls), "tool calls kept")
 
-      // A reasoning model with no reasoning in history sends no new field.
+      // A reasoning model whose earlier turn has no reasoning gets the
+      // cross-model placeholder (issue #334).
       const plain = messagesToOpenAI(
         [{ role: "assistant", content: [{ type: "text", text: "hello" }] }] as any,
         { model: "deepseek/deepseek-v4.1-flash" },
       ) as any
       const plainAssistant = plain.messages.find((m: any) => m.role === "assistant")
-      assert(!("reasoning_content" in plainAssistant), "no reasoning_content without reasoning")
+      assertEqual(plainAssistant.reasoning_content, "(no reasoning recorded for this earlier turn)")
       assertEqual(plainAssistant.content, "hello")
+    },
+  ],
+  [
+    "OpenAI: missing reasoning is synthesized for tool-bearing turns (issue #334)",
+    () => {
+      const placeholder = "(no reasoning recorded for this earlier turn)"
+      const prompt = [
+        { role: "user", content: [{ type: "text", text: "read the file" }] },
+        {
+          role: "assistant",
+          content: [
+            { type: "text", text: "Let me read that." },
+            { type: "tool-call", toolCallId: "tc1", toolName: "read", input: { path: "a.ts" } },
+          ],
+        },
+        {
+          role: "tool",
+          content: [{ type: "tool-result", toolCallId: "tc1", toolName: "read", result: "ok" }],
+        },
+      ] as any
+      const body = messagesToOpenAI(prompt, { model: "reflection/beam:free" }) as any
+      const assistant = body.messages.find((m: any) => m.role === "assistant")
+      assertEqual(assistant.reasoning_content, placeholder)
+      assertEqual(assistant.content, "Let me read that.")
+      assert(Array.isArray(assistant.tool_calls), "tool calls kept")
+
+      // Tool-call-only turns get it too, with content kept null.
+      const toolOnly = messagesToOpenAI(
+        [
+          {
+            role: "assistant",
+            content: [
+              { type: "tool-call", toolCallId: "tc1", toolName: "read", input: { path: "a.ts" } },
+            ],
+          },
+          {
+            role: "tool",
+            content: [{ type: "tool-result", toolCallId: "tc1", toolName: "read", result: "ok" }],
+          },
+        ] as any,
+        { model: "reflection/beam:free" },
+      ) as any
+      const toolOnlyAssistant = toolOnly.messages.find((m: any) => m.role === "assistant")
+      assertEqual(toolOnlyAssistant.reasoning_content, placeholder)
+      assertEqual(toolOnlyAssistant.content, null)
+
+      // An empty reasoning part counts as absent.
+      const empty = messagesToOpenAI(
+        [
+          {
+            role: "assistant",
+            content: [
+              { type: "reasoning", text: "" },
+              { type: "text", text: "hello" },
+            ],
+          },
+        ] as any,
+        { model: "reflection/beam:free" },
+      ) as any
+      const emptyAssistant = empty.messages.find((m: any) => m.role === "assistant")
+      assertEqual(emptyAssistant.reasoning_content, placeholder)
     },
   ],
   [

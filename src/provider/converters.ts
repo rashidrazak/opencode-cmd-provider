@@ -30,6 +30,15 @@ export { toJsonSchema } from "./json-schema.js"
 
 const DEFAULT_PROVIDER_MAX_TOKENS = 64_000
 
+/**
+ * Synthetic reasoning for an earlier assistant turn that recorded none — a
+ * session started on a non-reasoning model and continued on a reasoning one.
+ * Both wires reject a payload-bearing assistant turn without non-empty
+ * reasoning (tool-bearing turns included), and an empty part does not count,
+ * so replay cannot help here.
+ */
+const NO_REASONING_RECORDED = "(no reasoning recorded for this earlier turn)"
+
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
 }
@@ -269,6 +278,7 @@ export function messagesToCC(
     } else if (message.role === "assistant") {
       const parts: unknown[] = []
       let hasPayload = false
+      let hasReasoning = false
       for (const content of recordArray(message.content)) {
         if (content.type === "text") {
           parts.push({ type: "text", text: stringValue(content.text) ?? "" })
@@ -285,8 +295,20 @@ export function messagesToCC(
           hasPayload = true
         } else if (content.type === "reasoning" && preserveReasoning) {
           const text = textFromPart(content)
-          if (text) parts.push({ type: "reasoning", text })
+          if (text) {
+            parts.push({ type: "reasoning", text })
+            hasReasoning = true
+          }
         }
+      }
+      // A cross-model continuation leaves an earlier turn from a
+      // non-reasoning model with no reasoning at all, and the gateway refuses
+      // the whole request — tool-bearing turns included. There is nothing to
+      // replay, so mark the gap honestly; an empty part is rejected too.
+      // Dropping the turn would destroy its context, which is worse than
+      // synthetic reasoning.
+      if (preserveReasoning && hasPayload && !hasReasoning) {
+        parts.unshift({ type: "reasoning", text: NO_REASONING_RECORDED })
       }
       // A turn whose only payload was reasoning (or an unpaired tool call)
       // still vanishes whole, matching the OpenAI codec: reasoning rides on a
@@ -574,9 +596,10 @@ function promptToOpenAIMessages(
       // Reasoning from completed turns: DeepSeek V4.x requires the full prior
       // reasoning_content on tool-calling continuations (their docs: HTTP 400
       // without it), GLM-5.3 and Qwen3.8 preserve thinking for accuracy and
-      // cache hits. Emit it the way the resume path already does. A turn that
-      // only thought before calling a tool keeps a message instead of
-      // vanishing — but only when the message has a payload the wire
+      // cache hits, and Beam needs every earlier assistant turn's reasoning
+      // (tool-bearing turns included). Emit it the way the resume path already
+      // does. A turn that only thought before calling a tool keeps a message
+      // instead of vanishing — but only when the message has a payload the wire
       // requires: an assistant message with no tool_calls must carry string
       // content (content:null is valid only alongside tool_calls), so a turn
       // whose only tool call was unpaired and filtered out is dropped, exactly
@@ -588,9 +611,20 @@ function promptToOpenAIMessages(
             .filter(Boolean)
             .join("")
         : undefined
+      // Cross-model continuation: a turn from a non-reasoning model has no
+      // reasoning to replay, and the gateway refuses the request — tool-bearing
+      // turns included. An empty field is rejected too, so mark the gap the
+      // same way the legacy wire does. (Upstream-contract-backed; see
+      // ADR-0016. Not live-verified on the Provider API by this repo's
+      // Go-plan test account, which has no API access.)
+      const reasoningContent =
+        reasoning ||
+        (preserveReasoning && (toolCalls.length > 0 || texts.length > 0)
+          ? NO_REASONING_RECORDED
+          : undefined)
       if (toolCalls.length > 0) {
         const message: Record<string, unknown> = { role: "assistant" }
-        if (reasoning) message.reasoning_content = reasoning
+        if (reasoningContent) message.reasoning_content = reasoningContent
         message.content = texts.length > 0 ? texts.join("\n") : null
         message.tool_calls = toolCalls.map((p) => ({
           id: stringValue(p.toolCallId) ?? "",
@@ -601,10 +635,12 @@ function promptToOpenAIMessages(
           },
         }))
         out.push(message)
-      } else if (reasoning && texts.length > 0) {
-        out.push({ role: "assistant", reasoning_content: reasoning, content: texts.join("\n") })
       } else if (texts.length > 0) {
-        out.push({ role: "assistant", content: texts.join("\n") })
+        out.push({
+          role: "assistant",
+          ...(reasoningContent ? { reasoning_content: reasoningContent } : {}),
+          content: texts.join("\n"),
+        })
       }
     } else if (message.role === "tool") {
       const toolContent = recordArray(message.content)
