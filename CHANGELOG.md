@@ -1,3 +1,47 @@
+## 2.3.3 - 2026-11-02
+
+### Model catalog
+
+## Model catalog
+
+- **FACTS_LAST_REFRESHED**: `2026-10-29` → `2026-11-02`
+
+| Model                                  | Change | Before | After                             |
+| -------------------------------------- | ------ | ------ | --------------------------------- |
+| `inclusionai/ling-3.1-flash-1019:free` | added  | —      | Ling 3.1 Flash 1019 · 1000000 ctx |
+
+### API divergence
+
+- Listing API agrees with the shipped catalog
+
+### Pinned slug map (3)
+
+- `jev`: models-page slug not in the pinned map (docs-ahead; page evidence skipped)
+- `jev-1-14-0`: models-page slug not in the pinned map (docs-ahead; page evidence skipped)
+- `ling-3-1-flash-1019-free`: models-page slug not in the pinned map (docs-ahead; page evidence skipped)
+
+### Reasoning classification
+
+## Reasoning classification
+
+- **CLASSIFICATION_LAST_REFRESHED**: `2026-10-29` → `2026-11-02`
+
+| Model                                  | Change | Before | After                             |
+| -------------------------------------- | ------ | ------ | --------------------------------- |
+| `inclusionai/ling-3.1-flash-1019:free` | new    | —      | efforts model (low, medium, high) |
+
+### Deals catalog
+
+## Deals catalog
+
+- **DEAL_LAST_REFRESHED**: `2026-10-29` → `2026-11-02`
+
+| Model                                  | Change    | Before            | After               |
+| -------------------------------------- | --------- | ----------------- | ------------------- |
+| `deepseek/deepseek-v4.1-flash`         | allowance | goat: 80, pro: 90 | goat: 100, pro: 110 |
+| `inclusionai/ling-3.1-flash-1019:free` | added     | —                 | opensource (free)   |
+| `z-ai/glm-5.3-flash`                   | allowance | goat: 80, pro: 90 | goat: 100, pro: 110 |
+
 ## 2.3.2 - 2026-10-30
 
 **Fixes — HTTP failures now say which URL the request reached and which
