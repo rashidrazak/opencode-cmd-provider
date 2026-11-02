@@ -143,6 +143,166 @@ run([
   ],
 
   [
+    "legacy wire synthesizes reasoning for a text-only turn from another model (issue #334)",
+    () => {
+      // A session started on a non-reasoning model carries no reasoning part
+      // for its earlier turns. Continuing it on Beam would otherwise fail with
+      // HTTP 400 (`missing messages[N].reasoning_content`): the gateway wants
+      // a non-empty reasoning part on every assistant turn with a payload.
+      const out = messagesToCC(
+        [
+          { role: "user", content: [{ type: "text", text: "hi" }] },
+          { role: "assistant", content: [{ type: "text", text: "Hello!" }] },
+          { role: "user", content: [{ type: "text", text: "Tell me more" }] },
+        ],
+        { model: "reflection/beam:free" },
+      )
+      assertEqual(out, [
+        { role: "user", content: [{ type: "text", text: "hi" }] },
+        {
+          role: "assistant",
+          content: [
+            { type: "reasoning", text: "(no reasoning recorded for this earlier turn)" },
+            { type: "text", text: "Hello!" },
+          ],
+        },
+        { role: "user", content: [{ type: "text", text: "Tell me more" }] },
+      ])
+    },
+  ],
+
+  [
+    "legacy wire treats an empty reasoning part as absent and synthesizes one (issue #334)",
+    () => {
+      // An empty reasoning part is rejected by the gateway just like a missing
+      // one, and the replay path skips empty text.
+      const out = messagesToCC(
+        [
+          {
+            role: "assistant",
+            content: [
+              { type: "reasoning", text: "" },
+              { type: "text", text: "Hello!" },
+            ],
+          },
+        ],
+        { model: "reflection/beam:free" },
+      )
+      assertEqual(out, [
+        {
+          role: "assistant",
+          content: [
+            { type: "reasoning", text: "(no reasoning recorded for this earlier turn)" },
+            { type: "text", text: "Hello!" },
+          ],
+        },
+      ])
+    },
+  ],
+
+  [
+    "legacy wire synthesizes reasoning for a tool-bearing turn with none (issue #334)",
+    () => {
+      // Live verification: the gateway rejects tool-bearing turns without a
+      // reasoning part too, despite the issue's initial table claiming an
+      // exemption. The placeholder fixes both shapes.
+      const out = messagesToCC(
+        [
+          {
+            role: "assistant",
+            content: [
+              { type: "text", text: "Let me read that." },
+              { type: "tool-call", toolCallId: "tc1", toolName: "read", input: { path: "a.ts" } },
+            ],
+          },
+          {
+            role: "tool",
+            content: [
+              { type: "tool-result", toolCallId: "tc1", toolName: "read", result: "contents" },
+            ],
+          },
+        ],
+        { model: "reflection/beam:free" },
+      )
+      assertEqual(out, [
+        {
+          role: "assistant",
+          content: [
+            { type: "reasoning", text: "(no reasoning recorded for this earlier turn)" },
+            { type: "text", text: "Let me read that." },
+            { type: "tool-call", toolCallId: "tc1", toolName: "read", input: { path: "a.ts" } },
+          ],
+        },
+        {
+          role: "tool",
+          content: [
+            {
+              type: "tool-result",
+              toolCallId: "tc1",
+              toolName: "read",
+              output: { type: "text", value: "contents" },
+            },
+          ],
+        },
+      ])
+    },
+  ],
+
+  [
+    "legacy wire synthesizes reasoning for a tool-call-only turn (issue #334)",
+    () => {
+      const out = messagesToCC(
+        [
+          {
+            role: "assistant",
+            content: [
+              { type: "tool-call", toolCallId: "tc1", toolName: "read", input: { path: "a.ts" } },
+            ],
+          },
+          {
+            role: "tool",
+            content: [
+              { type: "tool-result", toolCallId: "tc1", toolName: "read", result: "contents" },
+            ],
+          },
+        ],
+        { model: "reflection/beam:free" },
+      )
+      assertEqual(out, [
+        {
+          role: "assistant",
+          content: [
+            { type: "reasoning", text: "(no reasoning recorded for this earlier turn)" },
+            { type: "tool-call", toolCallId: "tc1", toolName: "read", input: { path: "a.ts" } },
+          ],
+        },
+        {
+          role: "tool",
+          content: [
+            {
+              type: "tool-result",
+              toolCallId: "tc1",
+              toolName: "read",
+              output: { type: "text", value: "contents" },
+            },
+          ],
+        },
+      ])
+    },
+  ],
+
+  [
+    "legacy wire does not synthesize reasoning for a non-reasoning model (issue #334)",
+    () => {
+      const out = messagesToCC(
+        [{ role: "assistant", content: [{ type: "text", text: "Hello!" }] }],
+        { model: "moonshotai/Kimi-K2.5" },
+      )
+      assertEqual(out, [{ role: "assistant", content: [{ type: "text", text: "Hello!" }] }])
+    },
+  ],
+
+  [
     "maps tool call + tool result pair",
     () => {
       const out = messagesToCC([

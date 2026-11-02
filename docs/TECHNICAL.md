@@ -396,16 +396,31 @@ correct on either). A turn whose only tool call was unpaired (no result) is
 still dropped whole: an assistant message without `tool_calls` cannot carry
 `content: null`. The field matches the one the stream parser reads
 these models' reasoning from, and the pause-resume path already replays it.
+When a reasoning-capable model's history has a payload-bearing turn with no
+replayable reasoning — the cross-model case — the codec synthesizes
+`(no reasoning recorded for this earlier turn)` on both text-only and
+tool-bearing turns; an empty reasoning part counts as absent. The upstream
+contract is verified against Beam (its template requires `reasoning_content`
+when `allow_missing_thinking` is off; an OpenAI-compatible probe rejects the
+missing field and accepts the placeholder), but not against Command Code's
+Provider API, which this repo's Go-plan test account cannot reach (HTTP 403).
 
 The legacy `/alpha/generate` gateway (the Go-plan transport) carries the same
 contract on its own wire: an earlier assistant turn's reasoning is a
 `{ type: "reasoning", text }` content part — the shape the official
 command-code client's `toWireMessages` emits — **not** a message-level
 `reasoning_content` string, which the gateway ignores. Beam 1.0 answers
-HTTP 400 for the whole turn when any earlier assistant message omits it, so
-`messagesToCC` replays those parts under the same reasoning-model gate; a
-non-reasoning model's legacy history stays unchanged. A reasoning-only
-assistant turn is still dropped whole, matching the OpenAI codec.
+HTTP 400 for the whole turn when an earlier assistant message with a payload
+omits it, so `messagesToCC` replays those parts under the same reasoning-model gate; a
+non-reasoning model's legacy history stays unchanged. The gateway requires the
+part on every earlier assistant message with a payload, tool-bearing turns
+included (verified live; an empty reasoning part counts as absent) — so an
+earlier turn with no replayable reasoning, the cross-model continuation case
+where a session started on a non-reasoning model and continued on a reasoning
+one (issue #334), gets the honest synthetic placeholder
+`(no reasoning recorded for this earlier turn)`. A reasoning-only assistant
+turn, or one whose only tool call is unpaired, is still dropped whole, matching
+the OpenAI codec.
 
 Anthropic's `redacted_thinking` block — reasoning the provider's safety system
 encrypted — surfaces as a reasoning part too: no text, and its payload in

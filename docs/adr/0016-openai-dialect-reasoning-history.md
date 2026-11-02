@@ -90,7 +90,38 @@ carries the same requirement. Its assistant reasoning is a
 `{ type: "reasoning", text }` **content part** — the shape the official
 command-code client's `toWireMessages` emits — not a message-level
 `reasoning_content` string; the gateway ignores the latter. Beam 1.0 answers
-HTTP 400 for the turn when any earlier assistant message omits the part.
-`messagesToCC` therefore replays reasoning parts under the same
+HTTP 400 for the turn when an earlier assistant message with a payload omits the
+part. `messagesToCC` therefore replays reasoning parts under the same
 `isReasoningModel` gate as the OpenAI codec. The Provider API's Anthropic
 dialect is still unchanged.
+
+The gateway requires the part on **every** earlier assistant message that has
+a payload — tool-bearing turns included, verified live; the initial #334 table's
+tool-only exemption was wrong — and an empty part is rejected as if absent. A
+turn from a non-reasoning model has no reasoning to replay, so for any payload
+turn with no replayable reasoning `messagesToCC` synthesizes
+`(no reasoning recorded for this earlier turn)` (issue #334). That is the
+cross-model continuation case: a session started on a non-reasoning model and
+continued on a reasoning one. Dropping the turn would destroy its context; the
+placeholder is honest about the gap. Only turns that vanish whole — a
+reasoning-only turn or one whose only tool call is unpaired — are exempt, and a
+non-reasoning model's request stays byte-identical.
+
+## Addendum — the cross-model placeholder on the OpenAI dialect (2026-11-03)
+
+The OpenAI codec has the same gap (issue #334): a turn from a non-reasoning
+model has no reasoning to replay, and Beam (and the other reasoning models)
+reject history that omits it — tool-bearing turns included.
+`promptToOpenAIMessages` therefore synthesizes the same
+`(no reasoning recorded for this earlier turn)` placeholder for every
+payload-bearing assistant turn with no replayable reasoning, gated on
+`isReasoningModel` exactly like replay. An empty reasoning part counts as
+absent.
+
+The upstream contract is verified: Beam's chat template requires
+`reasoning_content` when `allow_missing_thinking` is off, and an
+OpenAI-compatible probe through OpenRouter rejects text-only and tool-bearing
+history alike (HTTP 400) and accepts the placeholder (HTTP 200). Command Code's
+Provider API behavior was not live-verified here: this repo's test account is
+Go-plan, which has no Provider API access (HTTP 403). The change is defensive
+and schema-valid if the gateway already tolerates missing reasoning.

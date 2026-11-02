@@ -178,6 +178,45 @@ run([
     },
   ],
   [
+    "provider: a cross-model text-only turn carries placeholder reasoning on the OpenAI wire (issue #334)",
+    async () => {
+      // The earlier turn was produced by a non-reasoning model, so it has no
+      // reasoning to replay. Beam still rejects history without a non-empty
+      // reasoning_content; the codec marks the gap with the same placeholder
+      // the legacy wire uses. Provider API behavior is upstream-contract
+      // backed, not live-verified from a Go-plan account (ADR-0016).
+      await withEnv("goat", async () => {
+        let body: Record<string, unknown> | undefined
+        const mock = await startMockCc({
+          chatCompletionsStream: [openAIChunk("done"), openAIFinishChunk()],
+          onChatCompletions: (b) => {
+            body = b
+          },
+        })
+        try {
+          await collect(
+            createCommandCode({ apiKey: "k", baseURL: mock.url }).languageModel(
+              "reflection/beam:free",
+            ),
+            [
+              { role: "user", content: "hi" },
+              { role: "assistant", content: [{ type: "text", text: "Hello!" }] },
+              { role: "user", content: "Tell me more" },
+            ] as LanguageModelV3Prompt,
+          )
+          const messages = (body as { messages?: unknown[] })?.messages ?? []
+          const assistant = messages.find((m) => (m as { role?: string }).role === "assistant") as
+            Record<string, unknown> | undefined
+          assert(assistant, "assistant message reached the wire")
+          assertEqual(assistant.reasoning_content, "(no reasoning recorded for this earlier turn)")
+          assertEqual(assistant.content, "Hello!")
+        } finally {
+          await mock.close()
+        }
+      })
+    },
+  ],
+  [
     "provider routing: goat plan claude-* hits /provider/v1/messages only",
     async () => {
       await withEnv("goat", async () => {
@@ -1520,6 +1559,46 @@ run([
               role: "assistant",
               content: [
                 { type: "reasoning", text: "Greet the user." },
+                { type: "text", text: "Hello!" },
+              ],
+            })
+          },
+        )
+      } finally {
+        await mock.close()
+      }
+    },
+  ],
+  [
+    "transport: the legacy wire marks a text-only turn from another model with placeholder reasoning (issue #334)",
+    async () => {
+      // Cross-model continuation: the earlier turn was produced by a
+      // non-reasoning model, so it recorded no reasoning to replay. Beam still
+      // demands a non-empty reasoning part on assistant history.
+      let legacyBody: Record<string, unknown> | undefined
+      const mock = await startMockCc({
+        stream: [textDelta("hi"), finishEvent()],
+        onGenerate: (body) => {
+          legacyBody = body
+        },
+      })
+      try {
+        await withEnvVars(
+          { COMMANDCODE_PLAN: "go", COMMANDCODE_API_KEY: "k", COMMANDCODE_API_BASE: mock.url },
+          async () => {
+            const provider = createCommandCode({ apiKey: "k", baseURL: mock.url })
+            await collect(provider.languageModel("reflection/beam:free"), [
+              { role: "user", content: [{ type: "text", text: "hi" }] },
+              { role: "assistant", content: [{ type: "text", text: "Hello!" }] },
+              { role: "user", content: [{ type: "text", text: "Tell me more" }] },
+            ])
+            assertEqual(mock.hits.generate, 1, "go pin → legacy only")
+            const params = legacyBody?.params as Record<string, unknown> | undefined
+            const messages = params?.messages as Array<Record<string, unknown>> | undefined
+            assertEqual(messages?.[1], {
+              role: "assistant",
+              content: [
+                { type: "reasoning", text: "(no reasoning recorded for this earlier turn)" },
                 { type: "text", text: "Hello!" },
               ],
             })
