@@ -1,3 +1,56 @@
+## 2.3.4 - 2026-11-04
+
+### Model catalog
+
+## Model catalog
+
+- **FACTS_LAST_REFRESHED**: `2026-11-02` → `2026-11-04`
+
+| Model                                  | Change  | Before                            | After                             |
+| -------------------------------------- | ------- | --------------------------------- | --------------------------------- |
+| `inclusionai/ling-3.1-flash-1019`      | added   | —                                 | Ling 3.1 Flash 1019 · 1000000 ctx |
+| `inclusionai/ling-3.1-flash-1019:free` | removed | Ling 3.1 Flash 1019 · 1000000 ctx | —                                 |
+| `stealth/crouton-alpha`                | added   | —                                 | Crouton Alpha · 1048576 ctx       |
+
+### Removed models (1)
+
+- `inclusionai/ling-3.1-flash-1019:free`: Ling 3.1 Flash 1019 · 1000000 ctx — package row removed, pruned from the Snapshot
+
+### API divergence
+
+- Listing API agrees with the shipped catalog
+
+### Pinned slug map (4)
+
+- `crouton-alpha`: models-page slug not in the pinned map (docs-ahead; page evidence skipped)
+- `jev`: models-page slug not in the pinned map (docs-ahead; page evidence skipped)
+- `jev-1-14-0`: models-page slug not in the pinned map (docs-ahead; page evidence skipped)
+- `ling-3-1-flash-1019`: models-page slug not in the pinned map (docs-ahead; page evidence skipped)
+
+### Reasoning classification
+
+## Reasoning classification
+
+- **CLASSIFICATION_LAST_REFRESHED**: `2026-11-02` → `2026-11-04`
+
+| Model                                  | Change  | Before                            | After                                         |
+| -------------------------------------- | ------- | --------------------------------- | --------------------------------------------- |
+| `inclusionai/ling-3.1-flash-1019`      | new     | —                                 | efforts model (low, medium, high)             |
+| `inclusionai/ling-3.1-flash-1019:free` | retired | efforts model (low, medium, high) | —                                             |
+| `stealth/crouton-alpha`                | new     | —                                 | efforts model (low, medium, high, xhigh, max) |
+
+### Deals catalog
+
+## Deals catalog
+
+- **DEAL_LAST_REFRESHED**: `2026-11-02` → `2026-11-04`
+
+| Model                                  | Change  | Before            | After             |
+| -------------------------------------- | ------- | ----------------- | ----------------- |
+| `inclusionai/ling-3.1-flash-1019`      | added   | —                 | opensource        |
+| `inclusionai/ling-3.1-flash-1019:free` | removed | opensource (free) | —                 |
+| `stealth/crouton-alpha`                | added   | —                 | opensource (free) |
+
 ## 2.3.3 - 2026-11-02
 
 ### Model catalog
