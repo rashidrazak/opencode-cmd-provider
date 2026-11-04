@@ -8,9 +8,9 @@
 // `npm run refresh:snapshot`.
 
 export const FACTS_SOURCE_URL = "https://api.commandcode.ai/provider/v1/models?view=client"
-export const FACTS_CATALOG_VERSION = "f3a513559e29f5b054c4f3eb840b885b9579cf34d7af5b92ee22a1573fa379a4"
+export const FACTS_CATALOG_VERSION = "449ff6a3f24f3aee62510406be058e2f69f063d2d8851b10ad8e79b4f79844c0"
 export const FACTS_PACKAGE_VERSION = "1.88.2"
-export const FACTS_LAST_REFRESHED = "2026-11-02"
+export const FACTS_LAST_REFRESHED = "2026-11-04"
 
 export const MODEL_EFFORTS: Readonly<Record<string, readonly string[]>> = {
   "claude-sonnet-5-5": ["low","medium","high","xhigh","max"],
@@ -67,9 +67,10 @@ export const MODEL_EFFORTS: Readonly<Record<string, readonly string[]>> = {
   "sakana/fugu-ultra": ["high","xhigh"],
   "nvidia/nemotron-3.5-super-vl": ["low","medium","high"],
   "stealth/glyph-cluster:free": ["low","medium","high","xhigh"],
+  "stealth/crouton-alpha": ["low","medium","high","xhigh","max"],
   "reflection/beam:free": ["low","medium","high","xhigh","max"],
   "inclusionai/ling-3.1-flash": ["low","medium","high"],
-  "inclusionai/ling-3.1-flash-1019:free": ["low","medium","high"],
+  "inclusionai/ling-3.1-flash-1019": ["low","medium","high"],
   "meta/muse-spark-1.1": ["low","medium","high","xhigh"],
   "meta/muse-spark-1.2": ["low","medium","high","xhigh"],
   "meta/muse-spark-1.2-contributor": ["low","medium","high","xhigh"],
@@ -166,10 +167,11 @@ export const MODEL_COSTS: Readonly<
   "thinkingmachines/inkling": { input: 1, output: 4.05, cacheRead: 0.17, cacheWrite: 0 },
   "thinkingmachines/inkling-small": { input: 0.5, output: 1.2, cacheRead: 0.1, cacheWrite: 0 },
   "stealth/glyph-cluster:free": { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+  "stealth/crouton-alpha": { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
   "reflection/beam:free": { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
   "poolside/laguna-s-2.1-free": { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
   "inclusionai/ling-3.1-flash": { input: 0.3, output: 0.9, cacheRead: 0.06, cacheWrite: 0 },
-  "inclusionai/ling-3.1-flash-1019:free": { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+  "inclusionai/ling-3.1-flash-1019": { input: 0.3, output: 0.9, cacheRead: 0.06, cacheWrite: 0 },
   "meta/muse-spark-1.1": { input: 1.25, output: 4.25, cacheRead: 0.15, cacheWrite: 0 },
   "meta/muse-spark-1.2": { input: 1.25, output: 4.25, cacheRead: 0.15, cacheWrite: 0 },
   "meta/muse-spark-1.2-contributor": { input: 0.1, output: 0.2, cacheRead: 0.002, cacheWrite: 0 },
@@ -248,6 +250,7 @@ export const MODEL_INPUT_MODALITIES: Readonly<
   "nvidia/nemotron-3.5-super-vl": ["text","image"],
   "thinkingmachines/inkling": ["text","image"],
   "thinkingmachines/inkling-small": ["text","image"],
+  "stealth/crouton-alpha": ["text","image"],
   "meta/muse-spark-1.1": ["text","image"],
   "meta/muse-spark-1.2": ["text","image"],
   "meta/muse-spark-1.2-contributor": ["text","image"],
