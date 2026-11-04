@@ -787,6 +787,12 @@ run([
         assert(release.includes('tags: ["v*"]'), release)
         assert(release.includes("npm publish"), release)
         assert(release.includes("stale catalog snapshot or facts"), release)
+        // GitHub dispatched v2.3.4's single tag push twice (runs #71/#72);
+        // the losing run died on npm's E409. The side-effecting steps and the
+        // per-tag concurrency group must stay idempotent/ordered.
+        assert(release.includes("concurrency:"), release)
+        assert(release.includes("npm view"), release)
+        assert(release.includes("gh release view"), release)
         // The release pipeline's changelog extractor must only stop at a
         // version-shaped heading — the refresh sections embed `## Model
         // catalog` H2s, and treating any `##` as a terminator truncated

@@ -8,6 +8,16 @@ permissions:
   contents: write
   id-token: write
 
+# GitHub can dispatch the same tag push twice (v2.3.4's single push produced
+# runs #71 and #72 at the same second; #72 lost the publish race with E409
+# "Cannot publish over previously staged version"). Serialize runs per tag so
+# the duplicate starts only after the first finishes, then finds both side
+# effects already done and skips them. Never cancel in progress: the earlier
+# run may be mid-publish.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   release:
     runs-on: ubuntu-latest
@@ -92,7 +102,16 @@ jobs:
       - name: Publish to npm
         run: |
           npm install -g npm@latest
+          name="$(node -p "require('./package.json').name")"
           version="$(node -p "require('./package.json').version")"
+          # Idempotent publish: a duplicate dispatch (or a re-run after a
+          # publish that outlived the job) must not fail on npm's E409 for an
+          # already-published version. The gates above still ran, so a green
+          # skip is the honest result.
+          if npm view "${name}@${version}" version >/dev/null 2>&1; then
+            echo "::notice::${name}@${version} is already on npm — skipping publish (duplicate or resumed run)."
+            exit 0
+          fi
           publish_args=""
           if [[ "$version" == *-* ]]; then
             publish_args="--tag beta"
@@ -103,6 +122,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # Same idempotency rail as the publish step: a duplicate run must
+          # not fail because the winning run already created the release.
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            echo "::notice::GitHub Release ${GITHUB_REF_NAME} already exists — skipping (duplicate or resumed run)."
+            exit 0
+          fi
           if [ "${{ steps.notes.outputs.has-notes }}" = "true" ]; then
             gh release create "${GITHUB_REF_NAME}" --title "${GITHUB_REF_NAME}" --notes-file /tmp/release-notes.md
           else
