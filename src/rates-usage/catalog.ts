@@ -87,7 +87,7 @@ export const MODEL_DEALS: Readonly<Record<string, ModelDeals>> = {
   "gpt-6.1-sol": { tier: "premium", benchmark: {"intelligence":51.8}, contextTiers: [{"label":"Standard","context":"≤ 272K","rates":{"input":2,"output":10,"cacheRead":0.1,"cacheWrite":2.5}},{"label":"Long context","context":"> 272K","rates":{"input":4,"output":15,"cacheRead":0.2,"cacheWrite":5}}], free: false, allowance: {"goat":20,"pro":20} },
   "gpt-6.1-terra": { tier: "premium", contextTiers: [{"label":"Standard","context":"≤ 272K","rates":{"input":1,"output":5,"cacheRead":0.05,"cacheWrite":1.25}},{"label":"Long context","context":"> 272K","rates":{"input":2,"output":7.5,"cacheRead":0.1,"cacheWrite":2.5}}], free: false, allowance: {"goat":20,"pro":20} },
   "inclusionai/ling-3.1-flash": { tier: "opensource", benchmark: {"intelligence":41.1}, free: false, allowance: {"goat":100,"pro":110} },
-  "inclusionai/ling-3.1-flash-1019:free": { tier: "opensource", free: true },
+  "inclusionai/ling-3.1-flash-1019": { tier: "opensource", free: false, allowance: {"goat":100,"pro":110} },
   "meituan/LongCat-2.0": { tier: "opensource", benchmark: {"intelligence":19.1}, free: false, allowance: {"goat":50,"pro":60} },
   "meta/muse-spark-1.1": { tier: "premium", benchmark: {"intelligence":33.7}, free: false, allowance: {"goat":20,"pro":20} },
   "meta/muse-spark-1.2": { tier: "opensource", benchmark: {"intelligence":39.6}, free: false, allowance: {"goat":20,"pro":30} },
@@ -124,6 +124,7 @@ export const MODEL_DEALS: Readonly<Record<string, ModelDeals>> = {
   "Qwen/Qwen3.8-Omni-Flash": { tier: "opensource", free: false, allowance: {"goat":20,"pro":30} },
   "reflection/beam:free": { tier: "opensource", free: true },
   "sakana/fugu-ultra": { tier: "premium", free: false, allowance: {"goat":20,"pro":20} },
+  "stealth/crouton-alpha": { tier: "opensource", free: true },
   "stealth/glyph-cluster:free": { tier: "opensource", free: true },
   "stepfun/Step-3.5-Flash": { tier: "opensource", benchmark: {"intelligence":17}, free: false, allowance: {"goat":20,"pro":30} },
   "stepfun/Step-3.7-Flash": { tier: "opensource", benchmark: {"intelligence":19.5}, free: false, allowance: {"goat":20,"pro":30} },
@@ -168,5 +169,5 @@ export const PLAN_CATALOG: Readonly<Record<PlanId, PlanInfo>> = {
 }
 
 export const DEAL_SOURCE_URL = "https://commandcode.ai/docs/resources/pricing-limits"
-export const DEAL_LAST_REFRESHED = "2026-11-02"
+export const DEAL_LAST_REFRESHED = "2026-11-04"
 export const DEAL_PACKAGE_VERSION = "docs"
