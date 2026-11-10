@@ -8,14 +8,15 @@
 // `npm run refresh:snapshot`.
 
 export const FACTS_SOURCE_URL = "https://api.commandcode.ai/provider/v1/models?view=client"
-export const FACTS_CATALOG_VERSION = "449ff6a3f24f3aee62510406be058e2f69f063d2d8851b10ad8e79b4f79844c0"
-export const FACTS_PACKAGE_VERSION = "1.88.2"
-export const FACTS_LAST_REFRESHED = "2026-11-04"
+export const FACTS_CATALOG_VERSION = "c6350c346d36fccd8e55482fdadc7f75e5376c5a10dfcbd9c157d329e979549e"
+export const FACTS_PACKAGE_VERSION = "1.88.5"
+export const FACTS_LAST_REFRESHED = "2026-11-10"
 
 export const MODEL_EFFORTS: Readonly<Record<string, readonly string[]>> = {
   "claude-sonnet-5-5": ["low","medium","high","xhigh","max"],
   "claude-sonnet-5": ["low","medium","high","xhigh","max"],
   "claude-sonnet-4-6": ["low","medium","high","xhigh","max"],
+  "claude-fable-5-2": ["low","medium","high","xhigh","max"],
   "claude-fable-5-1": ["low","medium","high","xhigh","max"],
   "claude-fable-5": ["low","medium","high","xhigh","max"],
   "claude-opus-5-5": ["low","medium","high","xhigh","max"],
@@ -41,6 +42,7 @@ export const MODEL_EFFORTS: Readonly<Record<string, readonly string[]>> = {
   "deepseek/deepseek-v4-flash-fast": ["low","high","max"],
   "deepseek/deepseek-v4.1-flash": ["low","high","max"],
   "deepseek/deepseek-v4.1-flash-fast": ["low","high","max"],
+  "deepseek/deepseek-v4.1-flash-ultrafast": ["low","high","max"],
   "moonshotai/Kimi-K3.1-Pro": ["low","high","max"],
   "moonshotai/Kimi-K3": ["low","high","max"],
   "z-ai/glm-5.3-flash": ["low","high","max"],
@@ -68,7 +70,6 @@ export const MODEL_EFFORTS: Readonly<Record<string, readonly string[]>> = {
   "nvidia/nemotron-3.5-super-vl": ["low","medium","high"],
   "stealth/glyph-cluster:free": ["low","medium","high","xhigh"],
   "stealth/crouton-alpha": ["low","medium","high","xhigh","max"],
-  "reflection/beam:free": ["low","medium","high","xhigh","max"],
   "inclusionai/ling-3.1-flash": ["low","medium","high"],
   "inclusionai/ling-3.1-flash-1019": ["low","medium","high"],
   "meta/muse-spark-1.1": ["low","medium","high","xhigh"],
@@ -78,6 +79,7 @@ export const MODEL_EFFORTS: Readonly<Record<string, readonly string[]>> = {
   "meta/muse-spark-1.3-contributor": ["low","medium","high","xhigh"],
   "meta/muse-spark-open": ["low","medium","high"],
   "meta/muse-wonder-1.0": ["low","medium","high","xhigh"],
+  "meta/muse-ember": ["low","medium","high","xhigh","max"],
   "xai/grok-4.5": ["low","medium","high"],
   "xai/grok-4.6": ["low","medium","high","xhigh"],
   "xai/grok-4.7": ["low","medium","high","xhigh"],
@@ -90,6 +92,7 @@ export const MODEL_COSTS: Readonly<
   "claude-sonnet-5-5": { input: 2, output: 10, cacheRead: 0.1, cacheWrite: 2.5 },
   "claude-sonnet-5": { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 },
   "claude-sonnet-4-6": { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
+  "claude-fable-5-2": { input: 8, output: 40, cacheRead: 0.2, cacheWrite: 10 },
   "claude-fable-5-1": { input: 10, output: 50, cacheRead: 0.25, cacheWrite: 12.5 },
   "claude-fable-5": { input: 10, output: 50, cacheRead: 1, cacheWrite: 12.5 },
   "claude-opus-5-5": { input: 4, output: 20, cacheRead: 0.2, cacheWrite: 5 },
@@ -116,6 +119,7 @@ export const MODEL_COSTS: Readonly<
   "deepseek/deepseek-v4-flash-fast": { input: 0.28, output: 0.56, cacheRead: 0.07, cacheWrite: 0 },
   "deepseek/deepseek-v4.1-flash": { input: 0.15, output: 0.6, cacheRead: 0.003, cacheWrite: 0 },
   "deepseek/deepseek-v4.1-flash-fast": { input: 0.16, output: 0.58, cacheRead: 0.016, cacheWrite: 0 },
+  "deepseek/deepseek-v4.1-flash-ultrafast": { input: 2.4, output: 9.6, cacheRead: 0.048, cacheWrite: 0 },
   "moonshotai/Kimi-K3.1-Pro": { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 0 },
   "moonshotai/Kimi-K3": { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 0 },
   "moonshotai/Kimi-K2.7-Code": { input: 0.95, output: 4, cacheRead: 0.19, cacheWrite: 0 },
@@ -168,8 +172,6 @@ export const MODEL_COSTS: Readonly<
   "thinkingmachines/inkling-small": { input: 0.5, output: 1.2, cacheRead: 0.1, cacheWrite: 0 },
   "stealth/glyph-cluster:free": { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
   "stealth/crouton-alpha": { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-  "reflection/beam:free": { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-  "poolside/laguna-s-2.1-free": { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
   "inclusionai/ling-3.1-flash": { input: 0.3, output: 0.9, cacheRead: 0.06, cacheWrite: 0 },
   "inclusionai/ling-3.1-flash-1019": { input: 0.3, output: 0.9, cacheRead: 0.06, cacheWrite: 0 },
   "meta/muse-spark-1.1": { input: 1.25, output: 4.25, cacheRead: 0.15, cacheWrite: 0 },
@@ -179,6 +181,7 @@ export const MODEL_COSTS: Readonly<
   "meta/muse-spark-1.3-contributor": { input: 0.1, output: 0.2, cacheRead: 0.002, cacheWrite: 0 },
   "meta/muse-spark-open": { input: 1.25, output: 4.25, cacheRead: 0.15, cacheWrite: 0 },
   "meta/muse-wonder-1.0": { input: 4, output: 20, cacheRead: 0.2, cacheWrite: 0 },
+  "meta/muse-ember": { input: 0.1, output: 0.5, cacheRead: 0.004, cacheWrite: 0 },
   "xai/grok-4.5": { input: 2, output: 6, cacheRead: 0.5, cacheWrite: 0 },
   "xai/grok-4.6": { input: 2, output: 6, cacheRead: 0.5, cacheWrite: 0 },
   "xai/grok-4.7": { input: 2, output: 6, cacheRead: 0.5, cacheWrite: 0 },
@@ -191,6 +194,7 @@ export const MODEL_INPUT_MODALITIES: Readonly<
   "claude-sonnet-5-5": ["text","image"],
   "claude-sonnet-5": ["text","image"],
   "claude-sonnet-4-6": ["text","image"],
+  "claude-fable-5-2": ["text","image"],
   "claude-fable-5-1": ["text","image"],
   "claude-fable-5": ["text","image"],
   "claude-opus-5-5": ["text","image"],
@@ -214,6 +218,7 @@ export const MODEL_INPUT_MODALITIES: Readonly<
   "deepseek/deepseek-v4-flash-vision-exp": ["text","image"],
   "deepseek/deepseek-v4.1-flash": ["text","image"],
   "deepseek/deepseek-v4.1-flash-fast": ["text","image"],
+  "deepseek/deepseek-v4.1-flash-ultrafast": ["text","image"],
   "moonshotai/Kimi-K3.1-Pro": ["text","image"],
   "moonshotai/Kimi-K3": ["text","image"],
   "moonshotai/Kimi-K2.7-Code": ["text","image"],
@@ -258,6 +263,7 @@ export const MODEL_INPUT_MODALITIES: Readonly<
   "meta/muse-spark-1.3-contributor": ["text","image"],
   "meta/muse-spark-open": ["text","image"],
   "meta/muse-wonder-1.0": ["text","image"],
+  "meta/muse-ember": ["text","image"],
   "xai/grok-4.5": ["text","image"],
   "xai/grok-4.6": ["text","image"],
   "xai/grok-4.7": ["text","image"],

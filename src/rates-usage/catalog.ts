@@ -52,6 +52,7 @@ export interface ModelDeals {
 export const MODEL_DEALS: Readonly<Record<string, ModelDeals>> = {
   "claude-fable-5": { tier: "premium", benchmark: {"intelligence":49.6}, free: false, allowance: {"goat":20,"pro":20} },
   "claude-fable-5-1": { tier: "premium", benchmark: {"intelligence":53.4}, free: false, allowance: {"goat":20,"pro":20} },
+  "claude-fable-5-2": { tier: "premium", free: false, allowance: {"goat":20,"pro":20} },
   "claude-haiku-4-5-20251001": { tier: "premium", benchmark: {"intelligence":15.4}, free: false, allowance: {"goat":20,"pro":20} },
   "claude-haiku-5-5": { tier: "premium", benchmark: {"intelligence":43.4}, contextTiers: [{"label":"Standard","context":"≤ 100K","rates":{"input":0.1,"output":0.5,"cacheRead":0.01,"cacheWrite":0.125}},{"label":"Long context","context":"> 100K","rates":{"input":0.5,"output":2.5,"cacheRead":0.05,"cacheWrite":0.625}}], free: false, allowance: {"goat":20,"pro":30} },
   "claude-opus-4-7": { tier: "premium", benchmark: {"intelligence":40.7}, free: false, allowance: {"goat":20,"pro":20} },
@@ -67,6 +68,7 @@ export const MODEL_DEALS: Readonly<Record<string, ModelDeals>> = {
   "deepseek/deepseek-v4-pro": { tier: "opensource", benchmark: {"intelligence":36}, peakOffPeak: {"peak":{"input":1.32,"output":3.96,"cacheRead":0.044,"cacheWrite":0},"offPeak":{"input":0.66,"output":1.98,"cacheRead":0.022,"cacheWrite":0},"windows":"01–04 & 06–10 UTC, Mon–Fri"}, free: false, allowance: {"goat":20,"pro":30} },
   "deepseek/deepseek-v4.1-flash": { tier: "opensource", benchmark: {"intelligence":39.5}, peakOffPeak: {"peak":{"input":0.3,"output":1.2,"cacheRead":0.006,"cacheWrite":0},"offPeak":{"input":0.15,"output":0.6,"cacheRead":0.003,"cacheWrite":0},"windows":"01–04 & 06–10 UTC, Mon–Fri"}, free: false, allowance: {"goat":100,"pro":110} },
   "deepseek/deepseek-v4.1-flash-fast": { tier: "opensource", peakOffPeak: {"peak":{"input":0.32,"output":1.16,"cacheRead":0.032,"cacheWrite":0},"offPeak":{"input":0.16,"output":0.58,"cacheRead":0.016,"cacheWrite":0},"windows":"01–04 & 06–10 UTC, Mon–Fri"}, free: false, allowance: {"goat":60,"pro":70} },
+  "deepseek/deepseek-v4.1-flash-ultrafast": { tier: "opensource", free: false, allowance: {"goat":20,"pro":30} },
   "google/gemini-3.1-flash-lite": { tier: "premium", benchmark: {"intelligence":15.6}, free: false, allowance: {"goat":20,"pro":20} },
   "google/gemini-3.5-flash": { tier: "premium", benchmark: {"intelligence":32.6}, free: false, allowance: {"goat":20,"pro":20} },
   "google/gemini-3.5-flash-lite": { tier: "premium", benchmark: {"intelligence":22.2}, free: false, allowance: {"goat":20,"pro":20} },
@@ -89,6 +91,7 @@ export const MODEL_DEALS: Readonly<Record<string, ModelDeals>> = {
   "inclusionai/ling-3.1-flash": { tier: "opensource", benchmark: {"intelligence":41.1}, free: false, allowance: {"goat":100,"pro":110} },
   "inclusionai/ling-3.1-flash-1019": { tier: "opensource", free: false, allowance: {"goat":100,"pro":110} },
   "meituan/LongCat-2.0": { tier: "opensource", benchmark: {"intelligence":19.1}, free: false, allowance: {"goat":50,"pro":60} },
+  "meta/muse-ember": { tier: "opensource", free: false, allowance: {"goat":20,"pro":30} },
   "meta/muse-spark-1.1": { tier: "premium", benchmark: {"intelligence":33.7}, free: false, allowance: {"goat":20,"pro":20} },
   "meta/muse-spark-1.2": { tier: "opensource", benchmark: {"intelligence":39.6}, free: false, allowance: {"goat":20,"pro":30} },
   "meta/muse-spark-1.2-contributor": { tier: "opensource", free: false, allowance: {"goat":20,"pro":30} },
@@ -110,7 +113,6 @@ export const MODEL_DEALS: Readonly<Record<string, ModelDeals>> = {
   "nvidia/nemotron-3-ultra-550b-a55b": { tier: "opensource", benchmark: {"intelligence":22.9}, free: false, allowance: {"goat":20,"pro":30} },
   "nvidia/nemotron-3.5-super-vl": { tier: "opensource", benchmark: {"intelligence":26.5}, free: false, allowance: {"goat":20,"pro":30} },
   "ornith/ornith-1.5-122b": { tier: "opensource", free: false, allowance: {"goat":20,"pro":30} },
-  "poolside/laguna-s-2.1-free": { tier: "opensource", free: true },
   "Qwen/Qwen3.6-Max-Preview": { tier: "opensource", benchmark: {"intelligence":28.4}, free: false, allowance: {"goat":20,"pro":30} },
   "Qwen/Qwen3.6-Plus": { tier: "opensource", benchmark: {"intelligence":27}, contextTiers: [{"label":"Standard","context":"≤ 256K","rates":{"input":0.5,"output":3,"cacheRead":0.1,"cacheWrite":0}},{"label":"Long context","context":"> 256K","rates":{"input":2,"output":6,"cacheRead":0.2,"cacheWrite":0}}], free: false, allowance: {"goat":33,"pro":43} },
   "Qwen/Qwen3.7-Flash": { tier: "opensource", contextTiers: [{"label":"Standard","context":"≤ 32K","rates":{"input":0.03,"output":0.13,"cacheRead":0.006,"cacheWrite":0.038}},{"label":"Extended 1","context":"≤ 256K","rates":{"input":0.1,"output":0.4,"cacheRead":0.02,"cacheWrite":0.125}},{"label":"Long context","context":"> 256K","rates":{"input":0.2,"output":0.8,"cacheRead":0.04,"cacheWrite":0.25}}], free: false, allowance: {"goat":20,"pro":30} },
@@ -122,7 +124,6 @@ export const MODEL_DEALS: Readonly<Record<string, ModelDeals>> = {
   "Qwen/Qwen3.8-Max-0902": { tier: "opensource", benchmark: {"intelligence":45.4}, free: false, allowance: {"goat":20,"pro":30} },
   "Qwen/Qwen3.8-Max-Prime": { tier: "opensource", free: false, allowance: {"goat":20,"pro":30} },
   "Qwen/Qwen3.8-Omni-Flash": { tier: "opensource", free: false, allowance: {"goat":20,"pro":30} },
-  "reflection/beam:free": { tier: "opensource", free: true },
   "sakana/fugu-ultra": { tier: "premium", free: false, allowance: {"goat":20,"pro":20} },
   "stealth/crouton-alpha": { tier: "opensource", free: true },
   "stealth/glyph-cluster:free": { tier: "opensource", free: true },
@@ -169,5 +170,5 @@ export const PLAN_CATALOG: Readonly<Record<PlanId, PlanInfo>> = {
 }
 
 export const DEAL_SOURCE_URL = "https://commandcode.ai/docs/resources/pricing-limits"
-export const DEAL_LAST_REFRESHED = "2026-11-04"
+export const DEAL_LAST_REFRESHED = "2026-11-10"
 export const DEAL_PACKAGE_VERSION = "docs"

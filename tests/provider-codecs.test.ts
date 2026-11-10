@@ -16,7 +16,21 @@ import {
   openAIUsageToAiSdkUsage,
   anthropicUsageToAiSdkUsage,
 } from "../src/provider/stream.js"
+import { MODEL_SNAPSHOT } from "../src/catalog/snapshot.js"
+import { isReasoningModel } from "../src/provider/reasoning.js"
 import { assert, assertEqual, run } from "./harness.js"
+
+/**
+ * Derived from the shipped Snapshot so catalog churn never reddens the suite.
+ * Non-Claude on purpose: the OpenAI codec tests below must exercise the
+ * chat-completions wire, which Claude models do not use.
+ */
+const REASONING_MODEL = MODEL_SNAPSHOT.find(
+  (model) => isReasoningModel(model.id) && !model.id.startsWith("claude-"),
+)?.id
+if (REASONING_MODEL === undefined) {
+  throw new Error("the Snapshot must ship at least one reasoning-capable model")
+}
 
 run([
   [
@@ -350,7 +364,7 @@ run([
           content: [{ type: "tool-result", toolCallId: "tc1", toolName: "read", result: "ok" }],
         },
       ] as any
-      const body = messagesToOpenAI(prompt, { model: "reflection/beam:free" }) as any
+      const body = messagesToOpenAI(prompt, { model: REASONING_MODEL }) as any
       const assistant = body.messages.find((m: any) => m.role === "assistant")
       assertEqual(assistant.reasoning_content, placeholder)
       assertEqual(assistant.content, "Let me read that.")
@@ -370,7 +384,7 @@ run([
             content: [{ type: "tool-result", toolCallId: "tc1", toolName: "read", result: "ok" }],
           },
         ] as any,
-        { model: "reflection/beam:free" },
+        { model: REASONING_MODEL },
       ) as any
       const toolOnlyAssistant = toolOnly.messages.find((m: any) => m.role === "assistant")
       assertEqual(toolOnlyAssistant.reasoning_content, placeholder)
@@ -387,7 +401,7 @@ run([
             ],
           },
         ] as any,
-        { model: "reflection/beam:free" },
+        { model: REASONING_MODEL },
       ) as any
       const emptyAssistant = empty.messages.find((m: any) => m.role === "assistant")
       assertEqual(emptyAssistant.reasoning_content, placeholder)
