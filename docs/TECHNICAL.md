@@ -99,6 +99,13 @@ written by an older package cannot hide a model this build ships. Set
 `COMMANDCODE_DISABLE_CATALOG_SYNC=1` to skip the background fetch entirely
 (mirrors the CLI's `CMD_DISABLE_REMOTE_MODEL_CATALOG`).
 
+On OpenCode v2 the plugin is loaded by the background service, not the TUI.
+Restarting the TUI does not reload it, so a cache written by the background
+fetch only reaches `/models` on the next plugin load: run `opencode reload`
+(or `opencode service restart`). `opencode models --standalone` starts a
+private server and is a useful check that the cache and merge path are healthy
+without touching the running service.
+
 - Auto-registered models carry the `[CMD] ` Display name prefix (e.g.
   `[CMD] Claude Sonnet 5`) so they are not confused with same-named models from
   other providers. A free-tier variant that shares an upstream display name gets
