@@ -1,3 +1,52 @@
+## 2.3.5 - 2026-11-10
+
+### Model catalog
+
+## Model catalog
+
+- **FACTS_LAST_REFRESHED**: `2026-11-04` → `2026-11-10`
+
+| Model                                    | Change  | Before                    | After                                       |
+| ---------------------------------------- | ------- | ------------------------- | ------------------------------------------- |
+| `claude-fable-5-2`                       | added   | —                         | Claude Fable 5.2 · 1000000 ctx              |
+| `deepseek/deepseek-v4.1-flash-ultrafast` | added   | —                         | DeepSeek V4.1 Flash Ultrafast · 1048576 ctx |
+| `meta/muse-ember`                        | added   | —                         | Muse Ember · 1048576 ctx                    |
+| `poolside/laguna-s-2.1-free`             | removed | Laguna S 2.1 · 256000 ctx | —                                           |
+| `reflection/beam:free`                   | removed | Beam 1.0 · 1048576 ctx    | —                                           |
+
+### Removed models (2)
+
+- `poolside/laguna-s-2.1-free`: Laguna S 2.1 · 256000 ctx — package row removed, pruned from the Snapshot
+- `reflection/beam:free`: Beam 1.0 · 1048576 ctx — package row removed, pruned from the Snapshot
+
+### Reasoning classification
+
+## Reasoning classification
+
+- **CLASSIFICATION_LAST_REFRESHED**: `2026-11-04` → `2026-11-10`
+
+| Model                                    | Change  | Before                                        | After                                         |
+| ---------------------------------------- | ------- | --------------------------------------------- | --------------------------------------------- |
+| `claude-fable-5-2`                       | new     | —                                             | efforts model (low, medium, high, xhigh, max) |
+| `deepseek/deepseek-v4.1-flash-ultrafast` | new     | —                                             | efforts model (low, high, max)                |
+| `meta/muse-ember`                        | new     | —                                             | efforts model (low, medium, high, xhigh, max) |
+| `poolside/laguna-s-2.1-free`             | retired | reasoning-without-efforts                     | —                                             |
+| `reflection/beam:free`                   | retired | efforts model (low, medium, high, xhigh, max) | —                                             |
+
+### Deals catalog
+
+## Deals catalog
+
+- **DEAL_LAST_REFRESHED**: `2026-11-04` → `2026-11-10`
+
+| Model                                    | Change  | Before            | After      |
+| ---------------------------------------- | ------- | ----------------- | ---------- |
+| `claude-fable-5-2`                       | added   | —                 | premium    |
+| `deepseek/deepseek-v4.1-flash-ultrafast` | added   | —                 | opensource |
+| `meta/muse-ember`                        | added   | —                 | opensource |
+| `poolside/laguna-s-2.1-free`             | removed | opensource (free) | —          |
+| `reflection/beam:free`                   | removed | opensource (free) | —          |
+
 ## 2.3.4 - 2026-11-04
 
 ### Model catalog
