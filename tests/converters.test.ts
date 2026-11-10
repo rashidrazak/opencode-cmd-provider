@@ -1,6 +1,20 @@
 // tests/converters.test.ts — AI SDK v3 messages → Command Code payload (PLAN #2 Part B)
 import { messagesToCC, toolsToJson, systemPromptToText } from "../src/provider/converters.js"
+import { MODEL_SNAPSHOT } from "../src/catalog/snapshot.js"
+import { isReasoningModel } from "../src/provider/reasoning.js"
 import { assert, assertEqual, rejects, run } from "./harness.js"
+
+/**
+ * A reasoning-capable, non-Claude model, derived from the shipped Snapshot. A
+ * literal id would pin an upstream-owned value and turn red the day that model
+ * is retired or goes `hidden` (the 2026-11-05 catalog-refresh failure).
+ */
+const REASONING_MODEL = MODEL_SNAPSHOT.find(
+  (model) => isReasoningModel(model.id) && !model.id.startsWith("claude-"),
+)?.id
+if (REASONING_MODEL === undefined) {
+  throw new Error("the Snapshot must ship at least one reasoning-capable model")
+}
 
 run([
   [
@@ -21,7 +35,7 @@ run([
     "legacy wire replays assistant reasoning for a reasoning model",
     () => {
       // The legacy /alpha/generate gateway serves the same provider contracts
-      // as the Provider API: Beam 1.0 answers HTTP 400 when an earlier
+      // as the Provider API: reasoning models answer HTTP 400 when an earlier
       // assistant turn's reasoning is missing. The CLI wire spells it as a
       // reasoning content part, which is what the official client sends.
       const out = messagesToCC(
@@ -36,7 +50,7 @@ run([
           },
           { role: "user", content: [{ type: "text", text: "Tell me more" }] },
         ],
-        { model: "reflection/beam:free" },
+        { model: REASONING_MODEL },
       )
       assertEqual(out, [
         { role: "user", content: [{ type: "text", text: "Hello" }] },
@@ -136,7 +150,7 @@ run([
     () => {
       const out = messagesToCC(
         [{ role: "assistant", content: [{ type: "reasoning", text: "just a thought" }] }],
-        { model: "reflection/beam:free" },
+        { model: REASONING_MODEL },
       )
       assertEqual(out, [])
     },
@@ -146,16 +160,17 @@ run([
     "legacy wire synthesizes reasoning for a text-only turn from another model (issue #334)",
     () => {
       // A session started on a non-reasoning model carries no reasoning part
-      // for its earlier turns. Continuing it on Beam would otherwise fail with
-      // HTTP 400 (`missing messages[N].reasoning_content`): the gateway wants
-      // a non-empty reasoning part on every assistant turn with a payload.
+      // for its earlier turns. Continuing it on a reasoning model would
+      // otherwise fail with HTTP 400 (`missing messages[N].reasoning_content`):
+      // the gateway wants a non-empty reasoning part on every assistant turn
+      // with a payload.
       const out = messagesToCC(
         [
           { role: "user", content: [{ type: "text", text: "hi" }] },
           { role: "assistant", content: [{ type: "text", text: "Hello!" }] },
           { role: "user", content: [{ type: "text", text: "Tell me more" }] },
         ],
-        { model: "reflection/beam:free" },
+        { model: REASONING_MODEL },
       )
       assertEqual(out, [
         { role: "user", content: [{ type: "text", text: "hi" }] },
@@ -186,7 +201,7 @@ run([
             ],
           },
         ],
-        { model: "reflection/beam:free" },
+        { model: REASONING_MODEL },
       )
       assertEqual(out, [
         {
@@ -222,7 +237,7 @@ run([
             ],
           },
         ],
-        { model: "reflection/beam:free" },
+        { model: REASONING_MODEL },
       )
       assertEqual(out, [
         {
@@ -266,7 +281,7 @@ run([
             ],
           },
         ],
-        { model: "reflection/beam:free" },
+        { model: REASONING_MODEL },
       )
       assertEqual(out, [
         {

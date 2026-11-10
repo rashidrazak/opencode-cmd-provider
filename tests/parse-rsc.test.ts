@@ -202,16 +202,15 @@ run([
     "extractPlanPageRsc leaves vendor-prefixed free variants untouched (no alias)",
     () => {
       const goat = extractPlanPageRsc(RSC_GOAT)
-      // poolside/laguna-s-2.1-free is the free variant; the alias map
-      // never strips the vendor prefix. The Map must still expose it
-      // under its raw RSC id.
-      assert(
-        goat.has("poolside/laguna-s-2.1-free"),
-        "goat Map must expose the free variant under its raw RSC id",
-      )
-      const record = goat.get("poolside/laguna-s-2.1-free")
+      // A free variant is upstream-owned and comes and goes with the plan
+      // page, so derive one from the fixture instead of pinning an id. The
+      // alias map never strips the vendor prefix; the Map must still expose
+      // the raw RSC id.
+      const freeVariant = [...goat.keys()].find((id) => id.includes("/") && id.endsWith(":free"))
+      assert(freeVariant, "the committed goat fixture must carry a vendor-prefixed free variant")
+      const record = goat.get(freeVariant)
       assert(record, "free-variant record must be retrievable")
-      assertEqual(record.id, "poolside/laguna-s-2.1-free", "free-variant id must not be rewritten")
+      assertEqual(record.id, freeVariant, "free-variant id must not be rewritten")
     },
   ],
   [

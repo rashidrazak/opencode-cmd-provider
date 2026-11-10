@@ -19,8 +19,22 @@ import {
   type MockCcOptions,
 } from "./helpers/mock-cc.js"
 import { projectSlugFromPath } from "../src/provider/project-slug.js"
+import { MODEL_SNAPSHOT } from "../src/catalog/snapshot.js"
+import { isReasoningModel } from "../src/provider/reasoning.js"
 import type { LanguageModelV3Prompt } from "../src/provider/aisdk-types.js"
 import { assert, assertEqual, run, withEnvVars } from "./harness.js"
+
+/**
+ * Derived from the shipped Snapshot so catalog churn never reddens the suite.
+ * Non-Claude on purpose: `claude-*` routes to the Anthropic endpoint, while
+ * these tests assert the OpenAI chat-completions wire.
+ */
+const REASONING_MODEL = MODEL_SNAPSHOT.find(
+  (model) => isReasoningModel(model.id) && !model.id.startsWith("claude-"),
+)?.id
+if (REASONING_MODEL === undefined) {
+  throw new Error("the Snapshot must ship at least one reasoning-capable model")
+}
 
 type Model = ReturnType<ReturnType<typeof createCommandCode>["languageModel"]>
 
@@ -181,8 +195,8 @@ run([
     "provider: a cross-model text-only turn carries placeholder reasoning on the OpenAI wire (issue #334)",
     async () => {
       // The earlier turn was produced by a non-reasoning model, so it has no
-      // reasoning to replay. Beam still rejects history without a non-empty
-      // reasoning_content; the codec marks the gap with the same placeholder
+      // reasoning to replay. A reasoning model still rejects history without a
+      // non-empty reasoning_content; the codec marks the gap with the same placeholder
       // the legacy wire uses. Provider API behavior is upstream-contract
       // backed, not live-verified from a Go-plan account (ADR-0016).
       await withEnv("goat", async () => {
@@ -195,9 +209,7 @@ run([
         })
         try {
           await collect(
-            createCommandCode({ apiKey: "k", baseURL: mock.url }).languageModel(
-              "reflection/beam:free",
-            ),
+            createCommandCode({ apiKey: "k", baseURL: mock.url }).languageModel(REASONING_MODEL),
             [
               { role: "user", content: "hi" },
               { role: "assistant", content: [{ type: "text", text: "Hello!" }] },
@@ -1520,8 +1532,8 @@ run([
   [
     "transport: the legacy wire carries assistant reasoning as a reasoning part (Go plan)",
     async () => {
-      // Beam 1.0 (and DeepSeek V4.x tool continuations) require every earlier
-      // assistant turn's reasoning on the legacy gateway too. The CLI wire
+      // Reasoning models (and DeepSeek V4.x tool continuations) require every
+      // earlier assistant turn's reasoning on the legacy gateway too. The CLI wire
       // spells it as a `{ type: "reasoning", text }` content part; a
       // message-level `reasoning_content` is ignored there.
       let legacyBody: Record<string, unknown> | undefined
@@ -1536,7 +1548,7 @@ run([
           { COMMANDCODE_PLAN: "go", COMMANDCODE_API_KEY: "k", COMMANDCODE_API_BASE: mock.url },
           async () => {
             const provider = createCommandCode({ apiKey: "k", baseURL: mock.url })
-            const parts = await collect(provider.languageModel("reflection/beam:free"), [
+            const parts = await collect(provider.languageModel(REASONING_MODEL), [
               { role: "user", content: [{ type: "text", text: "Hello" }] },
               {
                 role: "assistant",
@@ -1573,8 +1585,8 @@ run([
     "transport: the legacy wire marks a text-only turn from another model with placeholder reasoning (issue #334)",
     async () => {
       // Cross-model continuation: the earlier turn was produced by a
-      // non-reasoning model, so it recorded no reasoning to replay. Beam still
-      // demands a non-empty reasoning part on assistant history.
+      // non-reasoning model, so it recorded no reasoning to replay. The
+      // gateway still demands a non-empty reasoning part on assistant history.
       let legacyBody: Record<string, unknown> | undefined
       const mock = await startMockCc({
         stream: [textDelta("hi"), finishEvent()],
@@ -1587,7 +1599,7 @@ run([
           { COMMANDCODE_PLAN: "go", COMMANDCODE_API_KEY: "k", COMMANDCODE_API_BASE: mock.url },
           async () => {
             const provider = createCommandCode({ apiKey: "k", baseURL: mock.url })
-            await collect(provider.languageModel("reflection/beam:free"), [
+            await collect(provider.languageModel(REASONING_MODEL), [
               { role: "user", content: [{ type: "text", text: "hi" }] },
               { role: "assistant", content: [{ type: "text", text: "Hello!" }] },
               { role: "user", content: [{ type: "text", text: "Tell me more" }] },

@@ -16,9 +16,9 @@
 //   2. v4-flash-fast efforts promotion    (2026-08-31, facts/Efforts)
 //   3. Kimi-K3 efforts promotion          (2026-09-02, facts/Efforts)
 //   4. MiniMax M3 free retirement         (2026-09-01, model retirement —
-//      replayed on poolside/laguna-s-2.1-free, the free variant still in
-//      today's Snapshot; the M3 free variant already left the committed
-//      catalog when the retirement was absorbed)
+//      replayed on a free variant derived from today's Snapshot; the M3
+//      free variant already left the committed catalog when the retirement
+//      was absorbed)
 //   5. Gemini 3.7 Flash deal end          (deals/discount)
 import { execFile } from "node:child_process"
 import { cp, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises"
@@ -62,7 +62,19 @@ const EFFORTS_PROMOTIONS = new Map([
   ["moonshotai/Kimi-K3", "low, medium, high"],
 ])
 
-const RETIRED_FREE_VARIANT = "poolside/laguna-s-2.1-free"
+/**
+ * The free variant used as the retirement anchor. Derived from the shipped
+ * Snapshot: a literal id would redden the cron the day upstream retires it
+ * (the 2026-11-05 failure pinned `poolside/laguna-s-2.1-free`).
+ */
+const RETIRED_FREE_VARIANT = (() => {
+  const { byId } = snapshotIndex()
+  const id = [...byId.keys()].find((candidate) => candidate.endsWith(":free"))
+  if (id === undefined) {
+    throw new Error("the Snapshot must ship at least one free variant to replay a retirement")
+  }
+  return id
+})()
 const GEMINI_ID = "google/gemini-3.7-flash"
 
 interface WorldOptions {

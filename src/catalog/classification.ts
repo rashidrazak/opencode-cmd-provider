@@ -20,7 +20,7 @@ export const CLASSIFICATION_SOURCE_URLS: ReadonlyArray<string> = [
   "https://commandcode.ai/docs/plans/pro",
 ]
 
-export const CLASSIFICATION_LAST_REFRESHED = "2026-11-04"
+export const CLASSIFICATION_LAST_REFRESHED = "2026-11-10"
 
 // Active capability overrides. Empty = upstream data is truth.
 // Every entry requires a written justification naming the upstream
@@ -38,6 +38,7 @@ export const MODEL_REASONING_PENDING: ReadonlyArray<string> = [
 export const MODEL_REASONING_CAPABILITY: Readonly<Record<string, boolean>> = {
   "claude-fable-5": true,
   "claude-fable-5-1": true,
+  "claude-fable-5-2": true,
   "claude-haiku-4-5-20251001": false,
   "claude-haiku-5-5": true,
   "claude-opus-4-7": true,
@@ -53,6 +54,7 @@ export const MODEL_REASONING_CAPABILITY: Readonly<Record<string, boolean>> = {
   "deepseek/deepseek-v4-pro": true,
   "deepseek/deepseek-v4.1-flash": true,
   "deepseek/deepseek-v4.1-flash-fast": true,
+  "deepseek/deepseek-v4.1-flash-ultrafast": true,
   "google/gemini-3.1-flash-lite": true,
   "google/gemini-3.5-flash": true,
   "google/gemini-3.5-flash-lite": true,
@@ -75,6 +77,7 @@ export const MODEL_REASONING_CAPABILITY: Readonly<Record<string, boolean>> = {
   "inclusionai/ling-3.1-flash": true,
   "inclusionai/ling-3.1-flash-1019": true,
   "meituan/LongCat-2.0": true,
+  "meta/muse-ember": true,
   "meta/muse-spark-1.1": true,
   "meta/muse-spark-1.2": true,
   "meta/muse-spark-1.2-contributor": true,
@@ -96,7 +99,6 @@ export const MODEL_REASONING_CAPABILITY: Readonly<Record<string, boolean>> = {
   "nvidia/nemotron-3-ultra-550b-a55b": true,
   "nvidia/nemotron-3.5-super-vl": true,
   "ornith/ornith-1.5-122b": true,
-  "poolside/laguna-s-2.1-free": true,
   "Qwen/Qwen3.6-Max-Preview": true,
   "Qwen/Qwen3.6-Plus": true,
   "Qwen/Qwen3.7-Flash": true,
@@ -108,7 +110,6 @@ export const MODEL_REASONING_CAPABILITY: Readonly<Record<string, boolean>> = {
   "Qwen/Qwen3.8-Max-0902": true,
   "Qwen/Qwen3.8-Max-Prime": true,
   "Qwen/Qwen3.8-Omni-Flash": true,
-  "reflection/beam:free": true,
   "sakana/fugu-ultra": true,
   "stealth/crouton-alpha": true,
   "stealth/glyph-cluster:free": true,
