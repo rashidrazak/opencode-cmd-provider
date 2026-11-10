@@ -62,7 +62,15 @@ opencode plugin add opencode-cmd-provider
 
 This adds the plugin to your global OpenCode configuration, so it works in every
 project, registers Command Code and all of its models, and adds the sidebar
-section. **Restart OpenCode** when it finishes.
+section. **Reload OpenCode** when it finishes:
+
+```sh
+opencode reload
+```
+
+Closing and reopening the TUI is not enough on v2 — the background service keeps
+the previously loaded plugin. If the plugin still does not appear, restart the
+service with `opencode service restart`.
 
 If an install command fails on your machine, you can add the plugin to your
 configuration by hand — see
@@ -198,10 +206,12 @@ downloaded again. You never need to sign in again.
 
 New Command Code models usually appear on their own: the plugin refreshes its
 model list in the background each time OpenCode starts, so a model launched
-after your installed version was published reaches `/models` on the next start.
-If one is still missing, the background refresh may be blocked by your network
-or disabled via `COMMANDCODE_DISABLE_CATALOG_SYNC`; updating the plugin is then
-the fix.
+after your installed version was published reaches `/models` on the next plugin
+load. On OpenCode v2, run `opencode reload` (or `opencode service restart`)
+first — closing and reopening the TUI does not reload the background service.
+If the model is still missing, the background refresh may be blocked by your
+network or disabled via `COMMANDCODE_DISABLE_CATALOG_SYNC`; updating the plugin
+is then the fix.
 
 ## Uninstall
 
@@ -225,17 +235,18 @@ The provider and models this plugin registered disappear with it.
 
 ## Troubleshooting
 
-| What you see                                       | What to try                                                                                                                                                |
-| -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| No `[CMD]` models in `/models`                     | Check that your API key is set (or that `/connect` succeeded), restart OpenCode, and update the plugin if your install is old.                             |
-| Some Command Code models in `/models` lack `[CMD]` | Update the plugin. On OpenCode v2, older versions kept models.dev's own names for the models it also lists.                                                |
-| The sidebar has no **Command Code** section        | Make sure the session uses a `[CMD]` model, and press `ctrl+x b` — the sidebar may be hidden.                                                              |
-| Browser sign-in fails (v1)                         | Run `/connect` again and pick **Command Code API key** to paste one, or set `COMMANDCODE_API_KEY` and restart OpenCode.                                    |
-| `HTTP 404` on every request                        | Check `provider.commandcode.options.baseURL`. Set it to `https://api.commandcode.ai` — the plugin appends `/provider/v1/…` itself — or remove it.          |
-| `Your API key has expired`, but the key works      | A `401` now names the credential it used. If it says `legacy file ~/.commandcode/auth.json`, that login is stale — reconnect or set `COMMANDCODE_API_KEY`. |
-| A model shows `$0` cost                            | No published price for that model, so the estimate is `0`. See [Command Code pricing](https://commandcode.ai/docs/resources/pricing-limits).               |
-| `Command Code rejected this plugin as out of date` | Command Code refuses the version your install reports. Update the plugin — see [Keep it up to date](#keep-it-up-to-date).                                  |
-| Something else                                     | See the [technical reference](docs/TECHNICAL.md#troubleshooting) or [open an issue](https://github.com/rashidrazak/opencode-cmd-provider/issues).          |
+| What you see                                       | What to try                                                                                                                                                                             |
+| -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| No `[CMD]` models in `/models`                     | Check that your API key is set (or that `/connect` succeeded), then reload OpenCode (`opencode reload`, or `opencode service restart` on v2). Update the plugin if your install is old. |
+| A newly released model is missing from `/models`   | The catalog refresh applies on plugin load. On v2, run `opencode reload` (or `opencode service restart`) — restarting the TUI alone keeps the old plugin loaded.                        |
+| Some Command Code models in `/models` lack `[CMD]` | Update the plugin. On OpenCode v2, older versions kept models.dev's own names for the models it also lists.                                                                             |
+| The sidebar has no **Command Code** section        | Make sure the session uses a `[CMD]` model, and press `ctrl+x b` — the sidebar may be hidden.                                                                                           |
+| Browser sign-in fails (v1)                         | Run `/connect` again and pick **Command Code API key** to paste one, or set `COMMANDCODE_API_KEY` and restart OpenCode.                                                                 |
+| `HTTP 404` on every request                        | Check `provider.commandcode.options.baseURL`. Set it to `https://api.commandcode.ai` — the plugin appends `/provider/v1/…` itself — or remove it.                                       |
+| `Your API key has expired`, but the key works      | A `401` now names the credential it used. If it says `legacy file ~/.commandcode/auth.json`, that login is stale — reconnect or set `COMMANDCODE_API_KEY`.                              |
+| A model shows `$0` cost                            | No published price for that model, so the estimate is `0`. See [Command Code pricing](https://commandcode.ai/docs/resources/pricing-limits).                                            |
+| `Command Code rejected this plugin as out of date` | Command Code refuses the version your install reports. Update the plugin — see [Keep it up to date](#keep-it-up-to-date).                                                               |
+| Something else                                     | See the [technical reference](docs/TECHNICAL.md#troubleshooting) or [open an issue](https://github.com/rashidrazak/opencode-cmd-provider/issues).                                       |
 
 ## Learn more
 
