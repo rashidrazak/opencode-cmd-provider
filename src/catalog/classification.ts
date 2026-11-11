@@ -20,7 +20,7 @@ export const CLASSIFICATION_SOURCE_URLS: ReadonlyArray<string> = [
   "https://commandcode.ai/docs/plans/pro",
 ]
 
-export const CLASSIFICATION_LAST_REFRESHED = "2026-11-10"
+export const CLASSIFICATION_LAST_REFRESHED = "2026-11-11"
 
 // Active capability overrides. Empty = upstream data is truth.
 // Every entry requires a written justification naming the upstream
@@ -62,6 +62,7 @@ export const MODEL_REASONING_CAPABILITY: Readonly<Record<string, boolean>> = {
   "google/gemini-3.7-flash": true,
   "google/gemini-3.8-flash": true,
   "google/gemini-4-argon": true,
+  "google/gemini-4-carbon": true,
   "gpt-5.3-codex": true,
   "gpt-5.4": true,
   "gpt-5.4-mini": true,
@@ -111,7 +112,6 @@ export const MODEL_REASONING_CAPABILITY: Readonly<Record<string, boolean>> = {
   "Qwen/Qwen3.8-Max-Prime": true,
   "Qwen/Qwen3.8-Omni-Flash": true,
   "sakana/fugu-ultra": true,
-  "stealth/crouton-alpha": true,
   "stealth/glyph-cluster:free": true,
   "stepfun/Step-3.5-Flash": true,
   "stepfun/Step-3.7-Flash": true,

@@ -8,9 +8,9 @@
 // `npm run refresh:snapshot`.
 
 export const FACTS_SOURCE_URL = "https://api.commandcode.ai/provider/v1/models?view=client"
-export const FACTS_CATALOG_VERSION = "c6350c346d36fccd8e55482fdadc7f75e5376c5a10dfcbd9c157d329e979549e"
+export const FACTS_CATALOG_VERSION = "b787063039eb4a47da76c74379dd177365b0ee57541e63a80b1ed316d8db36e8"
 export const FACTS_PACKAGE_VERSION = "1.88.5"
-export const FACTS_LAST_REFRESHED = "2026-11-10"
+export const FACTS_LAST_REFRESHED = "2026-11-11"
 
 export const MODEL_EFFORTS: Readonly<Record<string, readonly string[]>> = {
   "claude-sonnet-5-5": ["low","medium","high","xhigh","max"],
@@ -59,6 +59,7 @@ export const MODEL_EFFORTS: Readonly<Record<string, readonly string[]>> = {
   "Qwen/Qwen3.8-Flash": ["low","medium","xhigh"],
   "stepfun/Step-5-Preview": ["low","medium","high"],
   "tencent/hy4-preview": ["low","medium","high"],
+  "google/gemini-4-carbon": ["low","medium","high"],
   "google/gemini-4-argon": ["low","medium","high"],
   "google/gemini-3.8-flash": ["low","medium","high"],
   "google/gemini-3.7-flash": ["low","medium","high"],
@@ -69,7 +70,6 @@ export const MODEL_EFFORTS: Readonly<Record<string, readonly string[]>> = {
   "sakana/fugu-ultra": ["high","xhigh"],
   "nvidia/nemotron-3.5-super-vl": ["low","medium","high"],
   "stealth/glyph-cluster:free": ["low","medium","high","xhigh"],
-  "stealth/crouton-alpha": ["low","medium","high","xhigh","max"],
   "inclusionai/ling-3.1-flash": ["low","medium","high"],
   "inclusionai/ling-3.1-flash-1019": ["low","medium","high"],
   "meta/muse-spark-1.1": ["low","medium","high","xhigh"],
@@ -158,6 +158,7 @@ export const MODEL_COSTS: Readonly<
   "stepfun/Step-3.5-Flash": { input: 0.09, output: 0.3, cacheRead: 0.02, cacheWrite: 0 },
   "tencent/hy3-paid": { input: 0.14, output: 0.58, cacheRead: 0.035, cacheWrite: 0 },
   "tencent/hy4-preview": { input: 0.834, output: 2.501, cacheRead: 0.042, cacheWrite: 0 },
+  "google/gemini-4-carbon": { input: 2, output: 10, cacheRead: 0.1, cacheWrite: 0 },
   "google/gemini-4-argon": { input: 2, output: 10, cacheRead: 0.1, cacheWrite: 0 },
   "google/gemini-3.8-flash": { input: 1.5, output: 7.5, cacheRead: 0.15, cacheWrite: 0 },
   "google/gemini-3.7-flash": { input: 1.5, output: 7.5, cacheRead: 0.15, cacheWrite: 0.08334 },
@@ -171,7 +172,6 @@ export const MODEL_COSTS: Readonly<
   "thinkingmachines/inkling": { input: 1, output: 4.05, cacheRead: 0.17, cacheWrite: 0 },
   "thinkingmachines/inkling-small": { input: 0.5, output: 1.2, cacheRead: 0.1, cacheWrite: 0 },
   "stealth/glyph-cluster:free": { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-  "stealth/crouton-alpha": { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
   "inclusionai/ling-3.1-flash": { input: 0.3, output: 0.9, cacheRead: 0.06, cacheWrite: 0 },
   "inclusionai/ling-3.1-flash-1019": { input: 0.3, output: 0.9, cacheRead: 0.06, cacheWrite: 0 },
   "meta/muse-spark-1.1": { input: 1.25, output: 4.25, cacheRead: 0.15, cacheWrite: 0 },
@@ -244,6 +244,7 @@ export const MODEL_INPUT_MODALITIES: Readonly<
   "Qwen/Qwen3.6-Plus": ["text","image"],
   "stepfun/Step-5-Preview": ["text","image"],
   "stepfun/Step-3.7-Flash": ["text","image"],
+  "google/gemini-4-carbon": ["text","image"],
   "google/gemini-4-argon": ["text","image"],
   "google/gemini-3.8-flash": ["text","image"],
   "google/gemini-3.7-flash": ["text","image"],
@@ -255,7 +256,6 @@ export const MODEL_INPUT_MODALITIES: Readonly<
   "nvidia/nemotron-3.5-super-vl": ["text","image"],
   "thinkingmachines/inkling": ["text","image"],
   "thinkingmachines/inkling-small": ["text","image"],
-  "stealth/crouton-alpha": ["text","image"],
   "meta/muse-spark-1.1": ["text","image"],
   "meta/muse-spark-1.2": ["text","image"],
   "meta/muse-spark-1.2-contributor": ["text","image"],

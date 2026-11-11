@@ -76,6 +76,7 @@ export const MODEL_DEALS: Readonly<Record<string, ModelDeals>> = {
   "google/gemini-3.7-flash": { tier: "opensource", benchmark: {"intelligence":39.1}, free: false, allowance: {"goat":40,"pro":50} },
   "google/gemini-3.8-flash": { tier: "premium", benchmark: {"intelligence":40.9}, free: false, allowance: {"goat":40,"pro":50} },
   "google/gemini-4-argon": { tier: "premium", benchmark: {"intelligence":52.6}, free: false, allowance: {"goat":20,"pro":20} },
+  "google/gemini-4-carbon": { tier: "premium", free: false, allowance: {"goat":20,"pro":30} },
   "gpt-5.3-codex": { tier: "premium", benchmark: {"intelligence":32.5}, free: false, allowance: {"goat":20,"pro":20} },
   "gpt-5.4": { tier: "premium", benchmark: {"intelligence":39}, free: false, allowance: {"goat":20,"pro":20} },
   "gpt-5.4-mini": { tier: "premium", benchmark: {"intelligence":24.1}, free: false, allowance: {"goat":20,"pro":20} },
@@ -125,7 +126,6 @@ export const MODEL_DEALS: Readonly<Record<string, ModelDeals>> = {
   "Qwen/Qwen3.8-Max-Prime": { tier: "opensource", free: false, allowance: {"goat":20,"pro":30} },
   "Qwen/Qwen3.8-Omni-Flash": { tier: "opensource", free: false, allowance: {"goat":20,"pro":30} },
   "sakana/fugu-ultra": { tier: "premium", free: false, allowance: {"goat":20,"pro":20} },
-  "stealth/crouton-alpha": { tier: "opensource", free: true },
   "stealth/glyph-cluster:free": { tier: "opensource", free: true },
   "stepfun/Step-3.5-Flash": { tier: "opensource", benchmark: {"intelligence":17}, free: false, allowance: {"goat":20,"pro":30} },
   "stepfun/Step-3.7-Flash": { tier: "opensource", benchmark: {"intelligence":19.5}, free: false, allowance: {"goat":20,"pro":30} },
@@ -170,5 +170,5 @@ export const PLAN_CATALOG: Readonly<Record<PlanId, PlanInfo>> = {
 }
 
 export const DEAL_SOURCE_URL = "https://commandcode.ai/docs/resources/pricing-limits"
-export const DEAL_LAST_REFRESHED = "2026-11-10"
+export const DEAL_LAST_REFRESHED = "2026-11-11"
 export const DEAL_PACKAGE_VERSION = "docs"
