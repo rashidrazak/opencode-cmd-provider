@@ -1,8 +1,10 @@
 // tests/contract.test.ts
 import { createRequire } from "node:module"
-import { readFileSync, readdirSync, statSync } from "node:fs"
+import { readFileSync, readdirSync, statSync, existsSync } from "node:fs"
 import { join } from "node:path"
+import { fileURLToPath } from "node:url"
 import { run, assert, assertEqual } from "./harness.js"
+import { DESKTOP_SHARED_MODULES } from "./gui-shared-modules.js"
 
 const require = createRequire(import.meta.url)
 const pkg = require("../package.json") as {
@@ -52,6 +54,45 @@ run([
     "exports exposes ./tui entry pointing to dist/tui.js",
     () => {
       assertEqual(pkg.exports?.["./tui"], "./dist/tui.js")
+    },
+  ],
+  [
+    "exports exposes ./gui-experimental entry pointing to dist/gui-experimental.cjs",
+    () => {
+      // The OpenCode Desktop GUI half (ADR-0025): the host loads the package's
+      // `./gui-experimental` export and requires it to be ONE prebuilt
+      // CommonJS file ending .cjs.
+      assertEqual(pkg.exports?.["./gui-experimental"], "./dist/gui-experimental.cjs")
+    },
+  ],
+  [
+    "dist/gui-experimental.cjs exists and requires only modules the desktop host shares",
+    () => {
+      // The desktop host evaluates the bundle with a `require` that serves only
+      // the modules it shares; anything else fails the whole GUI. The deep
+      // host-evaluation lives in tests/gui-panel.test.ts; this is the wiring
+      // pin: the artifact exists, is CommonJS, and its require targets are
+      // exactly the shared SDK/runtime modules — never a node builtin.
+      const bundle = join(
+        fileURLToPath(new URL("../dist", import.meta.url)),
+        "gui-experimental.cjs",
+      )
+      assert(existsSync(bundle), `missing ${bundle} — run npm run build:gui`)
+      const code = readFileSync(bundle, "utf-8")
+      // The canonical allowlist lives in tests/gui-shared-modules.ts (what the
+      // host permits); scripts/vite-gui.config.mjs's narrower SHARED list is
+      // what this bundle must keep external.
+      const targets = [...code.matchAll(/require\("([^"]+)"\)/g)].map((match) => match[1])
+      assert(
+        targets.length > 0,
+        "the GUI bundle must require the SDK module (tokens are identity-checked)",
+      )
+      const foreign = targets.filter((target) => !DESKTOP_SHARED_MODULES.includes(target as never))
+      assertEqual(
+        foreign,
+        [],
+        `the GUI bundle requires modules the desktop host does not share: ${foreign.join(", ")}`,
+      )
     },
   ],
   [

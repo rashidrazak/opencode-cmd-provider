@@ -70,7 +70,9 @@ opencode reload
 
 Closing and reopening the TUI is not enough on v2 — the background service keeps
 the previously loaded plugin. If the plugin still does not appear, restart the
-service with `opencode service restart`.
+service with `opencode service restart`. In the **OpenCode desktop app**,
+restart the app itself: its windows load the plugin (and the **Command Code**
+side panel, see [What you get](#what-you-get)) when they start.
 
 If an install command fails on your machine, you can add the plugin to your
 configuration by hand — see
@@ -147,6 +149,15 @@ panel (titled **Command Code**) for that model:
 To show, hide or reorder segments, type `/cmd-rates-usage` in the prompt (or
 run **Show, hide and reorder sidebar content** from the command palette,
 `ctrl+p`). Toggle the sidebar with `ctrl+x b`.
+
+**In the OpenCode desktop app** the same panel appears as a **Command Code**
+tab in the side panel of a session running a `[CMD]` model — open it from the
+**+** menu beside the side-panel tabs, with **Show Command Code rates and
+usage** in the command palette, or with the panel's refresh button to fetch
+your usage again. The desktop tab renders every segment and shares the live
+usage fetch with the CLI's sidebar (it never sees your API key; the plugin's
+server half resolves the account and fetches). The segment layout dialog is a
+terminal-side setting for now — the desktop tab always shows every segment.
 
 ### Plan and deal summaries
 
