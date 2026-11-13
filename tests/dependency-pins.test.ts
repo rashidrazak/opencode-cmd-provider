@@ -109,9 +109,11 @@ function requirementsFor(dep: string): Requirement[] {
 type Version = readonly [number, number, number]
 
 /**
- * The two requirement shapes this repo allows: an exact version, or a caret
- * range. Anything else (`~`, `>=`, `||`, a tag) returns `undefined` so the
- * gate fails loudly instead of guessing.
+ * The three requirement shapes this repo allows: an exact version, a caret
+ * range with a patch (`^1.9.12`), or a caret range without one (`^1.3`, as
+ * `solid-refresh` — vite-plugin-solid's dependency — states its solid-js
+ * peer). A patchless caret reads as `.0`; anything else (`~`, `>=`, `||`, a
+ * tag) returns `undefined` so the gate fails loudly instead of guessing.
  */
 function parseRange(
   range: string,
@@ -120,9 +122,12 @@ function parseRange(
   if (exact) {
     return { kind: "exact", version: [Number(exact[1]), Number(exact[2]), Number(exact[3])] }
   }
-  const caret = /^\^(\d+)\.(\d+)\.(\d+)$/.exec(range)
+  const caret = /^\^(\d+)\.(\d+)(?:\.(\d+))?$/.exec(range)
   if (caret) {
-    return { kind: "caret", version: [Number(caret[1]), Number(caret[2]), Number(caret[3])] }
+    return {
+      kind: "caret",
+      version: [Number(caret[1]), Number(caret[2]), Number(caret[3] ?? "0")],
+    }
   }
   return undefined
 }
@@ -243,13 +248,17 @@ run([
       // one must not, so a future regression in this file cannot silently
       // re-open the failure class it was written for.
       assert(admitsOnly("^1.9.18", "^1.9.12"), "a narrowed caret range is admitted")
+      assert(admitsOnly("^1.9.18", "^1.3"), "a narrowed caret range admits a patchless caret")
       assert(admitsOnly("1.9.12", "^1.9.12"), "an exact version inside the caret range is admitted")
       assert(admitsOnly("1.9.12", "1.9.12"), "an identical exact requirement is admitted")
       assert(!admitsOnly("^1.9.11", "^1.9.12"), "a lower caret floor widens the requirement")
+      assert(!admitsOnly("^1.2.9", "^1.3"), "a caret below the patchless caret's floor widens it")
       assert(!admitsOnly("^2.0.0", "^1.9.12"), "a different major widens the requirement")
       assert(!admitsOnly("^1.9.18", "1.9.12"), "a caret cannot replace an exact requirement")
       assert(!admitsOnly("~1.9.18", "^1.9.12"), "an unmodelled shape is never admitted")
+      assert(!admitsOnly(">=1.9.0", "^1.9.12"), "an unbounded range is never admitted")
       assert(satisfies("1.9.18", "^1.9.12"), "the resolved copy is inside the caret range")
+      assert(satisfies("1.9.18", "^1.3"), "the resolved copy is inside the patchless caret")
       assert(!satisfies("1.9.12", "^1.9.16"), "a resolved copy below the floor is rejected")
       assert(!satisfies("2.0.0", "^1.9.12"), "a resolved copy at another major is rejected")
     },

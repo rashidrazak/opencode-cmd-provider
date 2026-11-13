@@ -46,7 +46,12 @@ translating the other. The **TUI Host** is neither — it loads the `./tui` expo
 — and it splits the same way: v1 reads `{ id, tui(api) }` and renders the
 snake_case `sidebar_content` slot, v2 reads `{ id, setup(context) }` and claims
 the dot-separated `"sidebar.content"` path, reading the `cmd` payload from
-`settings.cmd` rather than `options.cmd`. See ADR-0010.
+`settings.cmd` rather than `options.cmd`. The **Desktop Host** (the OpenCode
+desktop app) is the fourth: it loads the `./gui-experimental` export — one
+prebuilt CommonJS bundle evaluated in every app window under a `require` that
+serves only the modules the app shares — and contributes the side-panel tab,
+palette command, + menu item and stylesheet through the GUI SDK's
+`Plugin.define({ setup })` (ADR-0025). See ADR-0010.
 _Avoid_: version, runtime, platform, shim
 
 **Declared models**:
@@ -87,11 +92,11 @@ The Deals catalog plus its enrichment (v1: `model.options.cmd`, `context_over_20
 _Avoid_: deals intelligence, deals feature, pricing UI
 
 **Rates & usage panel**:
-The Command Code section of the session sidebar: the selected model's bundled rates, allowances, deals and benchmarks plus the account's live usage, in five user-orderable segments; configured from the `/cmd-rates-usage` dialog. See ADR-0022.
+The Command Code section of the session sidebar: the selected model's bundled rates, allowances, deals and benchmarks plus the account's live usage, in five user-orderable segments; configured from the `/cmd-rates-usage` dialog on the TUI. The **Desktop Host** renders the same rows from the same composition (`panel-rows.ts`) as a side-panel tab in the desktop app, with the palette command and the + menu item as launchers — the fixed default layout there, because the desktop's persisted layout needs an Effect Schema the GUI bundle cannot carry (ADR-0025). See ADR-0022.
 _Avoid_: deals panel, deals sidebar, sidebar deals
 
 **Sidebar layout**:
-The per-machine user choice of which sidebar segments render and in which order, set from the `/cmd-rates-usage` dialog (`Show, hide and reorder sidebar content`) and persisted host-side (v1 `api.kv`, v2 `ctx.storage.store`) — never part of `opencode.json` or `tui.json` configuration. Normalized on every read, so a value written by another release cannot crash the panel or hide a segment. See issue #253 and ADR-0022.
+The per-machine user choice of which sidebar segments render and in which order, set from the `/cmd-rates-usage` dialog (`Show, hide and reorder sidebar content`) and persisted host-side (v1 `api.kv`, v2 `ctx.storage.store`) — never part of `opencode.json` or `tui.json` configuration. Normalized on every read, so a value written by another release cannot crash the panel or hide a segment. Desktop windows render the fixed default layout: persisting there needs the GUI SDK's Effect-Schema stores, which the bundle cannot carry across the root-beta/host-4.1 split (ADR-0025). See issue #253 and ADR-0022.
 _Avoid_: panel config, segment settings, panel preferences
 
 **Plan identity**:

@@ -11,13 +11,14 @@ config keys, and generated catalogs.
 
 ## Hosts and entry points
 
-One package serves both OpenCode lines; three host processes load it.
+One package serves both OpenCode lines; four host processes load it.
 
-| Host               | Configured in                                   | Default export                       | Registrations                                                                                                                |
-| ------------------ | ----------------------------------------------- | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
-| OpenCode v1 server | `opencode.json` → `plugin`                      | `dist/index.js` → `{ id, server }`   | `config` hook (auto-registration + Rates & usage enrichment), `auth` (OAuth browser flow + API-key method), `tool` map       |
-| OpenCode v2 server | `opencode.json` → `plugins`                     | `dist/index.js` → `{ id, setup }`    | `ctx.provider.transform` + `ctx.model.transform`, `ctx.integration.transform`, `ctx.tool.transform`, `ctx.aisdk.hook("sdk")` |
-| TUI (both lines)   | v1: `tui.json`; v2: the package's `./tui` entry | `dist/tui.js` → `{ id, tui, setup }` | v1: `api.slots.register` on `sidebar_content`; v2: `ctx.ui.slot({ append: "sidebar.content" })`                              |
+| Host               | Configured in                                   | Default export                                           | Registrations                                                                                                                |
+| ------------------ | ----------------------------------------------- | -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| OpenCode v1 server | `opencode.json` → `plugin`                      | `dist/index.js` → `{ id, server }`                       | `config` hook (auto-registration + Rates & usage enrichment), `auth` (OAuth browser flow + API-key method), `tool` map       |
+| OpenCode v2 server | `opencode.json` → `plugins`                     | `dist/index.js` → `{ id, setup }`                        | `ctx.provider.transform` + `ctx.model.transform`, `ctx.integration.transform`, `ctx.tool.transform`, `ctx.aisdk.hook("sdk")` |
+| TUI (both lines)   | v1: `tui.json`; v2: the package's `./tui` entry | `dist/tui.js` → `{ id, tui, setup }`                     | v1: `api.slots.register` on `sidebar_content`; v2: `ctx.ui.slot({ append: "sidebar.content" })`                              |
+| Desktop (v2 app)   | the package's `./gui-experimental` entry        | `dist/gui-experimental.cjs` → `Plugin.define({ setup })` | window `setup`: `Panel` (side tab), `Command`, `MenuItem`, `Style` — see ADR-0025                                            |
 
 - The v1 and v2 halves are **independent implementations** of the same
   capabilities — v2 does not translate v1 hooks. The v2 host context is mirrored
@@ -28,14 +29,33 @@ One package serves both OpenCode lines; three host processes load it.
 - Both TUI hosts rewrite the bundle's `@opentui/*` and `solid-js` imports to
   their own module instances, which is why `dist/tui.js` is built as a single
   file with those specifiers external.
+- The Desktop host (`./gui-experimental`, ADR-0025) evaluates the bundle in
+  every app window with a `require` that serves only the modules the app
+  shares (`@opencode/plugin/gui`, `effect`, `@opencode/client`, the
+  `solid-js` family). `dist/gui-experimental.cjs` is therefore one prebuilt
+  CommonJS file that keeps exactly those specifiers as requires and inlines
+  everything else; the GUI SDK types are mirrored in
+  `src/plugin/v2-gui-module.d.ts` and the program type-checks separately
+  (`tsconfig.gui.json`, `tsc -p tsconfig.gui.json` inside
+  `npm run typecheck`). `tests/gui-panel.test.ts` evaluates the built bundle
+  the way the host does; `tests/contract.test.ts` scans its require targets.
 - `npm run build` needs [bun](https://bun.sh) on `PATH`: `tsc` emits the server
   halves, then `scripts/build-tui.ts` compiles `src/rates-usage/tui.tsx` with
   `@opentui/solid`'s solid transform so the panel's JSX props stay reactive.
+  The last step, `npm run build:gui` (`scripts/vite-gui.config.mjs`), needs
+  only node: it compiles `src/rates-usage/gui/index.tsx` with
+  `vite-plugin-solid`, writes `dist/gui-experimental.cjs`, and copies the
+  bundle to `dev/opencode-plugin/gui-experimental.cjs` for the local-directory
+  dev flow (a generated artifact, gitignored — the desktop host resolves a
+  nameless directory plugin's GUI entry as a literal `gui-experimental.cjs`
+  file there, and a re-export wrapper cannot work because the window's
+  `require` serves only shared modules).
 - See [ADR-0001](adr/0001-auto-registration-snapshot.md) (auto-registration),
   [ADR-0004](adr/0004-rates-usage-slice.md) (the excisable Rates & usage slice),
   [ADR-0009](adr/0009-version-pinned-provider-specifier.md) (runtime-provider
-  specifier), and [ADR-0010](adr/0010-dual-v1-v2-plugin-entrypoint.md) (the dual
-  v1/v2 entrypoint, including the TUI half).
+  specifier), [ADR-0010](adr/0010-dual-v1-v2-plugin-entrypoint.md) (the dual
+  v1/v2 entrypoint, including the TUI half), and
+  [ADR-0025](adr/0025-desktop-gui-bundle.md) (the desktop GUI bundle).
 
 ## Installation mechanics and caching
 
@@ -49,7 +69,12 @@ OpenCode's plugin cache (`~/.cache/opencode/packages/`).
 TUI host resolves each registered package's own `./tui` entrypoint itself, so no
 `tui.json` is involved. Packages are cached under `~/.cache/opencode/npm/`.
 Sibling commands: `opencode plugin list`, `check`, `update [<target>]`, `remove
-<package>`.
+<package>`. The Desktop app additionally reads the package's
+`./gui-experimental` export: a named package resolves it through the export map
+(one prebuilt `.cjs` file), and a nameless local _directory_ resolves it as a
+literal `gui-experimental.cjs`/`gui-experimental.js` file beside the server
+entry — which is why `npm run build:gui` drops the bundle into
+`dev/opencode-plugin/` for the dev flow (ADR-0025).
 
 **v2 local plugin directories.** v2 also loads every directory under a
 project's `.opencode/plugins/`, without asking, for any session started there,
