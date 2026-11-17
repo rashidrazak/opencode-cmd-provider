@@ -131,12 +131,12 @@ const modelsPageRow = (
   label,
   { input = "$7", output = "$14", cacheRead = "$0.7", caps = "Text input" } = {},
 ) =>
-  `<tr><td><a href="/models/${slug}">${label}</a></td><td><span>1M</span></td><td>52</td>` +
+  `<tr><td><a href="/models/${slug}">${label}</a></td><td><span>1M</span></td>` +
   `<td><span>${input}</span></td><td><span>${output}</span></td><td><span>${cacheRead}</span></td>` +
   `<td><span>—</span></td><td><button type="button" aria-label="Capabilities: ${caps}"></button></td></tr>`
 
 const modelsPageTable = (rows) =>
-  `<table><thead><tr><th>Model</th><th>Context</th><th>Intelligence</th><th>Input</th><th>Output</th><th>Cache read</th><th>Cache write</th><th>Caps</th></tr></thead><tbody>` +
+  `<table><thead><tr><th>Model</th><th>Context</th><th>Input</th><th>Output</th><th>Cache read</th><th>Cache write</th><th>Caps</th></tr></thead><tbody>` +
   rows.join("") +
   `</tbody></table>`
 
