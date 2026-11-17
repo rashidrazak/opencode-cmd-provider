@@ -1,3 +1,17 @@
+## Unreleased
+
+### Added
+
+- **OpenCode desktop support** (ADR-0025): the plugin now ships a
+  `./gui-experimental` export — one prebuilt CommonJS bundle
+  (`dist/gui-experimental.cjs`) the OpenCode desktop app evaluates in every
+  window. It contributes the **Command Code** side-panel tab (the same five
+  Rates & usage segments as the TUI sidebar, including live usage over the
+  existing plugin-RPC bridge), a **Show Command Code rates and usage** palette
+  command, a **+**-menu launcher, and the panel's stylesheet. The desktop tab
+  renders the fixed default segment layout; the `/cmd-rates-usage` dialog
+  remains the terminal-side way to shape the sidebar.
+
 ## 2.3.6 - 2026-11-11
 
 ### Model catalog

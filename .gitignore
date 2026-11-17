@@ -2,3 +2,4 @@ node_modules/
 dist/
 *.tsbuildinfo
 .commandcode/
+dev/opencode-plugin/gui-experimental.cjs

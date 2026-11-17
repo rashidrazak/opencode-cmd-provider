@@ -7,10 +7,11 @@ decisions in `docs/adr/`.
 
 ## Commands
 
-- `npm run build` runs `tsc` then `bun scripts/build-tui.ts`. **`bun` must be on
-  PATH** — the TUI (`dist/tui.js`) is built with bun because `tsc`'s `react-jsx`
-  emit is non-reactive (props freeze; the sidebar never repaints). CI installs
-  bun.
+- `npm run build` runs `tsc`, then `bun scripts/build-tui.ts`, then
+  `npm run build:gui`. **`bun` must be on PATH** — the TUI (`dist/tui.js`) is
+  built with bun because `tsc`'s `react-jsx` emit is non-reactive (props
+  freeze; the sidebar never repaints). CI installs bun. The last step,
+  `build:gui`, is plain node (vite) and needs no bun.
 - `npm test` = typecheck → unit → integration → contract → `format:check`.
 - `npm run lint:secrets` scans the tree with secretlint for Command Code key
   material (`user_`/`cc_` + 8 characters, mirroring `provider/redact.ts`). It is
@@ -95,7 +96,7 @@ fixtures (see `scripts/check-deals-coverage.mjs` and
 
 ## Architecture
 
-- **Three hosts, two config files.** The server host reads `opencode.json`
+- **Four hosts; the first two have the config files.** The server host reads `opencode.json`
   (`src/plugin/index.ts`, package export `"."`) and has two flavours — OpenCode
   v1 calls the default export's `server()`, v2 calls its `setup(context)`; the
   TUI host reads `tui.json` (`src/rates-usage/tui.tsx`, package export `"./tui"` →
@@ -109,6 +110,17 @@ fixtures (see `scripts/check-deals-coverage.mjs` and
   by v2 ("Invalid V2 TUI plugin module") and the sidebar silently disappears —
   `src/plugin/v2-tui-types.ts` mirrors the v2 TUI context, and
   `tests/tui-rates-usage-panel.test.ts` plus `tests/contract.test.ts` pin both halves.
+  The Desktop host is the fourth (`src/rates-usage/gui/`, package export
+  `"./gui-experimental"` → `dist/gui-experimental.cjs`, ADR-0025): the app
+  evaluates that one prebuilt CommonJS file in every window with a `require`
+  that serves only shared modules, so the bundle keeps `@opencode/plugin/gui`
+  and the `solid-js` family external and inlines everything else; the SDK types
+  are mirrored in `src/plugin/v2-gui-module.d.ts` (the package must NOT become
+  a dependency — its `solid-js >=1.9.0` peer requirement is a shape
+  dependency-pins.test.ts cannot model), the program type-checks via
+  `tsconfig.gui.json` (excluded from the root program — the JSX import sources
+  differ), and `tests/gui-panel.test.ts` evaluates the built bundle the way
+  the host does. `npm run build:gui` is plain node (vite) — no bun.
 - **`src/rates-usage/` is the excisable Rates & usage slice.** Deleting it plus the
   registration lines in `src/plugin/index.ts` (`enrichProvider`, `tools` and
   `rpc` in the v2 `setup`, `enrichCommandCodeModels` and `planSummaryTool` in

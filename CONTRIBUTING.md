@@ -44,11 +44,16 @@ See [ADR-0009](docs/adr/0009-version-pinned-provider-specifier.md).
 
 ## Running the working tree in OpenCode v2
 
-`dev/opencode-plugin/` is a plugin directory that re-exports the built `dist/`
-bundle unchanged. OpenCode does not load it unless you configure it. To use it,
-run `npm run build`, then in `~/.config/opencode/opencode.json` replace the npm
-entry with the directory's absolute path (v2 accepts only a directory here, and
-`opencode plugin add` rejects local paths):
+`dev/opencode-plugin/` is a plugin directory that carries the built `dist/`
+bundles: `server.mjs` and `tui.mjs` re-export them unchanged, and
+`gui-experimental.cjs` is a verbatim copy made by `npm run build:gui`
+(gitignored like `dist/` — a wrapper re-export cannot serve the desktop GUI,
+whose window loader resolves a nameless directory plugin's entry as a literal
+`gui-experimental.cjs` file and evaluates it under a `require` that only
+shares host modules). OpenCode does not load it unless you configure it. To
+use it, run `npm run build`, then in `~/.config/opencode/opencode.json` replace
+the npm entry with the directory's absolute path (v2 accepts only a directory
+here, and `opencode plugin add` rejects local paths):
 
 ```json
 {

@@ -57,7 +57,7 @@ import { normalizePlan, PLAN_BEARING_SUBSCRIPTION_STATUSES, type PlanId } from "
 import { getApiBase } from "../env.js"
 import { isRecord, numberValue, stringValue } from "../provider/converters.js"
 import { PLAN_CATALOG, type PlanInfo } from "./catalog.js"
-import type { RatesUsageRow, RatesUsageRowTone } from "./tui.js"
+import type { RatesUsageRow, RatesUsageRowTone } from "./panel-rows.js"
 
 /** Abort budget for each billing request. The live API answers a leg in
  * 8–18 s, so a tighter budget drops data that was one or two seconds away;

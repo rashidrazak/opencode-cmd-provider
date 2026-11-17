@@ -3,7 +3,7 @@
 // switch, a model switch, and, in the plugin's own dev loop, every hot reload
 // of the TUI module — and a fresh panel has no state, so the segment used to
 // blank until a new billing chain settled (~15 s against the live API). This
-// module keeps the last published state in TUI-process memory, keyed by
+// module keeps the last published state in host-process memory, keyed by
 // session, so a remount renders it from the first frame and the mount chain
 // refreshes over it.
 //
@@ -13,17 +13,19 @@
 // also dies with the process — a fresh TUI does one fresh chain, which #251's
 // parallel legs make cheap.
 //
-// The default instance hangs off `globalThis`: the v2 TUI host re-evaluates
-// the plugin module on hot reload (verified live: module eval count went 1 → 2
-// per process on a source save, while the process stayed), so module-scope
-// state would be wiped exactly on the remount the cache exists for.
-// `globalThis` survives the re-evaluation and is dropped on process exit,
-// which is the intended lifetime.
+// The default instance hangs off `globalThis`: the plugin hosts re-evaluate
+// the module on hot reload (verified live for the v2 TUI host: module eval
+// count went 1 → 2 per process on a source save, while the process stayed),
+// so module-scope state would be wiped exactly on the remount the cache
+// exists for. `globalThis` survives the re-evaluation and is dropped on
+// process exit, which is the intended lifetime. Every non-server half shares
+// the default: the v1 and v2 TUI processes, and each desktop window (where a
+// reload is a window reload, so the cache is naturally per-window).
 //
 // Host-agnostic by design: no TUI runtime (solid-js), no runtime
 // `@opencode-ai/*` import — only a type-only import of the controller's state
 // shape.
-import type { UsagePanelState } from "./tui-usage.js"
+import type { UsagePanelState } from "./usage-panel.js"
 
 /**
  * How long a cached state stays seedable: stale numbers beat a blank segment
@@ -105,8 +107,9 @@ export function createUsageCache(options: UsageCacheOptions = {}): UsageCache {
 const GLOBAL_KEY = Symbol.for("opencode-cmd-provider.usage-cache")
 
 /**
- * The default cache instance the TUI halves share. Stored on `globalThis`
- * under a namespaced symbol so the plugin module's re-evaluation on a hot
+ * The default cache instance the non-server halves share (both TUI hosts and
+ * every desktop window). Stored on `globalThis` under a namespaced symbol so
+ * the plugin module's re-evaluation on a hot
  * reload keeps it (see the header); the factory stays the tests' seam.
  */
 export function globalUsageCache(): UsageCache {
