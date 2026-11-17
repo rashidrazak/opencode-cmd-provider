@@ -9,8 +9,9 @@ Use your [Command Code](https://commandcode.ai) plan inside
 This plugin connects OpenCode to Command Code and adds every Command Code model
 to the model picker, so you can use your Go, GOAT, Pro, Max 10×, Max 20×,
 Provider, Team, or Enterprise plan from OpenCode. It also adds the **Rates &
-usage** panel — a **Command Code** section in the session sidebar — with your
-plan's allowances, benchmarks, current deals, and live usage.
+usage** panel with your plan's allowances, benchmarks, current deals, and live
+usage — a **Command Code** section in the terminal's session sidebar, and a
+**Command Code** side-panel tab in the OpenCode desktop app.
 
 <!-- Absolute URL so the image also renders on npmjs.com (docs/ is not published to npm). -->
 
@@ -34,6 +35,10 @@ opencode --version
 
 - Prints `1.x` → follow **[Install on OpenCode v1](#install-on-opencode-v1)**.
 - Prints `2.x` → follow **[Install on OpenCode v2](#install-on-opencode-v2)**.
+
+Using the **OpenCode desktop app**? It is part of OpenCode v2 — follow
+**[Install on OpenCode v2](#install-on-opencode-v2)**, then see
+[In the desktop app](#in-the-desktop-app).
 
 ## Install on OpenCode v1
 
@@ -70,9 +75,15 @@ opencode reload
 
 Closing and reopening the TUI is not enough on v2 — the background service keeps
 the previously loaded plugin. If the plugin still does not appear, restart the
-service with `opencode service restart`. In the **OpenCode desktop app**,
-restart the app itself: its windows load the plugin (and the **Command Code**
-side panel, see [What you get](#what-you-get)) when they start.
+service with `opencode service restart`.
+
+### In the desktop app
+
+The desktop app picks up the same install. **Quit and reopen the app** after
+installing: its windows load the plugin when they start, so an open window
+keeps running without it. Once reopened, the `[CMD]` models are in the model
+picker and the **Command Code** side-panel tab is available — see
+[The panel in the desktop app](#the-panel-in-the-desktop-app).
 
 If an install command fails on your machine, you can add the plugin to your
 configuration by hand — see
@@ -135,8 +146,9 @@ opencode run --model commandcode/claude-sonnet-5 "hello"
 
 ### The Rates & usage panel
 
-While a session uses a `[CMD]` model, the sidebar shows the **Rates & usage**
-panel (titled **Command Code**) for that model:
+While a session uses a `[CMD]` model, OpenCode shows the **Rates & usage**
+panel (titled **Command Code**) for that model — in the sidebar of the
+terminal interface, and in the side panel of the desktop app:
 
 - **Tier and status** of the model
 - **Allowance** — the monthly allowance on each plan
@@ -146,19 +158,28 @@ panel (titled **Command Code**) for that model:
 - **Usage** — your live 5-hour, weekly and monthly usage, and this cycle's
   requests, tokens and spend, refreshed as you work
 
+#### The panel in the terminal
+
 To show, hide or reorder segments, type `/cmd-rates-usage` in the prompt (or
 run **Show, hide and reorder sidebar content** from the command palette,
 `ctrl+p`). Toggle the sidebar with `ctrl+x b`.
 
-**In the OpenCode desktop app** the same panel appears as a **Command Code**
-tab in the side panel of a session running a `[CMD]` model — open it from the
-**+** menu beside the side-panel tabs or with **Show Command Code rates and
-usage** in the command palette. Both launchers are offered only while the
-selected model is a Command Code one. The panel's refresh button fetches your
-usage again. The desktop tab renders every segment and shares the live
-usage fetch with the CLI's sidebar (it never sees your API key; the plugin's
-server half resolves the account and fetches). The segment layout dialog is a
-terminal-side setting for now — the desktop tab always shows every segment.
+#### The panel in the desktop app
+
+Open a session that uses a `[CMD]` model, then open the **Command Code** tab
+either way:
+
+- the **+** menu beside the side-panel tabs, or
+- **Show Command Code rates and usage** in the command palette.
+
+Both are offered only while the session's model is a Command Code one; switch
+to another provider's model and they disappear until you switch back. Usage
+refreshes after each completed turn, and the refresh button in the panel's
+header fetches it again on demand.
+
+The desktop tab always shows every segment in the default order. Showing,
+hiding and reordering segments (`/cmd-rates-usage`) is available in the
+terminal interface only for now.
 
 ### Plan and deal summaries
 
@@ -207,6 +228,8 @@ plugin.
 opencode plugin update
 ```
 
+Then run `opencode reload`, and quit and reopen the desktop app if you use it.
+
 **OpenCode v1:** delete the cached copy and restart OpenCode:
 
 ```sh
@@ -243,7 +266,8 @@ Then remove the cached copies to free the space — the plugin package
 rm -rf ~/.cache/opencode/npm/opencode-cmd-provider* ~/.cache/opencode/packages/opencode-cmd-provider* ~/.cache/opencode-cmd-provider
 ```
 
-The provider and models this plugin registered disappear with it.
+The provider and models this plugin registered disappear with it. Quit and
+reopen the desktop app, if you use it, to remove the **Command Code** tab.
 
 ## Troubleshooting
 
@@ -253,6 +277,7 @@ The provider and models this plugin registered disappear with it.
 | A newly released model is missing from `/models`   | The catalog refresh applies on plugin load. On v2, run `opencode reload` (or `opencode service restart`) — restarting the TUI alone keeps the old plugin loaded.                        |
 | Some Command Code models in `/models` lack `[CMD]` | Update the plugin. On OpenCode v2, older versions kept models.dev's own names for the models it also lists.                                                                             |
 | The sidebar has no **Command Code** section        | Make sure the session uses a `[CMD]` model, and press `ctrl+x b` — the sidebar may be hidden.                                                                                           |
+| The desktop app has no **Command Code** tab        | Make sure the session uses a `[CMD]` model, then open the tab from the **+** menu or the command palette. If neither offers it, quit and reopen the app after installing or updating.   |
 | Browser sign-in fails (v1)                         | Run `/connect` again and pick **Command Code API key** to paste one, or set `COMMANDCODE_API_KEY` and restart OpenCode.                                                                 |
 | `HTTP 404` on every request                        | Check `provider.commandcode.options.baseURL`. Set it to `https://api.commandcode.ai` — the plugin appends `/provider/v1/…` itself — or remove it.                                       |
 | `Your API key has expired`, but the key works      | A `401` now names the credential it used. If it says `legacy file ~/.commandcode/auth.json`, that login is stale — reconnect or set `COMMANDCODE_API_KEY`.                              |
