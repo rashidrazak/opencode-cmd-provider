@@ -8,9 +8,9 @@
 // `npm run refresh:snapshot`.
 
 export const FACTS_SOURCE_URL = "https://api.commandcode.ai/provider/v1/models?view=client"
-export const FACTS_CATALOG_VERSION = "b787063039eb4a47da76c74379dd177365b0ee57541e63a80b1ed316d8db36e8"
-export const FACTS_PACKAGE_VERSION = "1.88.5"
-export const FACTS_LAST_REFRESHED = "2026-11-11"
+export const FACTS_CATALOG_VERSION = "747dde904f9c5258e1af10594a1d7ea3f45e72e4e8930478f16f227dcceabd55"
+export const FACTS_PACKAGE_VERSION = "1.89.2"
+export const FACTS_LAST_REFRESHED = "2026-11-17"
 
 export const MODEL_EFFORTS: Readonly<Record<string, readonly string[]>> = {
   "claude-sonnet-5-5": ["low","medium","high","xhigh","max"],
@@ -51,6 +51,7 @@ export const MODEL_EFFORTS: Readonly<Record<string, readonly string[]>> = {
   "zai-org/GLM-5.2": ["high","max"],
   "minimax/minimax-m3.1-flash": ["low","medium","high","xhigh","max"],
   "MiniMaxAI/MiniMax-M3": ["low","medium","high"],
+  "Qwen/Qwen4-Max": ["low","high","xhigh"],
   "Qwen/Qwen3.8-Omni-Flash": ["low","medium","xhigh"],
   "Qwen/Qwen3.8-Max-Prime": ["low","medium","xhigh"],
   "Qwen/Qwen3.8-Max-0902": ["low","medium","xhigh"],
@@ -58,6 +59,7 @@ export const MODEL_EFFORTS: Readonly<Record<string, readonly string[]>> = {
   "Qwen/Qwen3.8-27B": ["low","medium","xhigh"],
   "Qwen/Qwen3.8-Flash": ["low","medium","xhigh"],
   "stepfun/Step-5-Preview": ["low","medium","high"],
+  "tencent/hy4-flash": ["high"],
   "tencent/hy4-preview": ["low","medium","high"],
   "google/gemini-4-carbon": ["low","medium","high"],
   "google/gemini-4-argon": ["low","medium","high"],
@@ -69,6 +71,7 @@ export const MODEL_EFFORTS: Readonly<Record<string, readonly string[]>> = {
   "google/gemini-3.1-flash-lite": ["low","medium","high"],
   "sakana/fugu-ultra": ["high","xhigh"],
   "nvidia/nemotron-3.5-super-vl": ["low","medium","high"],
+  "thinkingmachines/inkling-2-small:free": ["low","medium","high","max"],
   "stealth/glyph-cluster:free": ["low","medium","high","xhigh"],
   "inclusionai/ling-3.1-flash": ["low","medium","high"],
   "inclusionai/ling-3.1-flash-1019": ["low","medium","high"],
@@ -141,6 +144,7 @@ export const MODEL_COSTS: Readonly<
   "xiaomi/mimo-v2.6-pro": { input: 0.435, output: 0.87, cacheRead: 0.0036, cacheWrite: 0 },
   "xiaomi/mimo-v2.6-pro-ultraspeed": { input: 4.35, output: 8.7, cacheRead: 0.036, cacheWrite: 0 },
   "xiaomi/mimo-v2.6-flash": { input: 0.14, output: 0.28, cacheRead: 0.0028, cacheWrite: 0 },
+  "Qwen/Qwen4-Max": { input: 1.5, output: 4.5, cacheRead: 0.075, cacheWrite: 1.875 },
   "Qwen/Qwen3.8-Omni-Flash": { input: 0.15, output: 0.47, cacheRead: 0.016, cacheWrite: 0 },
   "Qwen/Qwen3.8-Max-Prime": { input: 4, output: 12, cacheRead: 0.5, cacheWrite: 5 },
   "Qwen/Qwen3.8-Max-0902": { input: 2, output: 6, cacheRead: 0.25, cacheWrite: 0 },
@@ -157,6 +161,7 @@ export const MODEL_COSTS: Readonly<
   "stepfun/Step-3.7-Flash": { input: 0.2, output: 1.15, cacheRead: 0.04, cacheWrite: 0 },
   "stepfun/Step-3.5-Flash": { input: 0.09, output: 0.3, cacheRead: 0.02, cacheWrite: 0 },
   "tencent/hy3-paid": { input: 0.14, output: 0.58, cacheRead: 0.035, cacheWrite: 0 },
+  "tencent/hy4-flash": { input: 0.07, output: 0.281, cacheRead: 0.003, cacheWrite: 0 },
   "tencent/hy4-preview": { input: 0.834, output: 2.501, cacheRead: 0.042, cacheWrite: 0 },
   "google/gemini-4-carbon": { input: 2, output: 10, cacheRead: 0.1, cacheWrite: 0 },
   "google/gemini-4-argon": { input: 2, output: 10, cacheRead: 0.1, cacheWrite: 0 },
@@ -171,6 +176,8 @@ export const MODEL_COSTS: Readonly<
   "nvidia/nemotron-3.5-super-vl": { input: 0.2, output: 0.5, cacheRead: 0.04, cacheWrite: 0 },
   "thinkingmachines/inkling": { input: 1, output: 4.05, cacheRead: 0.17, cacheWrite: 0 },
   "thinkingmachines/inkling-small": { input: 0.5, output: 1.2, cacheRead: 0.1, cacheWrite: 0 },
+  "thinkingmachines/inkling-2-small:free": { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+  "recursive/flint-v1.0:free": { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
   "stealth/glyph-cluster:free": { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
   "inclusionai/ling-3.1-flash": { input: 0.3, output: 0.9, cacheRead: 0.06, cacheWrite: 0 },
   "inclusionai/ling-3.1-flash-1019": { input: 0.3, output: 0.9, cacheRead: 0.06, cacheWrite: 0 },
@@ -233,6 +240,7 @@ export const MODEL_INPUT_MODALITIES: Readonly<
   "xiaomi/mimo-v2.6-pro": ["text","image"],
   "xiaomi/mimo-v2.6-pro-ultraspeed": ["text","image"],
   "xiaomi/mimo-v2.6-flash": ["text","image"],
+  "Qwen/Qwen4-Max": ["text","image"],
   "Qwen/Qwen3.8-Omni-Flash": ["text","image"],
   "Qwen/Qwen3.8-Max-Prime": ["text","image"],
   "Qwen/Qwen3.8-Max-0902": ["text","image"],
@@ -244,6 +252,7 @@ export const MODEL_INPUT_MODALITIES: Readonly<
   "Qwen/Qwen3.6-Plus": ["text","image"],
   "stepfun/Step-5-Preview": ["text","image"],
   "stepfun/Step-3.7-Flash": ["text","image"],
+  "tencent/hy4-flash": ["text","image"],
   "google/gemini-4-carbon": ["text","image"],
   "google/gemini-4-argon": ["text","image"],
   "google/gemini-3.8-flash": ["text","image"],
@@ -256,6 +265,7 @@ export const MODEL_INPUT_MODALITIES: Readonly<
   "nvidia/nemotron-3.5-super-vl": ["text","image"],
   "thinkingmachines/inkling": ["text","image"],
   "thinkingmachines/inkling-small": ["text","image"],
+  "thinkingmachines/inkling-2-small:free": ["text","image"],
   "meta/muse-spark-1.1": ["text","image"],
   "meta/muse-spark-1.2": ["text","image"],
   "meta/muse-spark-1.2-contributor": ["text","image"],

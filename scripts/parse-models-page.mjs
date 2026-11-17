@@ -21,11 +21,12 @@
 // through the existing peak/off-peak and over-context fields (no second band
 // parser is built — the bands stay in the RSC path, issue #129).
 //
-// Cell grammar (verified against the live page 2026-09-28; upstream
-// dropped the Tok/s column between the 2026-09-26 and 2026-09-28 captures —
-// the table is 8 cells now, everything after Intelligence shifted one left):
-//   - header: Model | Context | Intelligence | Input | Output |
-//     Cache read | Cache write | Caps
+// Cell grammar (verified against the live page 2026-11-18; upstream
+// dropped the Tok/s column between the 2026-09-26 and 2026-09-28 captures,
+// then the Intelligence column by 2026-11-18 — the table is 7 cells now,
+// with the rates and Caps one left of the 8-cell layout):
+//   - header: Model | Context | Input | Output | Cache read | Cache write |
+//     Caps
 //   - name cell: `<a href="/models/<slug>">Name</a>` — extract the clean
 //     display name from the link text ONLY (discount badges, off-peak
 //     notes and deal markers live in sibling elements of the cell and are
@@ -152,9 +153,9 @@ export function parseModelsPage(html) {
         `could not parse models page: a row after the header has no model link (${cleanText(nameCell).slice(0, 60) || "<empty name cell>"})`,
       )
     }
-    if (cells.length < 8) {
+    if (cells.length < 7) {
       throw new Error(
-        `could not parse models page: row for "${cleanText(nameCell).slice(0, 60)}" has ${cells.length} cells, expected 8`,
+        `could not parse models page: row for "${cleanText(nameCell).slice(0, 60)}" has ${cells.length} cells, expected 7`,
       )
     }
     const slug = href[1]
@@ -162,7 +163,7 @@ export function parseModelsPage(html) {
     const name = link ? cleanText(link[1]) : cleanText(nameCell)
     const contextRaw = cleanText(cells[1])
     const context = contextRaw === "—" || contextRaw === "-" ? null : contextRaw
-    const capsLabel = cells[7].match(/aria-label="([^"]+)"/)?.[1]
+    const capsLabel = cells[6].match(/aria-label="([^"]+)"/)?.[1]
     if (!capsLabel) {
       throw new Error(`could not parse models page: row ${name} has no caps aria-label`)
     }
@@ -171,10 +172,10 @@ export function parseModelsPage(html) {
     const crossed = { input: null, output: null }
     let banded = false
     const COLUMNS = [
-      [3, "input"],
-      [4, "output"],
-      [5, "cacheRead"],
-      [6, "cacheWrite"],
+      [2, "input"],
+      [3, "output"],
+      [4, "cacheRead"],
+      [5, "cacheWrite"],
     ]
     for (const [index, key] of COLUMNS) {
       const parsed = parseRateCell(cells[index])
@@ -185,10 +186,10 @@ export function parseModelsPage(html) {
     }
     if (banded) {
       const bandLabel =
+        cells[2].match(/aria-label="([^"]*context price bands)"/)?.[1] ??
         cells[3].match(/aria-label="([^"]*context price bands)"/)?.[1] ??
         cells[4].match(/aria-label="([^"]*context price bands)"/)?.[1] ??
-        cells[5].match(/aria-label="([^"]*context price bands)"/)?.[1] ??
-        cells[6].match(/aria-label="([^"]*context price bands)"/)?.[1]
+        cells[5].match(/aria-label="([^"]*context price bands)"/)?.[1]
       notes.push(
         `models-page: ${name} — banded pricing (${bandLabel ?? "footnote marker"}); base rate shipped, verify against RSC peak/off-peak and over-context fields`,
       )
