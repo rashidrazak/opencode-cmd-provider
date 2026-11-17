@@ -1,16 +1,123 @@
-## Unreleased
+## 2.4.0 - 2026-11-18
 
-### Added
+**Highlight — the Rates & usage panel comes to the OpenCode desktop app.** A
+session running a `[CMD]` model in the desktop app now has a **Command Code**
+side-panel tab with the same allowances, rates, deals and live usage as the
+terminal sidebar
+([#346](https://github.com/rashidrazak/opencode-cmd-provider/pull/346),
+ADR-0025). Thanks to [@EthanBlazkowicz](https://github.com/EthanBlazkowicz)
+for contributing the desktop support. The release also lands the 2026-11-17
+catalog refresh: four new models and a larger GLM-5.3 allowance.
 
-- **OpenCode desktop support** (ADR-0025): the plugin now ships a
-  `./gui-experimental` export — one prebuilt CommonJS bundle
-  (`dist/gui-experimental.cjs`) the OpenCode desktop app evaluates in every
-  window. It contributes the **Command Code** side-panel tab (the same five
-  Rates & usage segments as the TUI sidebar, including live usage over the
-  existing plugin-RPC bridge), a **Show Command Code rates and usage** palette
-  command, a **+**-menu launcher, and the panel's stylesheet. The desktop tab
-  renders the fixed default segment layout; the `/cmd-rates-usage` dialog
-  remains the terminal-side way to shape the sidebar.
+### Features
+
+- **Command Code tab in the OpenCode desktop app**
+  ([#346](https://github.com/rashidrazak/opencode-cmd-provider/pull/346)):
+  the package ships a fourth entry, `./gui-experimental` — one prebuilt
+  CommonJS bundle (`dist/gui-experimental.cjs`) that every desktop window
+  evaluates. It adds the **Command Code** side-panel tab (the same five
+  Rates & usage segments as the TUI sidebar, with live usage over the
+  existing plugin-RPC bridge, refreshed after each completed turn and on
+  demand from the panel header), a **Show Command Code rates and usage**
+  palette command, a **+**-menu launcher, and the panel's stylesheet, themed
+  with the app's own tokens. The usage fetch runs in the plugin's server
+  half against the session's own server, so the window never handles your
+  key. The desktop tab renders the fixed default segment layout; the
+  `/cmd-rates-usage` dialog remains the terminal-side way to shape the
+  sidebar. Nothing changes for OpenCode v1, the v2 CLI or the TUI.
+
+### Fixes
+
+- **Desktop app 2.3.0 compatibility and launcher gating**
+  ([#346](https://github.com/rashidrazak/opencode-cmd-provider/pull/346)):
+  desktop 2.3.0 keys its model catalog per location, so the panel now looks
+  the session's model up by the routed session's location — without it every
+  catalog row read `N/A`. The palette command and the **+** menu item are
+  offered only while the session's selected model is a Command Code one.
+- **Catalog refresh reads the 7-column models page**
+  ([#350](https://github.com/rashidrazak/opencode-cmd-provider/pull/350)):
+  Command Code dropped the Intelligence column from its models page, and the
+  parser's shape gate stopped the refresh on the first row. The grammar now
+  expects 7 cells, with the rate, band and caps lookups re-indexed. The
+  parser never read that column — intelligence scores still come from the
+  pricing pages — so no catalog value changes.
+
+### Dependencies
+
+- **Every dependency raised as far as upstream pins allow**
+  ([#349](https://github.com/rashidrazak/opencode-cmd-provider/pull/349)):
+  `@opentui/core` and `@opentui/solid` 0.8 → 0.9, `@ai-sdk/provider` 4.0.38,
+  `solid-js` 1.9.19, plus `secretlint` 14 and the other dev tools. `zod`
+  stays at 4.1.8 (`@opencode-ai/plugin` still depends on it exactly) and
+  `solid-js` stays on 1.x (`@opentui/solid` 0.9 still peer-requires it).
+  `vite` 8 and `vite-plugin-solid` are new dev dependencies that build the
+  desktop bundle.
+
+### Documentation
+
+- **README**: the desktop app gets its own install note, a section on
+  opening the **Command Code** tab, update and uninstall steps, and a
+  troubleshooting row for a missing tab.
+
+### Model catalog
+
+## Model catalog
+
+- **FACTS_LAST_REFRESHED**: `2026-11-11` → `2026-11-17`
+
+| Model                                   | Change | Before | After                           |
+| --------------------------------------- | ------ | ------ | ------------------------------- |
+| `Qwen/Qwen4-Max`                        | added  | —      | Qwen 4 Max · 1000000 ctx        |
+| `recursive/flint-v1.0:free`             | added  | —      | Flint · 262144 ctx              |
+| `tencent/hy4-flash`                     | added  | —      | Tencent Hy4 Flash · 1024000 ctx |
+| `thinkingmachines/inkling-2-small:free` | added  | —      | Inkling 2 Small · 1048576 ctx   |
+
+### API divergence
+
+- Listing API agrees with the shipped catalog
+
+### Pinned slug map (13)
+
+- `beam-free` → `reflection/beam:free`: pinned id is not in the Snapshot (upstream renamed it; re-pin the map)
+- `laguna-s-2-1-free` → `poolside/laguna-s-2.1-free`: pinned id is not in the Snapshot (upstream renamed it; re-pin the map)
+- `claude-fable-5-2`: models-page slug not in the pinned map (docs-ahead; page evidence skipped)
+- `deepseek-v4-1-flash-ultrafast`: models-page slug not in the pinned map (docs-ahead; page evidence skipped)
+- `flint-v1-0-free`: models-page slug not in the pinned map (docs-ahead; page evidence skipped)
+- `gemini-4-carbon`: models-page slug not in the pinned map (docs-ahead; page evidence skipped)
+- `hy4-flash`: models-page slug not in the pinned map (docs-ahead; page evidence skipped)
+- `inkling-2-small-free`: models-page slug not in the pinned map (docs-ahead; page evidence skipped)
+- `jev`: models-page slug not in the pinned map (docs-ahead; page evidence skipped)
+- `jev-1-14-0`: models-page slug not in the pinned map (docs-ahead; page evidence skipped)
+- `ling-3-1-flash-1019`: models-page slug not in the pinned map (docs-ahead; page evidence skipped)
+- `muse-ember`: models-page slug not in the pinned map (docs-ahead; page evidence skipped)
+- `qwen4-max`: models-page slug not in the pinned map (docs-ahead; page evidence skipped)
+
+### Reasoning classification
+
+## Reasoning classification
+
+- **CLASSIFICATION_LAST_REFRESHED**: `2026-11-11` → `2026-11-17`
+
+| Model                                   | Change | Before | After                                  |
+| --------------------------------------- | ------ | ------ | -------------------------------------- |
+| `Qwen/Qwen4-Max`                        | new    | —      | efforts model (low, high, xhigh)       |
+| `recursive/flint-v1.0:free`             | new    | —      | reasoning-without-efforts              |
+| `tencent/hy4-flash`                     | new    | —      | efforts model (high)                   |
+| `thinkingmachines/inkling-2-small:free` | new    | —      | efforts model (low, medium, high, max) |
+
+### Deals catalog
+
+## Deals catalog
+
+- **DEAL_LAST_REFRESHED**: `2026-11-11` → `2026-11-17`
+
+| Model                                   | Change    | Before            | After             |
+| --------------------------------------- | --------- | ----------------- | ----------------- |
+| `Qwen/Qwen4-Max`                        | added     | —                 | opensource        |
+| `recursive/flint-v1.0:free`             | added     | —                 | opensource (free) |
+| `tencent/hy4-flash`                     | added     | —                 | opensource        |
+| `thinkingmachines/inkling-2-small:free` | added     | —                 | opensource (free) |
+| `zai-org/GLM-5.3`                       | allowance | goat: 20, pro: 30 | goat: 70, pro: 80 |
 
 ## 2.3.6 - 2026-11-11
 
