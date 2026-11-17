@@ -480,11 +480,13 @@ run([
       for (const needle of [
         `data.on("session.idle"`,
         `data.on("session.execution.succeeded"`,
-        "createKeyed(",
         "turnCompleted()",
       ]) {
         assert(code.includes(needle), `the bundle must contain ${needle}`)
       }
+      // A call either way the bundler emits it: a bare `createKeyed(` or the
+      // CommonJS interop form `(0, <ns>.createKeyed)(` (vite 8 / rolldown).
+      assert(/createKeyed\)?\(/.test(code), "the bundle must call createKeyed")
     },
   ],
 ])
