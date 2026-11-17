@@ -125,14 +125,18 @@ export const MODEL_DEALS: Readonly<Record<string, ModelDeals>> = {
   "Qwen/Qwen3.8-Max-0902": { tier: "opensource", benchmark: {"intelligence":45.4}, free: false, allowance: {"goat":20,"pro":30} },
   "Qwen/Qwen3.8-Max-Prime": { tier: "opensource", free: false, allowance: {"goat":20,"pro":30} },
   "Qwen/Qwen3.8-Omni-Flash": { tier: "opensource", free: false, allowance: {"goat":20,"pro":30} },
+  "Qwen/Qwen4-Max": { tier: "opensource", free: false, allowance: {"goat":15,"pro":25} },
+  "recursive/flint-v1.0:free": { tier: "opensource", free: true },
   "sakana/fugu-ultra": { tier: "premium", free: false, allowance: {"goat":20,"pro":20} },
   "stealth/glyph-cluster:free": { tier: "opensource", free: true },
   "stepfun/Step-3.5-Flash": { tier: "opensource", benchmark: {"intelligence":17}, free: false, allowance: {"goat":20,"pro":30} },
   "stepfun/Step-3.7-Flash": { tier: "opensource", benchmark: {"intelligence":19.5}, free: false, allowance: {"goat":20,"pro":30} },
   "stepfun/Step-5-Preview": { tier: "opensource", benchmark: {"intelligence":43.7}, free: false, allowance: {"goat":20,"pro":30} },
   "tencent/hy3-paid": { tier: "opensource", benchmark: {"intelligence":25.3}, free: false, allowance: {"goat":70,"pro":80} },
+  "tencent/hy4-flash": { tier: "opensource", free: false, allowance: {"goat":15,"pro":25} },
   "tencent/hy4-preview": { tier: "opensource", free: false, allowance: {"goat":20,"pro":30} },
   "thinkingmachines/inkling": { tier: "opensource", benchmark: {"intelligence":25}, free: false, allowance: {"goat":20,"pro":30} },
+  "thinkingmachines/inkling-2-small:free": { tier: "opensource", free: true },
   "thinkingmachines/inkling-small": { tier: "opensource", benchmark: {"intelligence":25.7}, free: false, allowance: {"goat":20,"pro":30} },
   "xai/grok-4.5": { tier: "opensource", benchmark: {"intelligence":38.8}, free: false, allowance: {"goat":20,"pro":30} },
   "xai/grok-4.6": { tier: "opensource", benchmark: {"intelligence":44.3}, contextTiers: [{"label":"Standard","context":"≤ 200K","rates":{"input":2,"output":6,"cacheRead":0.5,"cacheWrite":0}},{"label":"Long context","context":"> 200K","rates":{"input":4,"output":12,"cacheRead":1,"cacheWrite":0}}], free: false, allowance: {"goat":20,"pro":30} },
@@ -146,7 +150,7 @@ export const MODEL_DEALS: Readonly<Record<string, ModelDeals>> = {
   "zai-org/GLM-5.1": { tier: "opensource", benchmark: {"intelligence":26.1}, free: false, allowance: {"goat":20,"pro":30} },
   "zai-org/GLM-5.2": { tier: "opensource", benchmark: {"intelligence":33.7}, free: false, allowance: {"goat":70,"pro":80} },
   "zai-org/GLM-5.2-Fast": { tier: "opensource", free: false, allowance: {"goat":20,"pro":30} },
-  "zai-org/GLM-5.3": { tier: "opensource", benchmark: {"intelligence":44.8}, free: false, allowance: {"goat":20,"pro":30} },
+  "zai-org/GLM-5.3": { tier: "opensource", benchmark: {"intelligence":44.8}, free: false, allowance: {"goat":70,"pro":80} },
 }
 
 export const PLAN_CATALOG: Readonly<Record<PlanId, PlanInfo>> = {
@@ -170,5 +174,5 @@ export const PLAN_CATALOG: Readonly<Record<PlanId, PlanInfo>> = {
 }
 
 export const DEAL_SOURCE_URL = "https://commandcode.ai/docs/resources/pricing-limits"
-export const DEAL_LAST_REFRESHED = "2026-11-11"
+export const DEAL_LAST_REFRESHED = "2026-11-17"
 export const DEAL_PACKAGE_VERSION = "docs"
