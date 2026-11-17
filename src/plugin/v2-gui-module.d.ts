@@ -1,7 +1,8 @@
 // src/plugin/v2-gui-module.d.ts — the OpenCode v2 desktop GUI SDK, mirrored
 // structurally (ADR-0010's mirror rule, now for the third host): the shapes of
 // `@opencode/plugin/gui` the Rates & usage GUI half (src/rates-usage/gui/)
-// consumes, as shipped by the desktop app this release targets (2.2.7).
+// consumes, as shipped by the desktop app this release targets (2.2.7), plus
+// the 2.3.0 store's optional per-location model ref verified live.
 //
 // The package is deliberately NOT a dependency of this repo:
 // tests/dependency-pins.test.ts fails the tree when an installed package states
@@ -73,10 +74,17 @@ declare module "@opencode/plugin/gui" {
     readonly cost?: readonly ModelCost[]
   }
 
+  /** One location's identity: the model catalog is stored per location. */
+  export interface LocationRef {
+    readonly directory: string
+    readonly workspaceID?: string
+  }
+
   /** One desktop session record: the panel reads its selected model. */
   export interface SessionInfo {
     readonly id: string
     readonly model?: { readonly id: string; readonly providerID: string }
+    readonly location?: LocationRef
   }
 
   /**
@@ -87,7 +95,9 @@ declare module "@opencode/plugin/gui" {
    */
   export interface Data {
     readonly session: { get(sessionID: string): SessionInfo | undefined }
-    readonly location: { readonly model: { list(): readonly ModelInfo[] | undefined } }
+    readonly location: {
+      readonly model: { list(ref?: LocationRef): readonly ModelInfo[] | undefined }
+    }
     on(type: string, handler: (event: { data: { sessionID: string } }) => void): () => void
   }
 

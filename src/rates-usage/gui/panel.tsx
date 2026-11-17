@@ -32,7 +32,7 @@ import {
   type MountedSession,
   type PanelTab,
 } from "@opencode/plugin/gui"
-import { v2ModelFor, type V2PanelModel } from "../panel-rows.js"
+import { v2ModelFor, type V2ModelLocation, type V2PanelModel } from "../panel-rows.js"
 import { createUsagePanel, type UsageLoadRequest, type UsagePanelState } from "../usage-panel.js"
 import { createUsageRpcLoader } from "../usage-rpc-client.js"
 import { globalUsageCache } from "../usage-cache.js"
@@ -57,15 +57,33 @@ const TAB: PanelTab = { id: PANEL_TAB_ID, title: PANEL_TITLE }
  * The panel's visibility gate, shared by `list` and the render: the mounted
  * session's selected model must be a Command Code one. Resolution goes through
  * `v2ModelFor`, the same lookup the v2 TUI sidebar uses — the desktop data
- * store's model records carry the same `settings.cmd` enrichment payload.
+ * store's model records carry the same `settings.cmd` enrichment payload. The
+ * desktop store keys its catalog per location (2.3.0's `list(ref)` returns
+ * undefined without one), so the routed session's location is passed
+ * explicitly; the TUI's store defaults to the current location.
  */
 export function guiModelFor(session: MountedSession): V2PanelModel | undefined {
-  return v2ModelFor(session.server.data, session.id)
+  const data = session.server.data
+  const location: V2ModelLocation = data.session.get(session.id)?.location ?? {
+    directory: session.directory,
+  }
+  return v2ModelFor(data, session.id, location)
 }
 
-/** Opens the panel for the session on screen; a no-op on Home or a draft. */
-export function openRatesUsagePanel(ctx: Context): void {
+/**
+ * The routed session when its selected model is a Command Code one. The
+ * launchers and `openRatesUsagePanel` use the same gate as `Panel.list`, so the
+ * tab, the palette command and the + menu item appear and disappear together;
+ * Home, a draft and another provider's session have no launcher.
+ */
+function currentCommandCodeSession(ctx: Context): MountedSession | undefined {
   const session = ctx.sessions.current()
+  return session !== undefined && guiModelFor(session) !== undefined ? session : undefined
+}
+
+/** Opens the panel for a Command Code session; a no-op everywhere else. */
+export function openRatesUsagePanel(ctx: Context): void {
+  const session = currentCommandCodeSession(ctx)
   if (session === undefined) return
   ctx.layout.open(`${ctx.id}:${PANEL_TAB_ID}`, session)
 }
@@ -118,7 +136,7 @@ function SessionRatesUsage(props: {
   // Model resolution is reactive on both inputs (the session record and the
   // catalog), so a mid-session model switch re-renders without a remount —
   // exactly the TUI's behaviour.
-  const model = createMemo(() => v2ModelFor(props.session().server.data, props.session().id))
+  const model = createMemo(() => guiModelFor(props.session()))
   const views = createMemo(() => guiPanelRows(model(), usage(), now()))
 
   // ADR-0020 rule 3: the loader is built per chain, so the session's server
@@ -215,27 +233,42 @@ export function registerRatesUsageStyle(ctx: Context): void {
  * slash semantics are ambiguous (a plain prompt can be meant), unlike the TUI
  * where the slash entry exists because terminal multiplexers capture the
  * palette key. The command id publishes as `${ctx.id}.rates-usage`.
+ *
+ * The contribution is reactive: the host re-runs it when the routed session or
+ * its selected model changes, and withdrawing the item (undefined) keeps the
+ * palette from offering a command that cannot open anything.
  */
 export function registerRatesUsageCommand(ctx: Context): void {
-  ctx.add(Command, {
-    id: PANEL_TAB_ID,
-    title: "Show Command Code rates and usage",
-    keywords: "rates usage allowance tier deal command code",
-    group: "Command Code",
-    section: "session",
-    run: () => openRatesUsagePanel(ctx),
+  ctx.add(Command, (): Command | undefined => {
+    if (currentCommandCodeSession(ctx) === undefined) return undefined
+    return {
+      id: PANEL_TAB_ID,
+      title: "Show Command Code rates and usage",
+      keywords: "rates usage allowance tier deal command code",
+      group: "Command Code",
+      section: "session",
+      run: () => openRatesUsagePanel(ctx),
+    }
   })
 }
 
-/** Contributes the + menu launcher, with the command's shortcut if bound. */
+/**
+ * Contributes the + menu launcher, with the command's shortcut if bound. Like
+ * the palette command, it exists only while the routed session is a Command
+ * Code one — `MenuItem` has no `enabled` flag, so the reactive contribution is
+ * what withdraws it.
+ */
 export function registerRatesUsageMenuItem(ctx: Context): void {
-  ctx.add(MenuItem, {
-    menu: "session.panel",
-    id: PANEL_TAB_ID,
-    title: PANEL_TITLE,
-    icon: "status",
-    keybind: `${ctx.id}.${PANEL_TAB_ID}`,
-    run: () => openRatesUsagePanel(ctx),
+  ctx.add(MenuItem, (): MenuItem | undefined => {
+    if (currentCommandCodeSession(ctx) === undefined) return undefined
+    return {
+      menu: "session.panel",
+      id: PANEL_TAB_ID,
+      title: PANEL_TITLE,
+      icon: "status",
+      keybind: `${ctx.id}.${PANEL_TAB_ID}`,
+      run: () => openRatesUsagePanel(ctx),
+    }
   })
 }
 

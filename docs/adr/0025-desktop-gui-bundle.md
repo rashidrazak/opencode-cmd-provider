@@ -67,7 +67,10 @@ Three constraints shaped the decision:
 - The panel is one side-region tab ("Command Code"), listed only while the
   routed session's selected model is a Command Code one (the same
   `v2ModelFor` gate as the v2 TUI, reading the desktop data store's
-  `session.get(id)?.model` against `location.model.list()`). The tab object is
+  `session.get(id)?.model` against `location.model.list(location)`). The
+  location argument matters: desktop 2.3.0 keys its model catalog per location
+  and returns nothing from `list()` without the routed session's location ref
+  (the 2.2.7 store defaulted to the current location). The tab object is
   a module-level constant, as `Panel.list` requires. No `pinned` tab, no
   mobile view, no slash command (slash semantics in the desktop composer are
   ambiguous), no `main` process entry.
@@ -102,6 +105,16 @@ Three constraints shaped the decision:
   equips with a literal `gui-experimental.cjs` file — a re-export wrapper
   cannot work there, since the window's require only serves shared modules)
   reports the same.
+- Live, against the desktop app 2.3.0 in an isolated HOME/XDG sandbox (the
+  app's service on a separate port, the local dev directory configured): the
+  panel renders the selected model's tier, allowance and context-band rates.
+  Its model lookup passes the routed session's location, which 2.3.0's
+  per-location catalog requires; without it every catalog row read `N/A`.
+  The palette command and `+` menu item are withdrawn in an `openai` session
+  and return when the session switches back to a `[CMD]` model. The sandbox's
+  copied Command Code credential was expired, so the usage segment correctly
+  rendered its `unavailable` line; the catalog rows are the render-path
+  evidence.
 
 ## Consequences
 
@@ -113,9 +126,10 @@ Three constraints shaped the decision:
 - The GUI bundle is a generated artifact readers should treat like `dist/`:
   unminified and greppable so the contract tests can scan it as text.
 - The desktop SDK is pinned informally to 2.2.7 (the release this was built
-  against); when the SDK moves, the mirror in `src/plugin/v2-gui-module.d.ts`
-  fails the GUI type-check at the moved call sites — the same loud failure the
-  other host mirrors give.
+  against). The mirror in `src/plugin/v2-gui-module.d.ts` is the contract:
+  when the host SDK moves, update the mirror deliberately, and the GUI program
+  fails the type-check at any call site whose new shape it no longer admits —
+  the same loud failure the other host mirrors give.
 - Deferred until constraint 3 lifts: persisted sidebar layout and the
   segment-settings dialog on the desktop (the TUI's `/cmd-rates-usage`
   remains the way to shape the sidebar).

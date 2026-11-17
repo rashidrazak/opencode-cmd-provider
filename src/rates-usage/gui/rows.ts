@@ -18,9 +18,6 @@ import {
 } from "../panel-rows.js"
 import { defaultLayout } from "../segments.js"
 import type { UsagePanelState } from "../usage-panel.js"
-import { RATES_USAGE_COMPONENT_NAME } from "./styles.js"
-
-export { RATES_USAGE_COMPONENT_NAME }
 
 /**
  * One row as the DOM renders it. `gap` is the blank line between segments;

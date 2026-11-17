@@ -374,12 +374,22 @@ export function selectedCommandCodeModel(
   )
 }
 
+/** One location's identity: the model catalog is stored per location. */
+export interface V2ModelLocation {
+  readonly directory: string
+  readonly workspaceID?: string
+}
+
 /** The v2 data slice this lookup needs — session records and the model catalog. */
 export interface V2ModelLookup {
   readonly session: {
     get(sessionID: string): { model?: { id: string; providerID: string } } | undefined
   }
-  readonly location: { readonly model: { list(): readonly V2ModelCandidate[] | undefined } }
+  readonly location: {
+    readonly model: {
+      list(location?: V2ModelLocation): readonly V2ModelCandidate[] | undefined
+    }
+  }
 }
 
 /**
@@ -389,9 +399,21 @@ export interface V2ModelLookup {
  * Code selection resolves to undefined (panel hidden); a Command Code model
  * missing from the catalog falls back to an empty record, so the panel renders
  * the full all-N/A row set.
+ *
+ * `location` (where the host's store keys its catalog) is optional because the
+ * TUI's store lists the session's location by default; the desktop store needs
+ * the routed session's location passed explicitly (2.3.0's `location.model.list(ref)`
+ * returns undefined without one).
  */
-export function v2ModelFor(data: V2ModelLookup, sessionID: string): V2PanelModel | undefined {
-  return selectedCommandCodeModel(data.session.get(sessionID)?.model, data.location.model.list())
+export function v2ModelFor(
+  data: V2ModelLookup,
+  sessionID: string,
+  location?: V2ModelLocation,
+): V2PanelModel | undefined {
+  return selectedCommandCodeModel(
+    data.session.get(sessionID)?.model,
+    data.location.model.list(location),
+  )
 }
 
 /**

@@ -240,6 +240,10 @@ run([
           ...process.env,
           COMMANDCODE_RSC_GOAT_URL: `${mock.url}/docs/plans/goat`,
           COMMANDCODE_RSC_PRO_URL: `${mock.url}/docs/plans/pro`,
+          // Page evidence is irrelevant to this RSC shape gate; keep the run
+          // off the live models page (a 404 means no page evidence), so an
+          // upstream page change cannot decide this test's outcome.
+          COMMANDCODE_MODELS_PAGE_URL: `${mock.url}/models-page.html`,
         })
         assert(result.status !== 0, `expected non-zero exit, got ${result.status}`)
         assert(

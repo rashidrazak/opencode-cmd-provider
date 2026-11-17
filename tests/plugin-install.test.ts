@@ -97,9 +97,9 @@ run([
     },
   ],
   [
-    "published artifact would contain both server and tui (npm pack dry-run)",
+    "published artifact would contain server, tui and gui (npm pack dry-run)",
     () => {
-      // Validate via npm pack --dry-run that dist/tui.js is included.
+      // Validate via npm pack --dry-run that the three host bundles are included.
       // `npm pack` writes scratch files into the npm cache, so point it at a
       // throwaway one: the assertion is about the packed file list, and a
       // read-only or shared ambient cache must not turn that into a failure.
@@ -112,6 +112,10 @@ run([
       const out = (packed.stdout || "") + (packed.stderr || "")
       assert(out.includes("dist/tui.js"), "npm pack must include dist/tui.js")
       assert(out.includes("dist/index.js"), "npm pack must include dist/index.js")
+      assert(
+        out.includes("dist/gui-experimental.cjs"),
+        "npm pack must include dist/gui-experimental.cjs",
+      )
     },
   ],
   [

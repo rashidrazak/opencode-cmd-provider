@@ -103,8 +103,11 @@ function createFakeCtx(current: unknown = undefined): FakeCtx {
 /** The session's server data slice: one Command Code selection, one catalog. */
 function createData(model: { id: string; providerID: string } | undefined, providerID: string) {
   const subscriptions: Array<{ type: string; handler: (event: unknown) => void }> = []
+  /** The location refs the panel asks the catalog for (2.3.0 keys the list). */
+  const listCalls: Array<{ directory?: string; workspaceID?: string }> = []
   return {
     subscriptions,
+    listCalls,
     data: {
       // Answers only the session this store was built for — a store's
       // `session.get` is keyed by id, and a wrong id has no record.
@@ -112,7 +115,19 @@ function createData(model: { id: string; providerID: string } | undefined, provi
         get: (sessionID: string) =>
           sessionID === "s1" && model !== undefined ? { id: sessionID, model } : undefined,
       },
-      location: { model: { list: () => [{ id: "glm-5", providerID, settings: {}, cost: [] }] } },
+      location: {
+        model: {
+          // The desktop store (2.3.0) lists a catalog per location; without a
+          // ref it has no location to answer for. This fake enforces that so a
+          // no-argument `list()` shows up as an empty panel instead of passing.
+          list: (ref?: { directory?: string; workspaceID?: string }) => {
+            listCalls.push(ref ?? {})
+            return ref === undefined
+              ? undefined
+              : [{ id: "glm-5", providerID, settings: {}, cost: [] }]
+          },
+        },
+      },
       on: (type: string, handler: (event: unknown) => void) => {
         subscriptions.push({ type, handler })
         return () => {
@@ -124,17 +139,21 @@ function createData(model: { id: string; providerID: string } | undefined, provi
   }
 }
 
+const SESSION_DIRECTORY = "/tmp/opencode/desktop-test/project"
+
 function createSession(model: { id: string; providerID: string } | undefined, providerID: string) {
-  const { data, subscriptions } = createData(model, providerID)
+  const { data, subscriptions, listCalls } = createData(model, providerID)
   return {
     session: {
       key: `srv\ns1`,
       id: "s1",
       tab: "t1",
       pending: false,
+      directory: SESSION_DIRECTORY,
       server: { id: "srv", name: "srv", client: {}, data },
     },
     subscriptions,
+    listCalls,
   }
 }
 
@@ -158,6 +177,19 @@ function evaluateBundle() {
 
 function added(ctx: FakeCtx, id: string): RecordedAdd | undefined {
   return ctx.adds.find((entry) => entry.registry.id === id)
+}
+
+/**
+ * Resolves a contribution the way the host does: a function item is re-run
+ * against the live context (and may withdraw itself by returning undefined); a
+ * fixed item is returned as-is.
+ */
+function resolveAdded<T>(ctx: FakeCtx, id: string): T | undefined {
+  const entry = added(ctx, id)
+  if (entry === undefined) return undefined
+  const item = entry.item
+  return (typeof item === "function" ? (item as () => T | undefined)() : (item as T)) as
+    T | undefined
 }
 
 run([
@@ -307,6 +339,14 @@ run([
       assertEqual(listed.length, 1, "a Command Code selection lists the tab")
       assertEqual(listed[0]?.id, "rates-usage")
       assertEqual(listed[0]?.title, "Command Code")
+      // The desktop store keys its model catalog by location (2.3.0's
+      // `list(ref)` returns undefined without one), so the panel must ask for
+      // the routed session's location rather than the store's default.
+      assertEqual(
+        cmd.listCalls[0]?.directory,
+        SESSION_DIRECTORY,
+        "the panel must pass the session's location to the model catalog",
+      )
       // Same object on every listing — the host re-renders the label on a new one.
       assertEqual(
         panel.list({ session: cmd.session, screen: {}, open: [] })[0],
@@ -329,25 +369,28 @@ run([
       const { session } = createSession({ id: "glm-5", providerID: "commandcode" }, "commandcode")
       const ctx = createFakeCtx(session)
       ;(definition as { setup: (ctx: unknown) => void }).setup(ctx)
-      const command = added(ctx, "gui.command")?.item as {
+      const command = resolveAdded<{
         id: string
         title: string
         slash?: unknown
         run: () => void
-      }
+      }>(ctx, "gui.command")
+      if (command === undefined)
+        throw new Error("the command must be contributed for a CMD session")
       assertEqual(command.id, "rates-usage")
       assertEqual(command.slash, undefined, "the GUI command must not offer a slash command")
       command.run()
       assertEqual(ctx.opened.length, 1)
       assertEqual(ctx.opened[0]?.key, "commandcode:rates-usage")
       assertEqual(ctx.opened[0]?.session, session)
-      const item = added(ctx, "gui.menu-item")?.item as {
+      const item = resolveAdded<{
         menu: string
         id: string
         title: string
         keybind: string
         run: () => void
-      }
+      }>(ctx, "gui.menu-item")
+      if (item === undefined) throw new Error("the menu item must be contributed for a CMD session")
       assertEqual(item.menu, "session.panel")
       assertEqual(item.id, "rates-usage")
       assertEqual(item.title, "Command Code")
@@ -355,6 +398,44 @@ run([
       item.run()
       assertEqual(ctx.opened.length, 2)
       assertEqual(ctx.opened[1]?.key, "commandcode:rates-usage")
+    },
+  ],
+  [
+    "bundle: launchers are withdrawn outside Command Code sessions",
+    () => {
+      const { definition } = evaluateBundle()
+      const cmd = createSession({ id: "glm-5", providerID: "commandcode" }, "commandcode")
+      const other = createSession({ id: "gpt-x", providerID: "openai" }, "openai")
+      const setup = (current: unknown) => {
+        const ctx = createFakeCtx(current)
+        ;(definition as { setup: (ctx: unknown) => void }).setup(ctx)
+        return ctx
+      }
+
+      // The contributions are reactive: their item is a function, so the host
+      // can re-run them when the routed session or its selected model changes.
+      const cmdCtx = setup(cmd.session)
+      assert(
+        typeof added(cmdCtx, "gui.command")?.item === "function",
+        "the command must be a reactive contribution",
+      )
+      assert(
+        typeof added(cmdCtx, "gui.menu-item")?.item === "function",
+        "the + menu item must be a reactive contribution",
+      )
+      assert(resolveAdded(cmdCtx, "gui.command") !== undefined, "CMD session: command exists")
+      assert(resolveAdded(cmdCtx, "gui.menu-item") !== undefined, "CMD session: menu item exists")
+
+      // Another provider's routed session withdraws both launchers, exactly as
+      // the panel gate keeps its tab out of the strip.
+      const otherCtx = setup(other.session)
+      assertEqual(resolveAdded(otherCtx, "gui.command"), undefined)
+      assertEqual(resolveAdded(otherCtx, "gui.menu-item"), undefined)
+
+      // Home and a draft have no routed session; neither launcher applies.
+      const homeCtx = setup(undefined)
+      assertEqual(resolveAdded(homeCtx, "gui.command"), undefined)
+      assertEqual(resolveAdded(homeCtx, "gui.menu-item"), undefined)
     },
   ],
   [

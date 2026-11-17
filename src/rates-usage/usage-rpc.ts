@@ -33,20 +33,13 @@
 import type { HostCredential } from "../provider/auth-key.js"
 import { isRecord, stringValue } from "../provider/converters.js"
 import type { V2RpcCallContext, V2RpcRegistration, V2SetupContext } from "../plugin/v2-types.js"
-import type { UsageLoader } from "./usage-panel.js"
 import {
   USAGE_RPC_DEFINITION,
   USAGE_RPC_PROGRESS,
   parseScope,
   parseSnapshot,
 } from "./usage-rpc-protocol.js"
-import { createUsageRpcLoader, type UsageRpcClient } from "./usage-rpc-client.js"
-import {
-  fetchUsageSnapshot,
-  type FetchUsageOptions,
-  type UsageCredentialSource,
-  type UsageScope,
-} from "./usage.js"
+import { fetchUsageSnapshot, type FetchUsageOptions, type UsageCredentialSource } from "./usage.js"
 
 export {
   USAGE_RPC_DEFINITION,

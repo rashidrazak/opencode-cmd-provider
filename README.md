@@ -152,9 +152,10 @@ run **Show, hide and reorder sidebar content** from the command palette,
 
 **In the OpenCode desktop app** the same panel appears as a **Command Code**
 tab in the side panel of a session running a `[CMD]` model — open it from the
-**+** menu beside the side-panel tabs, with **Show Command Code rates and
-usage** in the command palette, or with the panel's refresh button to fetch
-your usage again. The desktop tab renders every segment and shares the live
+**+** menu beside the side-panel tabs or with **Show Command Code rates and
+usage** in the command palette. Both launchers are offered only while the
+selected model is a Command Code one. The panel's refresh button fetches your
+usage again. The desktop tab renders every segment and shares the live
 usage fetch with the CLI's sidebar (it never sees your API key; the plugin's
 server half resolves the account and fetches). The segment layout dialog is a
 terminal-side setting for now — the desktop tab always shows every segment.
