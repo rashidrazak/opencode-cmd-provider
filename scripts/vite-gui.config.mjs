@@ -73,12 +73,20 @@ export default defineConfig({
       formats: ["cjs"],
       fileName: () => "gui-experimental.cjs",
     },
-    rollupOptions: {
+    rolldownOptions: {
       external: (id) => SHARED.some((shared) => id === shared || id.startsWith(`${shared}/`)),
       output: {
         // A fixed single-file name regardless of entry hashing.
         entryFileNames: "gui-experimental.cjs",
         chunkFileNames: "gui-experimental.cjs",
+        // The source is ES modules, which are always strict; the host runs the
+        // bundle through `new Function`, so the CommonJS output must declare
+        // "use strict" itself (rolldown's default "auto" only echoes source
+        // directives, and ES modules carry none).
+        strict: true,
+        // Source comments are documentation for this repo, not for the window
+        // that evaluates the bundle; rolldown keeps them by default.
+        comments: false,
       },
     },
     target: "es2022",

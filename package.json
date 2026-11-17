@@ -49,22 +49,22 @@
     "url": "git+https://github.com/rashidrazak/opencode-cmd-provider.git"
   },
   "dependencies": {
-    "@ai-sdk/provider": "^4.0.7",
-    "@opentui/core": "^0.8.0",
-    "@opentui/solid": "^0.8.0",
-    "solid-js": "^1.9.18",
+    "@ai-sdk/provider": "^4.0.38",
+    "@opentui/core": "^0.9.2",
+    "@opentui/solid": "^0.9.2",
+    "solid-js": "^1.9.19",
     "zod": "4.1.8"
   },
   "devDependencies": {
     "@opencode-ai/plugin": "*",
-    "@secretlint/secretlint-rule-pattern": "^13.0.5",
-    "@types/node": "^26.2.0",
-    "acorn": "^8.18.0",
-    "prettier": "^3.9.6",
-    "secretlint": "^13.0.5",
-    "tsx": "^4.23.12",
+    "@secretlint/secretlint-rule-pattern": "^13.1.0",
+    "@types/node": "^26.6.6",
+    "acorn": "^8.19.0",
+    "prettier": "^3.10.1",
+    "secretlint": "^14.0.1",
+    "tsx": "^4.23.15",
     "typescript": "^7.0.2",
-    "vite": "^7.3.8",
+    "vite": "^8.3.8",
     "vite-plugin-solid": "^2.11.16"
   },
   "peerDependencies": {
