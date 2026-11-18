@@ -20,7 +20,7 @@ export const CLASSIFICATION_SOURCE_URLS: ReadonlyArray<string> = [
   "https://commandcode.ai/docs/plans/pro",
 ]
 
-export const CLASSIFICATION_LAST_REFRESHED = "2026-11-17"
+export const CLASSIFICATION_LAST_REFRESHED = "2026-11-18"
 
 // Active capability overrides. Empty = upstream data is truth.
 // Every entry requires a written justification naming the upstream
@@ -75,6 +75,8 @@ export const MODEL_REASONING_CAPABILITY: Readonly<Record<string, boolean>> = {
   "gpt-6-sol": true,
   "gpt-6.1-sol": true,
   "gpt-6.1-terra": true,
+  "gpt-6.2-astra": true,
+  "gpt-6.2-sol": true,
   "inclusionai/ling-3.1-flash": true,
   "inclusionai/ling-3.1-flash-1019": true,
   "meituan/LongCat-2.0": true,
@@ -119,6 +121,7 @@ export const MODEL_REASONING_CAPABILITY: Readonly<Record<string, boolean>> = {
   "stepfun/Step-3.7-Flash": true,
   "stepfun/Step-5-Preview": true,
   "tencent/hy3-paid": true,
+  "tencent/hy4": true,
   "tencent/hy4-flash": true,
   "tencent/hy4-preview": true,
   "thinkingmachines/inkling": true,
