@@ -1,3 +1,68 @@
+## 2.4.1 - 2026-11-19
+
+### Model catalog
+
+## Model catalog
+
+- **FACTS_LAST_REFRESHED**: `2026-11-17` → `2026-11-19`
+
+| Model                  | Change | Before | After                       |
+| ---------------------- | ------ | ------ | --------------------------- |
+| `google/gemini-4-neon` | added  | —      | Gemini 4 Neon · 1000000 ctx |
+| `gpt-6.2-astra`        | added  | —      | GPT-6.2 Astra · 1050000 ctx |
+| `gpt-6.2-sol`          | added  | —      | GPT-6.2 Sol · 1050000 ctx   |
+| `tencent/hy4`          | added  | —      | Tencent Hy4 · 1024000 ctx   |
+
+### API divergence
+
+- Listing API agrees with the shipped catalog
+
+### Pinned slug map (17)
+
+- `beam-free` → `reflection/beam:free`: pinned id is not in the Snapshot (upstream renamed it; re-pin the map)
+- `laguna-s-2-1-free` → `poolside/laguna-s-2.1-free`: pinned id is not in the Snapshot (upstream renamed it; re-pin the map)
+- `claude-fable-5-2`: models-page slug not in the pinned map (docs-ahead; page evidence skipped)
+- `deepseek-v4-1-flash-ultrafast`: models-page slug not in the pinned map (docs-ahead; page evidence skipped)
+- `flint-v1-0-free`: models-page slug not in the pinned map (docs-ahead; page evidence skipped)
+- `gemini-4-carbon`: models-page slug not in the pinned map (docs-ahead; page evidence skipped)
+- `gemini-4-neon`: models-page slug not in the pinned map (docs-ahead; page evidence skipped)
+- `gpt-6-2-astra`: models-page slug not in the pinned map (docs-ahead; page evidence skipped)
+- `gpt-6-2-sol`: models-page slug not in the pinned map (docs-ahead; page evidence skipped)
+- `hy4`: models-page slug not in the pinned map (docs-ahead; page evidence skipped)
+- `hy4-flash`: models-page slug not in the pinned map (docs-ahead; page evidence skipped)
+- `inkling-2-small-free`: models-page slug not in the pinned map (docs-ahead; page evidence skipped)
+- `jev`: models-page slug not in the pinned map (docs-ahead; page evidence skipped)
+- `jev-1-14-0`: models-page slug not in the pinned map (docs-ahead; page evidence skipped)
+- `ling-3-1-flash-1019`: models-page slug not in the pinned map (docs-ahead; page evidence skipped)
+- `muse-ember`: models-page slug not in the pinned map (docs-ahead; page evidence skipped)
+- `qwen4-max`: models-page slug not in the pinned map (docs-ahead; page evidence skipped)
+
+### Reasoning classification
+
+## Reasoning classification
+
+- **CLASSIFICATION_LAST_REFRESHED**: `2026-11-17` → `2026-11-19`
+
+| Model                  | Change | Before | After                                         |
+| ---------------------- | ------ | ------ | --------------------------------------------- |
+| `google/gemini-4-neon` | new    | —      | efforts model (low, medium, high, xhigh)      |
+| `gpt-6.2-astra`        | new    | —      | efforts model (low, medium, high, xhigh, max) |
+| `gpt-6.2-sol`          | new    | —      | efforts model (low, medium, high, xhigh, max) |
+| `tencent/hy4`          | new    | —      | efforts model (low, medium, high)             |
+
+### Deals catalog
+
+## Deals catalog
+
+- **DEAL_LAST_REFRESHED**: `2026-11-17` → `2026-11-19`
+
+| Model                  | Change | Before | After      |
+| ---------------------- | ------ | ------ | ---------- |
+| `google/gemini-4-neon` | added  | —      | premium    |
+| `gpt-6.2-astra`        | added  | —      | premium    |
+| `gpt-6.2-sol`          | added  | —      | premium    |
+| `tencent/hy4`          | added  | —      | opensource |
+
 ## 2.4.0 - 2026-11-18
 
 **Highlight — the Rates & usage panel comes to the OpenCode desktop app.** A
