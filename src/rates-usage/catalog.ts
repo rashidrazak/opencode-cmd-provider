@@ -77,6 +77,7 @@ export const MODEL_DEALS: Readonly<Record<string, ModelDeals>> = {
   "google/gemini-3.8-flash": { tier: "premium", benchmark: {"intelligence":40.9}, free: false, allowance: {"goat":40,"pro":50} },
   "google/gemini-4-argon": { tier: "premium", benchmark: {"intelligence":52.6}, free: false, allowance: {"goat":20,"pro":20} },
   "google/gemini-4-carbon": { tier: "premium", free: false, allowance: {"goat":20,"pro":30} },
+  "google/gemini-4-neon": { tier: "premium", free: false, allowance: {"goat":20,"pro":20} },
   "gpt-5.3-codex": { tier: "premium", benchmark: {"intelligence":32.5}, free: false, allowance: {"goat":20,"pro":20} },
   "gpt-5.4": { tier: "premium", benchmark: {"intelligence":39}, free: false, allowance: {"goat":20,"pro":20} },
   "gpt-5.4-mini": { tier: "premium", benchmark: {"intelligence":24.1}, free: false, allowance: {"goat":20,"pro":20} },
@@ -89,6 +90,8 @@ export const MODEL_DEALS: Readonly<Record<string, ModelDeals>> = {
   "gpt-6-sol": { tier: "premium", benchmark: {"intelligence":47.6}, contextTiers: [{"label":"Standard","context":"≤ 272K","rates":{"input":2,"output":10,"cacheRead":0.2,"cacheWrite":2.5}},{"label":"Long context","context":"> 272K","rates":{"input":4,"output":15,"cacheRead":0.4,"cacheWrite":5}}], free: false, allowance: {"goat":20,"pro":20} },
   "gpt-6.1-sol": { tier: "premium", benchmark: {"intelligence":51.8}, contextTiers: [{"label":"Standard","context":"≤ 272K","rates":{"input":2,"output":10,"cacheRead":0.1,"cacheWrite":2.5}},{"label":"Long context","context":"> 272K","rates":{"input":4,"output":15,"cacheRead":0.2,"cacheWrite":5}}], free: false, allowance: {"goat":20,"pro":20} },
   "gpt-6.1-terra": { tier: "premium", contextTiers: [{"label":"Standard","context":"≤ 272K","rates":{"input":1,"output":5,"cacheRead":0.05,"cacheWrite":1.25}},{"label":"Long context","context":"> 272K","rates":{"input":2,"output":7.5,"cacheRead":0.1,"cacheWrite":2.5}}], free: false, allowance: {"goat":20,"pro":20} },
+  "gpt-6.2-astra": { tier: "premium", contextTiers: [{"label":"Standard","context":"≤ 272K","rates":{"input":8,"output":40,"cacheRead":0.4,"cacheWrite":10}},{"label":"Long context","context":"> 272K","rates":{"input":16,"output":60,"cacheRead":0.8,"cacheWrite":20}}], free: false, allowance: {"goat":20,"pro":20} },
+  "gpt-6.2-sol": { tier: "premium", contextTiers: [{"label":"Standard","context":"≤ 272K","rates":{"input":2,"output":10,"cacheRead":0.1,"cacheWrite":2.5}},{"label":"Long context","context":"> 272K","rates":{"input":4,"output":15,"cacheRead":0.2,"cacheWrite":5}}], free: false, allowance: {"goat":20,"pro":20} },
   "inclusionai/ling-3.1-flash": { tier: "opensource", benchmark: {"intelligence":41.1}, free: false, allowance: {"goat":100,"pro":110} },
   "inclusionai/ling-3.1-flash-1019": { tier: "opensource", free: false, allowance: {"goat":100,"pro":110} },
   "meituan/LongCat-2.0": { tier: "opensource", benchmark: {"intelligence":19.1}, free: false, allowance: {"goat":50,"pro":60} },
@@ -133,6 +136,7 @@ export const MODEL_DEALS: Readonly<Record<string, ModelDeals>> = {
   "stepfun/Step-3.7-Flash": { tier: "opensource", benchmark: {"intelligence":19.5}, free: false, allowance: {"goat":20,"pro":30} },
   "stepfun/Step-5-Preview": { tier: "opensource", benchmark: {"intelligence":43.7}, free: false, allowance: {"goat":20,"pro":30} },
   "tencent/hy3-paid": { tier: "opensource", benchmark: {"intelligence":25.3}, free: false, allowance: {"goat":70,"pro":80} },
+  "tencent/hy4": { tier: "opensource", free: false, allowance: {"goat":20,"pro":30} },
   "tencent/hy4-flash": { tier: "opensource", free: false, allowance: {"goat":15,"pro":25} },
   "tencent/hy4-preview": { tier: "opensource", free: false, allowance: {"goat":20,"pro":30} },
   "thinkingmachines/inkling": { tier: "opensource", benchmark: {"intelligence":25}, free: false, allowance: {"goat":20,"pro":30} },
@@ -174,5 +178,5 @@ export const PLAN_CATALOG: Readonly<Record<PlanId, PlanInfo>> = {
 }
 
 export const DEAL_SOURCE_URL = "https://commandcode.ai/docs/resources/pricing-limits"
-export const DEAL_LAST_REFRESHED = "2026-11-17"
+export const DEAL_LAST_REFRESHED = "2026-11-19"
 export const DEAL_PACKAGE_VERSION = "docs"

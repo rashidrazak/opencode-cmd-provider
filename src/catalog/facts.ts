@@ -8,9 +8,9 @@
 // `npm run refresh:snapshot`.
 
 export const FACTS_SOURCE_URL = "https://api.commandcode.ai/provider/v1/models?view=client"
-export const FACTS_CATALOG_VERSION = "747dde904f9c5258e1af10594a1d7ea3f45e72e4e8930478f16f227dcceabd55"
-export const FACTS_PACKAGE_VERSION = "1.89.2"
-export const FACTS_LAST_REFRESHED = "2026-11-17"
+export const FACTS_CATALOG_VERSION = "f2dd711d7361b602a0daa25ff647e6deafdb16348cab12ac3bb0af3a6873f764"
+export const FACTS_PACKAGE_VERSION = "1.91.1"
+export const FACTS_LAST_REFRESHED = "2026-11-19"
 
 export const MODEL_EFFORTS: Readonly<Record<string, readonly string[]>> = {
   "claude-sonnet-5-5": ["low","medium","high","xhigh","max"],
@@ -25,6 +25,8 @@ export const MODEL_EFFORTS: Readonly<Record<string, readonly string[]>> = {
   "claude-opus-4-7": ["low","medium","high","xhigh","max"],
   "claude-haiku-5-5": ["low","medium","high","xhigh","max"],
   "gpt-6-astra": ["low","medium","high","xhigh","max"],
+  "gpt-6.2-astra": ["low","medium","high","xhigh","max"],
+  "gpt-6.2-sol": ["low","medium","high","xhigh","max"],
   "gpt-6.1-sol": ["low","medium","high","xhigh","max"],
   "gpt-6.1-terra": ["low","medium","high","xhigh","max"],
   "gpt-6-sol": ["low","medium","high","xhigh","max"],
@@ -59,9 +61,11 @@ export const MODEL_EFFORTS: Readonly<Record<string, readonly string[]>> = {
   "Qwen/Qwen3.8-27B": ["low","medium","xhigh"],
   "Qwen/Qwen3.8-Flash": ["low","medium","xhigh"],
   "stepfun/Step-5-Preview": ["low","medium","high"],
+  "tencent/hy4": ["low","medium","high"],
   "tencent/hy4-flash": ["high"],
   "tencent/hy4-preview": ["low","medium","high"],
   "google/gemini-4-carbon": ["low","medium","high"],
+  "google/gemini-4-neon": ["low","medium","high","xhigh"],
   "google/gemini-4-argon": ["low","medium","high"],
   "google/gemini-3.8-flash": ["low","medium","high"],
   "google/gemini-3.7-flash": ["low","medium","high"],
@@ -105,6 +109,8 @@ export const MODEL_COSTS: Readonly<
   "claude-haiku-5-5": { input: 0.1, output: 0.5, cacheRead: 0.01, cacheWrite: 0.125 },
   "claude-haiku-4-5-20251001": { input: 1, output: 5, cacheRead: 0.1, cacheWrite: 1.25 },
   "gpt-6-astra": { input: 10, output: 50, cacheRead: 1, cacheWrite: 12.5 },
+  "gpt-6.2-astra": { input: 8, output: 40, cacheRead: 0.4, cacheWrite: 10 },
+  "gpt-6.2-sol": { input: 2, output: 10, cacheRead: 0.1, cacheWrite: 2.5 },
   "gpt-6.1-sol": { input: 2, output: 10, cacheRead: 0.1, cacheWrite: 2.5 },
   "gpt-6.1-terra": { input: 1, output: 5, cacheRead: 0.05, cacheWrite: 1.25 },
   "gpt-6-sol": { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 },
@@ -161,9 +167,11 @@ export const MODEL_COSTS: Readonly<
   "stepfun/Step-3.7-Flash": { input: 0.2, output: 1.15, cacheRead: 0.04, cacheWrite: 0 },
   "stepfun/Step-3.5-Flash": { input: 0.09, output: 0.3, cacheRead: 0.02, cacheWrite: 0 },
   "tencent/hy3-paid": { input: 0.14, output: 0.58, cacheRead: 0.035, cacheWrite: 0 },
+  "tencent/hy4": { input: 0.834, output: 2.501, cacheRead: 0.042, cacheWrite: 0 },
   "tencent/hy4-flash": { input: 0.07, output: 0.281, cacheRead: 0.003, cacheWrite: 0 },
   "tencent/hy4-preview": { input: 0.834, output: 2.501, cacheRead: 0.042, cacheWrite: 0 },
   "google/gemini-4-carbon": { input: 2, output: 10, cacheRead: 0.1, cacheWrite: 0 },
+  "google/gemini-4-neon": { input: 3, output: 15, cacheRead: 0.15, cacheWrite: 0 },
   "google/gemini-4-argon": { input: 2, output: 10, cacheRead: 0.1, cacheWrite: 0 },
   "google/gemini-3.8-flash": { input: 1.5, output: 7.5, cacheRead: 0.15, cacheWrite: 0 },
   "google/gemini-3.7-flash": { input: 1.5, output: 7.5, cacheRead: 0.15, cacheWrite: 0.08334 },
@@ -211,6 +219,8 @@ export const MODEL_INPUT_MODALITIES: Readonly<
   "claude-haiku-5-5": ["text","image"],
   "claude-haiku-4-5-20251001": ["text","image"],
   "gpt-6-astra": ["text","image"],
+  "gpt-6.2-astra": ["text","image"],
+  "gpt-6.2-sol": ["text","image"],
   "gpt-6.1-sol": ["text","image"],
   "gpt-6.1-terra": ["text","image"],
   "gpt-6-sol": ["text","image"],
@@ -252,8 +262,10 @@ export const MODEL_INPUT_MODALITIES: Readonly<
   "Qwen/Qwen3.6-Plus": ["text","image"],
   "stepfun/Step-5-Preview": ["text","image"],
   "stepfun/Step-3.7-Flash": ["text","image"],
+  "tencent/hy4": ["text","image"],
   "tencent/hy4-flash": ["text","image"],
   "google/gemini-4-carbon": ["text","image"],
+  "google/gemini-4-neon": ["text","image"],
   "google/gemini-4-argon": ["text","image"],
   "google/gemini-3.8-flash": ["text","image"],
   "google/gemini-3.7-flash": ["text","image"],
