@@ -140,7 +140,6 @@ export const MODEL_DEALS: Readonly<Record<string, ModelDeals>> = {
   "tencent/hy4-flash": { tier: "opensource", free: false, allowance: {"goat":15,"pro":25} },
   "tencent/hy4-preview": { tier: "opensource", free: false, allowance: {"goat":20,"pro":30} },
   "thinkingmachines/inkling": { tier: "opensource", benchmark: {"intelligence":25}, free: false, allowance: {"goat":20,"pro":30} },
-  "thinkingmachines/inkling-2-small:free": { tier: "opensource", free: true },
   "thinkingmachines/inkling-small": { tier: "opensource", benchmark: {"intelligence":25.7}, free: false, allowance: {"goat":20,"pro":30} },
   "xai/grok-4.5": { tier: "opensource", benchmark: {"intelligence":38.8}, free: false, allowance: {"goat":20,"pro":30} },
   "xai/grok-4.6": { tier: "opensource", benchmark: {"intelligence":44.3}, contextTiers: [{"label":"Standard","context":"≤ 200K","rates":{"input":2,"output":6,"cacheRead":0.5,"cacheWrite":0}},{"label":"Long context","context":"> 200K","rates":{"input":4,"output":12,"cacheRead":1,"cacheWrite":0}}], free: false, allowance: {"goat":20,"pro":30} },
@@ -178,5 +177,5 @@ export const PLAN_CATALOG: Readonly<Record<PlanId, PlanInfo>> = {
 }
 
 export const DEAL_SOURCE_URL = "https://commandcode.ai/docs/resources/pricing-limits"
-export const DEAL_LAST_REFRESHED = "2026-11-19"
+export const DEAL_LAST_REFRESHED = "2026-11-21"
 export const DEAL_PACKAGE_VERSION = "docs"

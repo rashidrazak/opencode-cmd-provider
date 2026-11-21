@@ -8,9 +8,9 @@
 // `npm run refresh:snapshot`.
 
 export const FACTS_SOURCE_URL = "https://api.commandcode.ai/provider/v1/models?view=client"
-export const FACTS_CATALOG_VERSION = "f2dd711d7361b602a0daa25ff647e6deafdb16348cab12ac3bb0af3a6873f764"
-export const FACTS_PACKAGE_VERSION = "1.91.1"
-export const FACTS_LAST_REFRESHED = "2026-11-19"
+export const FACTS_CATALOG_VERSION = "cd9e4079529824c6a6a78a9e2f31d196c2c712d8ede2557c52843a22481e05be"
+export const FACTS_PACKAGE_VERSION = "1.93.0"
+export const FACTS_LAST_REFRESHED = "2026-11-21"
 
 export const MODEL_EFFORTS: Readonly<Record<string, readonly string[]>> = {
   "claude-sonnet-5-5": ["low","medium","high","xhigh","max"],
@@ -75,7 +75,6 @@ export const MODEL_EFFORTS: Readonly<Record<string, readonly string[]>> = {
   "google/gemini-3.1-flash-lite": ["low","medium","high"],
   "sakana/fugu-ultra": ["high","xhigh"],
   "nvidia/nemotron-3.5-super-vl": ["low","medium","high"],
-  "thinkingmachines/inkling-2-small:free": ["low","medium","high","max"],
   "stealth/glyph-cluster:free": ["low","medium","high","xhigh"],
   "inclusionai/ling-3.1-flash": ["low","medium","high"],
   "inclusionai/ling-3.1-flash-1019": ["low","medium","high"],
@@ -184,7 +183,6 @@ export const MODEL_COSTS: Readonly<
   "nvidia/nemotron-3.5-super-vl": { input: 0.2, output: 0.5, cacheRead: 0.04, cacheWrite: 0 },
   "thinkingmachines/inkling": { input: 1, output: 4.05, cacheRead: 0.17, cacheWrite: 0 },
   "thinkingmachines/inkling-small": { input: 0.5, output: 1.2, cacheRead: 0.1, cacheWrite: 0 },
-  "thinkingmachines/inkling-2-small:free": { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
   "recursive/flint-v1.0:free": { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
   "stealth/glyph-cluster:free": { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
   "inclusionai/ling-3.1-flash": { input: 0.3, output: 0.9, cacheRead: 0.06, cacheWrite: 0 },
@@ -277,7 +275,6 @@ export const MODEL_INPUT_MODALITIES: Readonly<
   "nvidia/nemotron-3.5-super-vl": ["text","image"],
   "thinkingmachines/inkling": ["text","image"],
   "thinkingmachines/inkling-small": ["text","image"],
-  "thinkingmachines/inkling-2-small:free": ["text","image"],
   "meta/muse-spark-1.1": ["text","image"],
   "meta/muse-spark-1.2": ["text","image"],
   "meta/muse-spark-1.2-contributor": ["text","image"],

@@ -20,7 +20,7 @@ export const CLASSIFICATION_SOURCE_URLS: ReadonlyArray<string> = [
   "https://commandcode.ai/docs/plans/pro",
 ]
 
-export const CLASSIFICATION_LAST_REFRESHED = "2026-11-19"
+export const CLASSIFICATION_LAST_REFRESHED = "2026-11-21"
 
 // Active capability overrides. Empty = upstream data is truth.
 // Every entry requires a written justification naming the upstream
@@ -126,7 +126,6 @@ export const MODEL_REASONING_CAPABILITY: Readonly<Record<string, boolean>> = {
   "tencent/hy4-flash": true,
   "tencent/hy4-preview": true,
   "thinkingmachines/inkling": true,
-  "thinkingmachines/inkling-2-small:free": true,
   "thinkingmachines/inkling-small": true,
   "xai/grok-4.5": true,
   "xai/grok-4.6": true,
