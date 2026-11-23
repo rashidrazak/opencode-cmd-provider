@@ -1,3 +1,66 @@
+## 2.4.2 - 2026-11-23
+
+### Model catalog
+
+## Model catalog
+
+- **FACTS_LAST_REFRESHED**: `2026-11-19` → `2026-11-23`
+
+| Model                                   | Change  | Before                        | After                        |
+| --------------------------------------- | ------- | ----------------------------- | ---------------------------- |
+| `thinkingmachines/inkling-2-mini`       | added   | —                             | Inkling 2 Mini · 1048576 ctx |
+| `thinkingmachines/inkling-2-small:free` | removed | Inkling 2 Small · 1048576 ctx | —                            |
+
+### Removed models (1)
+
+- `thinkingmachines/inkling-2-small:free`: Inkling 2 Small · 1048576 ctx — package row removed, pruned from the Snapshot
+
+### API divergence
+
+- Listing API agrees with the shipped catalog
+
+### Pinned slug map (17)
+
+- `beam-free` → `reflection/beam:free`: pinned id is not in the Snapshot (upstream renamed it; re-pin the map)
+- `laguna-s-2-1-free` → `poolside/laguna-s-2.1-free`: pinned id is not in the Snapshot (upstream renamed it; re-pin the map)
+- `claude-fable-5-2`: models-page slug not in the pinned map (docs-ahead; page evidence skipped)
+- `deepseek-v4-1-flash-ultrafast`: models-page slug not in the pinned map (docs-ahead; page evidence skipped)
+- `flint-v1-0-free`: models-page slug not in the pinned map (docs-ahead; page evidence skipped)
+- `gemini-4-carbon`: models-page slug not in the pinned map (docs-ahead; page evidence skipped)
+- `gemini-4-neon`: models-page slug not in the pinned map (docs-ahead; page evidence skipped)
+- `gpt-6-2-astra`: models-page slug not in the pinned map (docs-ahead; page evidence skipped)
+- `gpt-6-2-sol`: models-page slug not in the pinned map (docs-ahead; page evidence skipped)
+- `hy4`: models-page slug not in the pinned map (docs-ahead; page evidence skipped)
+- `hy4-flash`: models-page slug not in the pinned map (docs-ahead; page evidence skipped)
+- `inkling-2-mini`: models-page slug not in the pinned map (docs-ahead; page evidence skipped)
+- `jev`: models-page slug not in the pinned map (docs-ahead; page evidence skipped)
+- `jev-1-14-0`: models-page slug not in the pinned map (docs-ahead; page evidence skipped)
+- `ling-3-1-flash-1019`: models-page slug not in the pinned map (docs-ahead; page evidence skipped)
+- `muse-ember`: models-page slug not in the pinned map (docs-ahead; page evidence skipped)
+- `qwen4-max`: models-page slug not in the pinned map (docs-ahead; page evidence skipped)
+
+### Reasoning classification
+
+## Reasoning classification
+
+- **CLASSIFICATION_LAST_REFRESHED**: `2026-11-19` → `2026-11-23`
+
+| Model                                   | Change  | Before                                 | After                                  |
+| --------------------------------------- | ------- | -------------------------------------- | -------------------------------------- |
+| `thinkingmachines/inkling-2-mini`       | new     | —                                      | efforts model (low, medium, high, max) |
+| `thinkingmachines/inkling-2-small:free` | retired | efforts model (low, medium, high, max) | —                                      |
+
+### Deals catalog
+
+## Deals catalog
+
+- **DEAL_LAST_REFRESHED**: `2026-11-19` → `2026-11-23`
+
+| Model                                   | Change  | Before            | After      |
+| --------------------------------------- | ------- | ----------------- | ---------- |
+| `thinkingmachines/inkling-2-mini`       | added   | —                 | opensource |
+| `thinkingmachines/inkling-2-small:free` | removed | opensource (free) | —          |
+
 ## 2.4.1 - 2026-11-19
 
 ### Model catalog
